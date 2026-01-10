@@ -1,0 +1,1637 @@
+package com.prantiux.pixelgallery.ui.overlay
+
+import android.app.WallpaperManager
+import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem as ExoMediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import com.prantiux.pixelgallery.model.MediaItem
+import com.prantiux.pixelgallery.viewmodel.MediaViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import com.prantiux.pixelgallery.ui.icons.FontIcon
+import com.prantiux.pixelgallery.ui.icons.FontIcons
+
+
+// Gesture direction locking
+private enum class GestureMode {
+    NONE,
+    HORIZONTAL_SWIPE,
+    VERTICAL_UP,
+    VERTICAL_DOWN,
+    ZOOM
+}
+
+private data class Transforms(
+    val translationX: Float,
+    val translationY: Float,
+    val scaleX: Float,
+    val scaleY: Float
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MediaOverlay(
+    viewModel: MediaViewModel,
+    overlayState: MediaViewModel.MediaOverlayState,
+    mediaItems: List<MediaItem>,
+    onDismiss: () -> Unit
+) {
+    if (!overlayState.isVisible) return
+
+    val scope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val view = LocalView.current
+    val context = LocalContext.current
+    
+    // Check if this is trash mode
+    val isTrashMode = overlayState.mediaType == "trash"
+    
+    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
+
+    // Animation progress
+    var animationProgress by remember { mutableFloatStateOf(0f) }
+    var isClosing by remember { mutableStateOf(false) }
+
+    // Current index state
+    var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
+    
+    // Track the index being displayed during transition (prevents blink)
+    var displayIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
+    
+    // Zoom state
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    
+    // Video player state
+    var exoPlayer: ExoPlayer? by remember { mutableStateOf(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    
+    // Delete confirmation dialog
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // Gesture state - PERSISTENT ANIMATABLE OFFSETS
+    var gestureMode by remember { mutableStateOf(GestureMode.NONE) }
+    val horizontalOffset = remember { Animatable(0f) }
+    val verticalOffset = remember { Animatable(0f) }
+    var detailsPanelProgress by remember { mutableFloatStateOf(0f) }
+    
+    // Track if closing from downward swipe (to prevent opening animation reversal)
+    var closingFromSwipe by remember { mutableStateOf(false) }
+    
+    // UI visibility
+    var showControls by remember { mutableStateOf(false) }
+    var showDetailsPanel by remember { mutableStateOf(false) }
+    
+    // System UI control for immersive mode
+    DisposableEffect(overlayState.isVisible, showControls) {
+        val window = (view.context as? android.app.Activity)?.window
+        window?.let {
+            if (showControls) {
+                // Show system bars
+                androidx.core.view.WindowInsetsControllerCompat(it, view).apply {
+                    show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+                }
+            } else {
+                // Hide system bars (immersive)
+                androidx.core.view.WindowInsetsControllerCompat(it, view).apply {
+                    hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+        }
+        onDispose {
+            // Restore system bars on exit
+            window?.let {
+                androidx.core.view.WindowInsetsControllerCompat(it, view).show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+    
+    // ExoPlayer lifecycle management
+    DisposableEffect(context) {
+        val player = ExoPlayer.Builder(context).build()
+        exoPlayer = player
+        onDispose {
+            player.release()
+            exoPlayer = null
+        }
+    }
+    
+    // Update video playback when current item changes
+    LaunchedEffect(currentIndex, mediaItems) {
+        exoPlayer?.let { player ->
+            val currentItem = mediaItems.getOrNull(currentIndex)
+            if (currentItem?.isVideo == true) {
+                val mediaItem = ExoMediaItem.fromUri(currentItem.uri)
+                player.setMediaItem(mediaItem)
+                player.prepare()
+                player.playWhenReady = true
+                isPlaying = true
+            } else {
+                player.pause()
+                player.clearMediaItems()
+                isPlaying = false
+            }
+        }
+    }
+    
+    // Close progress for downward swipe (0f = not dragging, 1f = at threshold)
+    val closeProgress = if (gestureMode == GestureMode.VERTICAL_DOWN) {
+        (abs(verticalOffset.value) / 150f).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    // Unified closing animation - returns image to thumbnail position
+    val closeOverlayWithAnimation: () -> Unit = {
+        scope.launch {
+            closingFromSwipe = true  // Use gesture-driven transforms during close
+            isClosing = true
+            showControls = false
+            
+            // Animate to thumbnail position
+            launch {
+                animate(
+                    initialValue = animationProgress,
+                    targetValue = 0f,
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ) { value, _ ->
+                    animationProgress = value
+                }
+            }
+            
+            // Also animate verticalOffset if there's any drag offset
+            if (abs(verticalOffset.value) > 0f) {
+                launch {
+                    verticalOffset.animateTo(
+                        targetValue = overlayState.thumbnailBounds?.startTop ?: 0f,
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+            
+            // Wait for animation then dismiss
+            kotlinx.coroutines.delay(300)
+            onDismiss()
+        }
+    }
+
+    // Back handler - intercept system back gesture
+    BackHandler(enabled = overlayState.isVisible && !isClosing) {
+        closeOverlayWithAnimation()
+    }
+
+    // Opening animation
+    LaunchedEffect(overlayState.isVisible) {
+        if (overlayState.isVisible && !isClosing) {
+            currentIndex = overlayState.selectedIndex
+            displayIndex = overlayState.selectedIndex
+            animationProgress = 0f
+            scale = 1f
+            offsetX = 0f
+            offsetY = 0f
+            gestureMode = GestureMode.NONE
+            closingFromSwipe = false
+            horizontalOffset.snapTo(0f)
+            verticalOffset.snapTo(0f)
+            detailsPanelProgress = 0f
+            showDetailsPanel = false
+            
+            animate(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+            ) { value, _ ->
+                animationProgress = value
+            }
+            showControls = true
+        }
+    }
+
+    // Current media item (use displayIndex to prevent blink during transitions)
+    val currentItem = mediaItems.getOrNull(displayIndex)
+    
+    // Action handlers (defined after currentItem and closeOverlayWithAnimation)
+    val shareItem: () -> Unit = {
+        mediaItems.getOrNull(currentIndex)?.let { item ->
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = item.mimeType
+                putExtra(Intent.EXTRA_STREAM, item.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "Share via"))
+        }
+    }
+    
+    val deleteItem: () -> Unit = {
+        mediaItems.getOrNull(currentIndex)?.let { item ->
+            if (isTrashMode) {
+                // In trash mode, trigger system delete dialog directly
+                viewModel.permanentlyDelete(context, item)
+                closeOverlayWithAnimation()
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // For Android 11+, use the ViewModel's trash request system
+                // Close overlay first since we can't track deletion success
+                closeOverlayWithAnimation()
+                // Trigger deletion through ViewModel
+                viewModel.enterSelectionMode(item)
+                viewModel.deleteSelectedItems(context) { /* handled by activity */ }
+            } else {
+                // For older versions, show confirmation dialog first
+                showDeleteDialog = true
+            }
+        }
+    }
+    
+    // Restore from trash action (only for trash mode)
+    val restoreItem: () -> Unit = {
+        if (isTrashMode) {
+            mediaItems.getOrNull(currentIndex)?.let { item ->
+                // Trigger system restore dialog directly
+                viewModel.restoreFromTrash(context, item)
+                closeOverlayWithAnimation()
+            }
+        }
+    }
+    
+    val editItem: () -> Unit = {
+        mediaItems.getOrNull(currentIndex)?.let { item ->
+            val editIntent = Intent(Intent.ACTION_EDIT).apply {
+                setDataAndType(item.uri, item.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                context.startActivity(Intent.createChooser(editIntent, "Edit with"))
+            } catch (e: Exception) {
+                Toast.makeText(context, "No editor app found", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    val setAsWallpaper: () -> Unit = {
+        mediaItems.getOrNull(currentIndex)?.let { item ->
+            if (item.isVideo) {
+                Toast.makeText(context, "Cannot set video as wallpaper", Toast.LENGTH_SHORT).show()
+                return@let
+            }
+            try {
+                val wallpaperIntent = Intent(Intent.ACTION_ATTACH_DATA).apply {
+                    setDataAndType(item.uri, "image/*")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(wallpaperIntent, "Set as"))
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    // Double-tap zoom handler (images only)
+    val handleDoubleTap: () -> Unit = {
+        if (currentItem?.isVideo != true && animationProgress >= 1f && !isClosing) {
+            scope.launch {
+                val targetScale = if (scale > 1f) 1f else 2f
+                val targetOffsetX = if (targetScale == 1f) 0f else offsetX
+                val targetOffsetY = if (targetScale == 1f) 0f else offsetY
+                
+                animate(
+                    initialValue = scale,
+                    targetValue = targetScale,
+                    animationSpec = tween(200, easing = FastOutSlowInEasing)
+                ) { value, _ ->
+                    scale = value
+                    offsetX = targetOffsetX * (value - 1f)
+                    offsetY = targetOffsetY * (value - 1f)
+                }
+            }
+        }
+    }
+
+    // Calculate transforms based on thumbnail bounds
+    val thumbnailBounds = overlayState.thumbnailBounds
+    val (openingTranslationX, openingTranslationY, openingScaleX, openingScaleY) = remember(animationProgress, thumbnailBounds) {
+        if (thumbnailBounds == null) {
+            Transforms(0f, 0f, 1f, 1f)
+        } else {
+            val startLeft = thumbnailBounds.startLeft
+            val startTop = thumbnailBounds.startTop
+            val startWidth = thumbnailBounds.startWidth
+            val startHeight = thumbnailBounds.startHeight
+
+            val finalLeft = 0f
+            val finalTop = 0f
+            val finalWidth = screenWidth
+            val finalHeight = screenHeight
+
+            val startScaleX = startWidth / finalWidth
+            val startScaleY = startHeight / finalHeight
+
+            val progress = if (isClosing) 1f - animationProgress else animationProgress
+
+            val tx = startLeft + (finalLeft - startLeft) * progress
+            val ty = startTop + (finalTop - startTop) * progress
+            val sx = startScaleX + (1f - startScaleX) * progress
+            val sy = startScaleY + (1f - startScaleY) * progress
+
+            Transforms(tx, ty, sx, sy)
+        }
+    }
+
+    // Background scrim alpha
+    val backgroundAlpha = when {
+        isClosing -> animationProgress * 0.5f
+        animationProgress < 0.7f -> 0f
+        gestureMode == GestureMode.VERTICAL_DOWN -> {
+            // During downward swipe, fade background based on drag distance
+            val baseAlpha = if (animationProgress >= 0.7f) (animationProgress - 0.7f) / 0.3f else 0f
+            baseAlpha * (1f - closeProgress)
+        }
+        else -> {
+            (animationProgress - 0.7f) / 0.3f
+        }
+    }
+
+    // Controls visibility based on gesture
+    val controlsVisible = showControls && 
+        !isClosing && 
+        animationProgress >= 0.8f && 
+        gestureMode != GestureMode.VERTICAL_UP &&
+        !showDetailsPanel &&
+        detailsPanelProgress < 0.05f &&  // Hide controls when details start emerging
+        closeProgress == 0f  // Hide controls when downward swipe starts
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(scale) {
+                // Centralized gesture coordinator - DO NOT consume until direction locked
+                awaitEachGesture {
+                    // 1️⃣ LOG POINTER ENTRY
+                    Log.d("GESTURE_DEBUG", "========== Gesture START ==========")
+                    
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    
+                    // LOG FIRST DOWN
+                    Log.d("GESTURE_DEBUG", "First DOWN - scale=$scale, animationProgress=$animationProgress")
+                    
+                    // 1️⃣ INVARIANT: Only process when animation complete AND scale = 1f
+                    if (animationProgress < 1f) {
+                        Log.d("GESTURE_DEBUG", "BLOCKED - Animation not complete (progress=$animationProgress)")
+                        return@awaitEachGesture
+                    }
+                    
+                    // 2️⃣ LOG SCALE GATING
+                    Log.d("GESTURE_DEBUG", "Scale check - currentScale=$scale (swipeAllowed=${scale == 1f})")
+                    if (scale != 1f) {
+                        Log.d("GESTURE_DEBUG", "BLOCKED - Scale is not 1f (scale=$scale)")
+                        return@awaitEachGesture
+                    }
+
+                    var currentGestureMode = GestureMode.NONE
+                    var accumulatedDx = 0f
+                    var accumulatedDy = 0f
+                    var lastMoveTime = System.currentTimeMillis()
+                    var velocityX = 0f
+                    var velocityY = 0f
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        
+                        // Check if finger released
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) {
+                            // 7️⃣ LOG POINTER RELEASE
+                            Log.d("GESTURE_DEBUG", "UP - finalOffsetX=${horizontalOffset.value}, finalOffsetY=${verticalOffset.value}")
+                            
+                            // ✅ Consume on pointer UP
+                            change.consume()
+                            break
+                        }
+
+                        // Detect multi-touch for zoom
+                        if (event.changes.size > 1) {
+                            currentGestureMode = GestureMode.ZOOM
+                            Log.d("GESTURE_DEBUG", "Multi-touch detected - switching to ZOOM mode")
+                            // Let zoom handler consume
+                            break
+                        }
+
+                        val dx = change.positionChangeIgnoreConsumed().x
+                        val dy = change.positionChangeIgnoreConsumed().y
+                        
+                        accumulatedDx += dx
+                        accumulatedDy += dy
+
+                        // 3️⃣ LOG RAW MOVEMENT
+                        Log.d("GESTURE_DEBUG", "MOVE - dx=$dx dy=$dy accumulatedDx=$accumulatedDx accumulatedDy=$accumulatedDy")
+
+                        // 🔒 Direction lock - NO CONSUMPTION YET
+                        if (currentGestureMode == GestureMode.NONE) {
+                            val threshold = 10f
+                            if (abs(accumulatedDx) > threshold || abs(accumulatedDy) > threshold) {
+                                currentGestureMode = when {
+                                    abs(accumulatedDx) > abs(accumulatedDy) -> GestureMode.HORIZONTAL_SWIPE
+                                    accumulatedDy > 0 -> GestureMode.VERTICAL_DOWN
+                                    accumulatedDy < 0 -> GestureMode.VERTICAL_UP
+                                    else -> GestureMode.NONE
+                                }
+                                gestureMode = currentGestureMode
+                                
+                                // 4️⃣ LOG DIRECTION LOCK DECISION
+                                Log.d("GESTURE_DEBUG", "DIRECTION LOCKED → $currentGestureMode")
+                            }
+                        }
+
+                        // 3️⃣ Accumulate drag into PERSISTENT state
+                        // ✅ DO NOT CONSUME during MOVE - let deltas continue flowing
+                        when (currentGestureMode) {
+                            GestureMode.HORIZONTAL_SWIPE -> {
+                                // REMOVED: change.consume() - consumption kills dx/dy deltas
+                                scope.launch {
+                                    // Apply resistance at edges
+                                    var adjustedDx = dx
+                                    if (currentIndex == 0 && horizontalOffset.value + dx > 0f) {
+                                        // At first image, resist right swipe
+                                        adjustedDx *= 0.15f
+                                    } else if (currentIndex == mediaItems.size - 1 && horizontalOffset.value + dx < 0f) {
+                                        // At last image, resist left swipe
+                                        adjustedDx *= 0.15f
+                                    }
+                                    
+                                    // Calculate velocity for fast swipe detection
+                                    val currentTime = System.currentTimeMillis()
+                                    val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
+                                    velocityX = (adjustedDx / deltaTime) * 1000f  // pixels per second
+                                    lastMoveTime = currentTime
+                                    
+                                    horizontalOffset.snapTo(horizontalOffset.value + adjustedDx)
+                                    // 5️⃣ LOG OFFSET STATE UPDATE
+                                    Log.d("GESTURE_DEBUG", "OFFSET UPDATE - horizontal=${horizontalOffset.value}, velocity=$velocityX")
+                                }
+                            }
+                            
+                            GestureMode.VERTICAL_UP -> {
+                                // REMOVED: change.consume()
+                                scope.launch {
+                                    verticalOffset.snapTo(verticalOffset.value + dy)
+                                    Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
+                                }
+                                // Calculate progress based on drag distance (threshold = 50% screen height)
+                                val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
+                                detailsPanelProgress = progress
+                                
+                                // Immediately fade out controls as user starts dragging
+                                if (progress > 0.05f) {
+                                    showControls = false
+                                }
+                            }
+                            
+                            GestureMode.VERTICAL_DOWN -> {
+                                // REMOVED: change.consume()
+                                scope.launch {
+                                    verticalOffset.snapTo(verticalOffset.value + dy)
+                                    Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
+                                }
+                                
+                                // Calculate vertical velocity for intent detection
+                                val currentTime = System.currentTimeMillis()
+                                val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
+                                velocityY = (dy / deltaTime) * 1000f  // pixels per second
+                                lastMoveTime = currentTime
+                                
+                                // If details panel is active, close it first (don't close image)
+                                if (detailsPanelProgress > 0f) {
+                                    // Reverse animate details panel based on drag
+                                    val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
+                                    detailsPanelProgress = (1f - progress).coerceIn(0f, 1f)
+                                    
+                                    // Fade controls back in as details close
+                                    if (detailsPanelProgress < 0.3f) {
+                                        showControls = true
+                                    }
+                                }
+                            }
+                            
+                            else -> {
+                                // Don't consume if no mode locked yet
+                            }
+                        }
+                    }
+
+                    // 5️⃣ Release logic - decide complete or snap back
+                    when (currentGestureMode) {
+                        GestureMode.HORIZONTAL_SWIPE -> {
+                            // 4️⃣ Threshold uses distance OR velocity
+                            val distanceThreshold = screenWidth * 0.25f
+                            val velocityThreshold = 1500f  // pixels per second
+                            
+                            // 8️⃣ LOG THRESHOLD CHECK
+                            Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - offset=${horizontalOffset.value}, velocity=$velocityX, distanceThreshold=$distanceThreshold")
+                            
+                            scope.launch {
+                                // Fast swipe or sufficient distance
+                                if (abs(horizontalOffset.value) > distanceThreshold || abs(velocityX) > velocityThreshold) {
+                                    // Complete gesture - animate then change image
+                                    val targetOffset = if (horizontalOffset.value < 0) -screenWidth else screenWidth
+                                    
+                                    // Animate slide to next/prev
+                                    horizontalOffset.animateTo(
+                                        targetValue = targetOffset,
+                                        animationSpec = tween(
+                                            durationMillis = 250,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    )
+                                    
+                                    // Update index AFTER animation completes
+                                    if (horizontalOffset.value < 0 && currentIndex < mediaItems.size - 1) {
+                                        currentIndex++
+                                        viewModel.updateOverlayIndex(currentIndex)
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SWITCH_IMAGE_NEXT (index=$currentIndex)")
+                                    } else if (horizontalOffset.value > 0 && currentIndex > 0) {
+                                        currentIndex--
+                                        viewModel.updateOverlayIndex(currentIndex)
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SWITCH_IMAGE_PREV (index=$currentIndex)")
+                                    } else {
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → THRESHOLD_PASSED_BUT_AT_BOUNDARY")
+                                    }
+                                    
+                                    // Reset offset to center, then update display index to prevent blink
+                                    horizontalOffset.snapTo(0f)
+                                    displayIndex = currentIndex
+                                } else {
+                                    Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK (offset too small)")
+                                    // Snap back to center with simple tween
+                                    horizontalOffset.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = tween(
+                                            durationMillis = 200,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        
+                        GestureMode.VERTICAL_UP -> {
+                            Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=$detailsPanelProgress, threshold=0.5f")
+                            
+                            scope.launch {
+                                if (detailsPanelProgress >= 0.5f) {
+                                    // Complete gesture - lock details panel at 100%
+                                    showDetailsPanel = true
+                                    Log.d("GESTURE_DEBUG", "GESTURE RESULT → LOCK_DETAILS")
+                                    animate(
+                                        initialValue = detailsPanelProgress,
+                                        targetValue = 1f,
+                                        animationSpec = spring(
+                                            stiffness = Spring.StiffnessMediumLow,
+                                            dampingRatio = Spring.DampingRatioNoBouncy
+                                        )
+                                    ) { value, _ ->
+                                        detailsPanelProgress = value
+                                    }
+                                } else {
+                                    // Snap back - collapse details
+                                    Log.d("GESTURE_DEBUG", "GESTURE RESULT → COLLAPSE_DETAILS")
+                                    animate(
+                                        initialValue = detailsPanelProgress,
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            stiffness = Spring.StiffnessMediumLow,
+                                            dampingRatio = Spring.DampingRatioNoBouncy
+                                        )
+                                    ) { value, _ ->
+                                        detailsPanelProgress = value
+                                    }
+                                    showDetailsPanel = false
+                                    showControls = true
+                                }
+                                verticalOffset.snapTo(0f)
+                            }
+                        }
+                        
+                        GestureMode.VERTICAL_DOWN -> {
+                            // If details panel is active, close it first
+                            if (detailsPanelProgress > 0f) {
+                                Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=$detailsPanelProgress, velocityY=$velocityY")
+                                
+                                scope.launch {
+                                    // Close if EITHER: dragged > 50% OR fast downward swipe
+                                    val shouldCloseDetails = detailsPanelProgress < 0.5f || velocityY > 1200f
+                                    
+                                    if (shouldCloseDetails) {
+                                        // Complete close - collapse details
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_DETAILS (progress=$detailsPanelProgress, velocity=$velocityY)")
+                                        animate(
+                                            initialValue = detailsPanelProgress,
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                dampingRatio = Spring.DampingRatioNoBouncy
+                                            )
+                                        ) { value, _ ->
+                                            detailsPanelProgress = value
+                                        }
+                                        showDetailsPanel = false
+                                        showControls = true
+                                    } else {
+                                        // Snap back to open
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK_TO_OPEN_DETAILS")
+                                        animate(
+                                            initialValue = detailsPanelProgress,
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                dampingRatio = Spring.DampingRatioNoBouncy
+                                            )
+                                        ) { value, _ ->
+                                            detailsPanelProgress = value
+                                        }
+                                        showDetailsPanel = true
+                                    }
+                                    verticalOffset.snapTo(0f)
+                                }
+                            } else {
+                                // Details panel is closed, proceed with image close
+                                val threshold = 150f
+                                
+                                Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - offset=${verticalOffset.value}, threshold=$threshold")
+                                
+                                scope.launch {
+                                    if (abs(verticalOffset.value) > threshold) {
+                                        // Complete close gesture - animate to thumbnail
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_OVERLAY (return to thumbnail)")
+                                        closingFromSwipe = true
+                                        isClosing = true
+                                        showControls = false
+                                        
+                                        // Animate image back to thumbnail position
+                                        launch {
+                                            animate(
+                                                initialValue = animationProgress,
+                                                targetValue = 0f,
+                                                animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                            ) { value, _ ->
+                                                animationProgress = value
+                                            }
+                                        }
+                                        
+                                        // Animate verticalOffset to thumbnail top position
+                                        launch {
+                                            verticalOffset.animateTo(
+                                                targetValue = thumbnailBounds?.startTop ?: 0f,
+                                                animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                            )
+                                        }
+                                        
+                                        // Wait for animation then dismiss
+                                        kotlinx.coroutines.delay(300)
+                                        onDismiss()
+                                    } else {
+                                        // Snap back
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK (close cancelled)")
+                                        verticalOffset.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        else -> {
+                            Log.d("GESTURE_DEBUG", "No gesture detected - mode was NONE")
+                        }
+                    }
+
+                    // Reset gesture mode
+                    Log.d("GESTURE_DEBUG", "========== Gesture END - Resetting mode ==========")
+                    gestureMode = GestureMode.NONE
+                }
+            }
+    ) {
+        // Background scrim
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = backgroundAlpha))
+        )
+
+        // Media image
+        currentItem?.let { item ->
+            // Previous image (if exists) - use displayIndex to prevent blink
+            val prevItem = mediaItems.getOrNull(displayIndex - 1)
+            val nextItem = mediaItems.getOrNull(displayIndex + 1)
+            
+            // Render previous, current, and next images for smooth horizontal swipe
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Previous image
+                prevItem?.let { prev ->
+                    AsyncImage(
+                        model = prev.uri,
+                        contentDescription = prev.displayName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(end = 4.dp)  // Small gap between images
+                            .graphicsLayer {
+                                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                this.translationX = horizontalOffset.value - screenWidth
+                            }
+                    )
+                }
+                
+                // Current image
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = item.displayName,
+                    contentScale = if (detailsPanelProgress > 0.05f) ContentScale.Crop else ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            // Double-tap detection for images (before single tap)
+                            detectTapGestures(
+                                onDoubleTap = { handleDoubleTap() },
+                                onTap = {
+                                    // Single tap to toggle UI or close details
+                                    if (animationProgress >= 1f && !isClosing) {
+                                        if (showDetailsPanel || detailsPanelProgress > 0.1f) {
+                                            // Close details panel
+                                            showDetailsPanel = false
+                                            scope.launch {
+                                                animate(
+                                                    initialValue = detailsPanelProgress,
+                                                    targetValue = 0f,
+                                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                                ) { value, _ ->
+                                                    detailsPanelProgress = value
+                                                }
+                                                verticalOffset.snapTo(0f)
+                                                showControls = true
+                                            }
+                                        } else {
+                                            showControls = !showControls
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                        .graphicsLayer {
+                            // Opening animation only
+                            if (animationProgress < 1f && !isClosing) {
+                                // Opening animation - thumbnail to fullscreen
+                                this.translationX = openingTranslationX
+                                this.translationY = openingTranslationY
+                                this.scaleX = openingScaleX
+                                this.scaleY = openingScaleY
+                                transformOrigin = TransformOrigin(0f, 0f)
+                            } else if (isClosing && !closingFromSwipe) {
+                                // Back button close - use opening animation in reverse
+                                this.translationX = openingTranslationX
+                                this.translationY = openingTranslationY
+                                this.scaleX = openingScaleX
+                                this.scaleY = openingScaleY
+                                transformOrigin = TransformOrigin(0f, 0f)
+                            } else if (closingFromSwipe && isClosing) {
+                                // Swipe close - animate from current state to thumbnail
+                                transformOrigin = TransformOrigin(0f, 0f)
+                                
+                                // Calculate target thumbnail bounds
+                                val thumbnailBounds = overlayState.thumbnailBounds
+                                if (thumbnailBounds != null) {
+                                    val targetX = thumbnailBounds.startLeft
+                                    val targetY = thumbnailBounds.startTop
+                                    val targetScaleX = thumbnailBounds.startWidth / screenWidth
+                                    val targetScaleY = thumbnailBounds.startHeight / screenHeight
+                                    
+                                    // Transition from current position to thumbnail
+                                    // animationProgress goes from 1 to 0, so closeProgress goes from 0 to 1
+                                    val closeTransitionProgress = 1f - animationProgress
+                                    
+                                    // Start from gesture offsets, end at thumbnail position
+                                    val startX = horizontalOffset.value
+                                    val startY = verticalOffset.value
+                                    val startScale = 1f - closeProgress * 0.15f
+                                    
+                                    this.translationX = startX + (targetX - startX) * closeTransitionProgress
+                                    this.translationY = startY + (targetY - startY) * closeTransitionProgress
+                                    this.scaleX = startScale + (targetScaleX - startScale) * closeTransitionProgress
+                                    this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
+                                } else {
+                                    // Fallback if no thumbnail bounds
+                                    this.translationX = horizontalOffset.value
+                                    this.translationY = verticalOffset.value
+                                    this.scaleX = 1f - closeProgress * 0.15f
+                                    this.scaleY = 1f - closeProgress * 0.15f
+                                }
+                            } else {
+                                // Gesture-driven state (normal interaction)
+                                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                
+                                // Details panel transition - image moves to top half
+                                val detailsActivationThreshold = 0.05f
+                                if (detailsPanelProgress > detailsActivationThreshold) {
+                                    // Calculate effective progress after activation threshold
+                                    val effectiveProgress = ((detailsPanelProgress - detailsActivationThreshold) / 
+                                        (1f - detailsActivationThreshold)).coerceIn(0f, 1f)
+                                    
+                                    // Image slides up, clamped to half screen max
+                                    val imageMaxOffset = screenHeight * 0.25f
+                                    this.translationY = -imageMaxOffset * effectiveProgress
+                                    transformOrigin = TransformOrigin(0.5f, 0f)
+                                } else if (detailsPanelProgress > 0f) {
+                                    // Details active but below threshold - no transformation yet
+                                    this.translationY = 0f
+                                } else {
+                                    // Horizontal swipe offset from Animatable
+                                    this.translationX = horizontalOffset.value
+                                    
+                                    // Subtle scale during horizontal swipe (for depth)
+                                    if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
+                                        val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
+                                        val scaleAmount = swipeProgress * 0.05f
+                                        this.scaleX = 1f - scaleAmount
+                                        this.scaleY = 1f - scaleAmount
+                                    }
+                                    
+                                    // Vertical offset from Animatable (only when details NOT active)
+                                    this.translationY = verticalOffset.value
+                                    
+                                    // Vertical close - scale down effect (1f → 0.85f)
+                                    if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                                        val scaleAmount = 0.15f * closeProgress
+                                        this.scaleX = 1f - scaleAmount
+                                        this.scaleY = 1f - scaleAmount
+                                    }
+                                    
+                                    // Zoom transforms (only when zoomed)
+                                    if (scale > 1f) {
+                                        this.scaleX *= scale
+                                        this.scaleY *= scale
+                                        this.translationX += offsetX
+                                        this.translationY += offsetY
+                                    }
+                                }
+                            }
+                        }
+                        .pointerInput(Unit) {
+                            // Pinch zoom (highest priority) - disabled for videos
+                            if (item.isVideo != true) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    if (animationProgress >= 1f && !isClosing) {
+                                        val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                        scale = newScale
+                                        
+                                        if (scale > 1f) {
+                                            gestureMode = GestureMode.ZOOM
+                                            offsetX += pan.x
+                                            offsetY += pan.y
+                                        } else {
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                            gestureMode = GestureMode.NONE
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                )
+                
+                // Next image
+                nextItem?.let { next ->
+                    AsyncImage(
+                        model = next.uri,
+                        contentDescription = next.displayName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(start = 4.dp)  // Small gap between images
+                            .graphicsLayer {
+                                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                this.translationX = horizontalOffset.value + screenWidth
+                            }
+                    )
+                }
+            }
+        }
+        
+        // Video player overlay (when video is playing)
+        exoPlayer?.let { player ->
+            if (currentItem?.isVideo == true) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                        // Apply same transformations as image
+                        if (animationProgress < 1f && !isClosing) {
+                            this.translationX = openingTranslationX
+                            this.translationY = openingTranslationY
+                            this.scaleX = openingScaleX
+                            this.scaleY = openingScaleY
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        } else if (closingFromSwipe && isClosing) {
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            val thumbnailBounds = overlayState.thumbnailBounds
+                            if (thumbnailBounds != null) {
+                                val targetX = thumbnailBounds.startLeft
+                                val targetY = thumbnailBounds.startTop
+                                val targetScaleX = thumbnailBounds.startWidth / screenWidth
+                                val targetScaleY = thumbnailBounds.startHeight / screenHeight
+                                val closeTransitionProgress = 1f - animationProgress
+                                val startX = horizontalOffset.value
+                                val startY = verticalOffset.value
+                                val startScale = 1f - closeProgress * 0.15f
+                                this.translationX = startX + (targetX - startX) * closeTransitionProgress
+                                this.translationY = startY + (targetY - startY) * closeTransitionProgress
+                                this.scaleX = startScale + (targetScaleX - startScale) * closeTransitionProgress
+                                this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
+                            }
+                        } else {
+                            transformOrigin = TransformOrigin(0.5f, 0.5f)
+                            val detailsActivationThreshold = 0.05f
+                            if (detailsPanelProgress > detailsActivationThreshold) {
+                                val effectiveProgress = ((detailsPanelProgress - detailsActivationThreshold) / 
+                                    (1f - detailsActivationThreshold)).coerceIn(0f, 1f)
+                                val imageMaxOffset = screenHeight * 0.25f
+                                this.translationY = -imageMaxOffset * effectiveProgress
+                                transformOrigin = TransformOrigin(0.5f, 0f)
+                            } else {
+                                this.translationX = horizontalOffset.value
+                                this.translationY = verticalOffset.value
+                                if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                                    val scaleAmount = 0.15f * closeProgress
+                                    this.scaleX = 1f - scaleAmount
+                                    this.scaleY = 1f - scaleAmount
+                                }
+                            }
+                        }
+                    }
+            ) {
+                // Video player surface only (no default controls)
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            this.player = player
+                            useController = false // Disable default controls
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+                
+                // Custom video controls overlay
+                AnimatedVisibility(
+                    visible = controlsVisible,
+                    enter = fadeIn(animationSpec = tween(300)),
+                    exit = fadeOut(animationSpec = tween(300))
+                ) {
+                    CustomVideoControls(
+                        exoPlayer = player,
+                        isPlaying = isPlaying,
+                        onPlayPauseClick = {
+                            if (player.isPlaying) {
+                                player.pause()
+                                isPlaying = false
+                            } else {
+                                player.play()
+                                isPlaying = true
+                            }
+                        }
+                    )
+                }
+            }
+        }
+}
+        // Top header (animated)
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .graphicsLayer {
+                    // Fade out and slide up during downward swipe
+                    alpha = 1f - closeProgress
+                    translationY = -closeProgress * 100f
+                }
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding(),  // Respect status bar inset
+                color = Color.Black
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left side: Location + Date/Time stacked
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        // Location (if available)
+                        // TODO: Add location from media metadata when available
+                        // Text(
+                        //     text = "Location Name",
+                        //     color = Color.White.copy(alpha = 0.7f),
+                        //     style = MaterialTheme.typography.bodySmall
+                        // )
+                        
+                        // Date + Time
+                        Text(
+                            text = currentItem?.let {
+                                val dateFormat = java.text.SimpleDateFormat("MMM d, yyyy • h:mm a", java.util.Locale.getDefault())
+                                dateFormat.format(java.util.Date(it.dateAdded * 1000))
+                            } ?: "",
+                            color = Color.White.copy(alpha = 0.9f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    
+                    // Right side: Three-dot menu (hidden in trash mode)
+                    if (!isTrashMode) {
+                        var menuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                FontIcon(
+                                    unicode = FontIcons.MoreVert,
+                                    contentDescription = "More options",
+                                    tint = Color.White
+                                )
+                            }
+                            DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            modifier = Modifier.background(
+                                Color(0xFF2C2C2C),
+                                shape = MaterialTheme.shapes.medium
+                            )
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit", color = Color.White) },
+                                onClick = {
+                                    menuExpanded = false
+                                    editItem()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Set as wallpaper", color = Color.White) },
+                                onClick = {
+                                    menuExpanded = false
+                                    setAsWallpaper()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Details", color = Color.White) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showDetailsPanel = true
+                                    scope.launch {
+                                        detailsPanelProgress = 1f
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Copy to album", color = Color.White) },
+                                onClick = {
+                                    menuExpanded = false
+                                    // TODO: Copy to album
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Move to album", color = Color.White) },
+                                onClick = {
+                                    menuExpanded = false
+                                    // TODO: Move to album
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Set as duplicate", color = Color.White) },
+                                onClick = {
+                                    menuExpanded = false
+                                    // TODO: Set as duplicate
+                                }
+                            )
+                        }
+                    }
+                    }
+                }
+            }
+        }
+
+        // Bottom controls (animated)
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .graphicsLayer {
+                    // Fade out and slide down during downward swipe
+                    alpha = 1f - closeProgress
+                    translationY = closeProgress * 100f
+                }
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),  // Respect navigation bar inset
+                color = Color.Black,
+                shape = androidx.compose.ui.graphics.RectangleShape  // Edge-to-edge, no rounded corners
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isTrashMode) {
+                        // Trash mode: Only Restore and Delete
+                        IconButton(onClick = restoreItem) {
+                            FontIcon(
+                                unicode = FontIcons.Refresh,
+                                contentDescription = "Restore",
+                                tint = Color.White
+                            )
+                        }
+                        
+                        IconButton(onClick = deleteItem) {
+                            FontIcon(
+                                unicode = FontIcons.Delete,
+                                contentDescription = "Delete permanently",
+                                tint = Color.White
+                            )
+                        }
+                    } else {
+                        // Normal mode: All actions
+                        // Favorite (empty star at 1st position)
+                        IconButton(onClick = { /* Toggle favorite */ }) {
+                            FontIcon(
+                                unicode = FontIcons.StarOutline,
+                                contentDescription = "Favorite",
+                                tint = Color.White
+                            )
+                        }
+                        
+                        // Share
+                        IconButton(onClick = shareItem) {
+                            FontIcon(
+                                unicode = FontIcons.Share,
+                                contentDescription = "Share",
+                                tint = Color.White
+                            )
+                        }
+                        
+                        // Mute/Unmute button (only for videos, in center)
+                        exoPlayer?.let { player ->
+                            if (currentItem?.isVideo == true) {
+                                MuteUnmuteButton(exoPlayer = player)
+                            }
+                        }
+                        
+                        // Delete
+                        IconButton(onClick = deleteItem) {
+                            FontIcon(
+                                unicode = FontIcons.Delete,
+                                contentDescription = "Delete",
+                                tint = Color.White
+                            )
+                        }
+                        
+                        // More options
+                        IconButton(onClick = { /* More options */ }) {
+                            FontIcon(
+                                unicode = FontIcons.MoreVert,
+                                contentDescription = "More",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Details panel - Material 3 Expressive, bottom half
+        if (detailsPanelProgress > 0f) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.5f * detailsPanelProgress)
+                    .graphicsLayer {
+                        // Slide up from bottom, driven by progress
+                        val slideOffset = (1f - detailsPanelProgress) * size.height
+                        translationY = slideOffset
+                        alpha = detailsPanelProgress.coerceIn(0f, 1f)
+                    },
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = MaterialTheme.shapes.extraLarge.copy(
+                    bottomStart = CornerSize(0.dp),
+                    bottomEnd = CornerSize(0.dp)
+                ),
+                tonalElevation = 3.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp, vertical = 20.dp)
+                ) {
+                    // Drag handle
+                    Box(
+                        modifier = Modifier
+                            .width(48.dp)
+                            .height(4.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                shape = MaterialTheme.shapes.extraLarge
+                            )
+                            .align(Alignment.CenterHorizontally)
+                    )
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    // Details title
+                    Text(
+                        text = "Details",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.graphicsLayer {
+                            alpha = ((detailsPanelProgress - 0.3f) / 0.7f).coerceIn(0f, 1f)
+                        }
+                    )
+                    
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    currentItem?.let { item ->
+                        // Progressive fade-in for metadata sections
+                        val textAlpha = ((detailsPanelProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
+                        
+                        Column(
+                            modifier = Modifier.graphicsLayer { alpha = textAlpha },
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // File name
+                            DetailSection(
+                                label = "Name",
+                                value = item.displayName
+                            )
+                            
+                            // Date and time
+                            DetailSection(
+                                label = "Date",
+                                value = java.text.SimpleDateFormat(
+                                    "MMMM dd, yyyy • h:mm a",
+                                    java.util.Locale.getDefault()
+                                ).format(java.util.Date(item.dateAdded * 1000))
+                            )
+                            
+                            // Location (if available)
+                            if (item.path.contains("/")) {
+                                val locationPath = item.path.substringBeforeLast("/")
+                                DetailSection(
+                                    label = "Location",
+                                    value = locationPath
+                                )
+                            }
+                            
+                            // Size
+                            val sizeKB = item.size / 1024
+                            val sizeFormatted = if (sizeKB > 1024) {
+                                String.format("%.2f MB", sizeKB / 1024.0)
+                            } else {
+                                "$sizeKB KB"
+                            }
+                            DetailSection(
+                                label = "Size",
+                                value = sizeFormatted
+                            )
+                            
+                            // Full path
+                            DetailSection(
+                                label = "Path",
+                                value = item.path
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Delete confirmation dialog (only for older Android versions, not for trash)
+    if (showDeleteDialog && Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isTrashMode) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete item?") },
+            text = { Text("This item will be permanently deleted.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        mediaItems.getOrNull(currentIndex)?.let { item ->
+                            try {
+                                val deleted = context.contentResolver.delete(item.uri, null, null)
+                                if (deleted > 0) {
+                                    Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
+                                    closeOverlayWithAnimation()
+                                } else {
+                                    Toast.makeText(context, "Failed to delete", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Custom video controls overlay with Material 3 design
+ */
+@Composable
+private fun CustomVideoControls(
+    exoPlayer: ExoPlayer,
+    isPlaying: Boolean,
+    onPlayPauseClick: () -> Unit
+) {
+    var currentPosition by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var videoEnded by remember { mutableStateOf(false) }
+    var isMuted by remember { mutableStateOf(exoPlayer.volume == 0f) }
+    
+    // Calculate bottom bar height: IconButton (48dp) + vertical padding (12dp * 2) + navigation bars
+    val density = LocalDensity.current
+    val navigationBarsPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomBarHeight = 48.dp + 24.dp + navigationBarsPadding // Total height of bottom action bar
+    
+    // Update position continuously
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            currentPosition = exoPlayer.currentPosition
+            duration = exoPlayer.duration.coerceAtLeast(0L)
+            videoEnded = exoPlayer.playbackState == Player.STATE_ENDED
+            delay(100)
+        }
+    }
+    
+    // Animated button shape based on state with smooth transition
+    val buttonShape by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "buttonShape"
+    )
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Video progress bar and time above bottom bar with gradient background
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(bottom = bottomBarHeight) // Attached to bottom bar, no spacing
+                .pointerInput(Unit) {
+                    // Block ALL gestures in this area (video controls zone)
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            // Consume all pointer events to prevent ANY gestures from passing through
+                            event.changes.forEach { change ->
+                                change.consume()
+                            }
+                        }
+                    }
+                }
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent, // Top: transparent (merges with video)
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f) // Bottom: theme-based color with opacity
+                        )
+                    )
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Seek bar
+                Slider(
+                    value = if (duration > 0) currentPosition.toFloat() else 0f,
+                    onValueChange = { newPosition ->
+                        exoPlayer.seekTo(newPosition.toLong())
+                    },
+                    valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Play/Pause button and Time display - button left, time center
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    // Play/Pause/Restart button (left-aligned)
+                    val shape = if (buttonShape > 0.5f) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    
+                    Surface(
+                        onClick = {
+                            if (videoEnded) {
+                                // Restart video
+                                exoPlayer.seekTo(0)
+                                exoPlayer.play()
+                                videoEnded = false
+                            } else {
+                                onPlayPauseClick()
+                            }
+                        },
+                        shape = shape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                        modifier = Modifier
+                            .size(36.dp)
+                            .align(Alignment.CenterStart)
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            FontIcon(
+                                unicode = when {
+                                    videoEnded -> FontIcons.Refresh
+                                    isPlaying -> FontIcons.Pause
+                                    else -> FontIcons.PlayArrow
+                                },
+                                contentDescription = when {
+                                    videoEnded -> "Restart"
+                                    isPlaying -> "Pause"
+                                    else -> "Play"
+                                },
+                                tint = Color.White,
+                                size = 20.sp,
+                                filled = true
+                            )
+                        }
+                    }
+                    
+                    // Time display (center-aligned)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
+                        Text(
+                            text = formatVideoTime(currentPosition),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "/",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = formatVideoTime(duration),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Mute/unmute button for video - to be added in bottom bar center
+ */
+@Composable
+fun MuteUnmuteButton(
+    exoPlayer: ExoPlayer,
+    modifier: Modifier = Modifier
+) {
+    var isMuted by remember { mutableStateOf(exoPlayer.volume == 0f) }
+    
+    IconButton(
+        onClick = {
+            if (isMuted) {
+                exoPlayer.volume = 1f
+                isMuted = false
+            } else {
+                exoPlayer.volume = 0f
+                isMuted = true
+            }
+        },
+        modifier = modifier
+    ) {
+        FontIcon(
+            unicode = if (isMuted) FontIcons.VolumeOff else FontIcons.VolumeUp,
+            contentDescription = if (isMuted) "Unmute" else "Mute",
+            tint = Color.White
+        )
+    }
+}
+
+/**
+ * Format milliseconds to MM:SS or HH:MM:SS
+ */
+private fun formatVideoTime(timeMs: Long): String {
+    val totalSeconds = (timeMs / 1000).toInt()
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    
+    return if (hours > 0) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%d:%02d", minutes, seconds)
+    }
+}
+
+@Composable
+fun DetailSection(label: String, value: String) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
