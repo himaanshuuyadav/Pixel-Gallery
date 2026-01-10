@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pixel Gallery</string>
+    <string name="photos">Photos</string>
+    <string name="albums">Albums</string>
+    <string name="videos">Videos</string>
+    <string name="sort">Sort</string>
+    <string name="share">Share</string>
+    <string name="delete">Delete</string>
+    <string name="permission_required">Storage permission is required to view your photos and videos</string>
+    <string name="grant_permission">Grant Permission</string>
+    <string name="date">Date</string>
+    <string name="name">Name</string>
+    <string name="size">Size</string>
+    <string name="ascending">Ascending</string>
+    <string name="descending">Descending</string>
+</resources>
