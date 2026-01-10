@@ -47,5 +47,9 @@ output.json
 # Kotlin
 .kotlin/
 
+# VS Code
+.vscode/
+
 # Android Profiling
 *.hprof
+
