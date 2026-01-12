@@ -50,6 +50,7 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.viewmodel.SortMode
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.PermissionRequestScreen
+import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -392,6 +393,22 @@ fun PhotosContent(
                                                 )
                                             )
                                         }
+                                    }
+                                }
+                                
+                                // Favorite indicator (gold star at top-left)
+                                if (item.isFavorite && !isSelectionMode) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Star,
+                                            contentDescription = "Favorited",
+                                            size = 16.sp,
+                                            tint = Color(0xFFFFD700)
+                                        )
                                     }
                                 }
                                 
