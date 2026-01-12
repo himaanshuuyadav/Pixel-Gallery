@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalFoundationApi::class)
+
 package com.prantiux.pixelgallery.ui.overlay
 
 import android.app.WallpaperManager
@@ -12,6 +14,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
@@ -20,9 +23,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.Player
@@ -73,7 +79,6 @@ private data class Transforms(
     val scaleY: Float
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaOverlay(
     viewModel: MediaViewModel,
@@ -129,6 +134,23 @@ fun MediaOverlay(
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
     var showDetailsPanel by remember { mutableStateOf(false) }
+    
+    // Favorite states - track which items are favorited
+    val favoriteStates = remember { mutableStateMapOf<Long, Boolean>().apply {
+        mediaItems.forEach { item -> put(item.id, item.isFavorite) }
+    } }
+    
+    // Favorite message pill state
+    var showFavoritePill by remember { mutableStateOf(false) }
+    var favoriteMessage by remember { mutableStateOf("") }
+    
+    // Auto-hide favorite message after 2 seconds
+    LaunchedEffect(showFavoritePill) {
+        if (showFavoritePill) {
+            kotlinx.coroutines.delay(2000)
+            showFavoritePill = false
+        }
+    }
     
     // System UI control for immersive mode
     DisposableEffect(overlayState.isVisible, showControls) {
@@ -275,16 +297,32 @@ fun MediaOverlay(
     val deleteItem: () -> Unit = {
         mediaItems.getOrNull(currentIndex)?.let { item ->
             if (isTrashMode) {
-                // In trash mode, trigger system delete dialog directly
+                // In trash mode, trigger system delete dialog directly without closing overlay
                 viewModel.permanentlyDelete(context, item)
-                closeOverlayWithAnimation()
+                // Don't close overlay - will slide to next item after deletion
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // For Android 11+, use the ViewModel's trash request system
-                // Close overlay first since we can't track deletion success
-                closeOverlayWithAnimation()
-                // Trigger deletion through ViewModel
+                // For Android 11+, trigger system confirmation without closing overlay
+                // User will see the confirmation dialog over the media overlay
                 viewModel.enterSelectionMode(item)
-                viewModel.deleteSelectedItems(context) { /* handled by activity */ }
+                viewModel.deleteSelectedItems(context) { success ->
+                    if (success) {
+                        // After successful deletion, slide to next item
+                        val nextIndex = if (currentIndex < mediaItems.size - 1) {
+                            currentIndex // Stay at same index, next item shifts into position
+                        } else {
+                            (currentIndex - 1).coerceAtLeast(0) // Go to previous if was last
+                        }
+                        
+                        // If no more items, close overlay
+                        if (mediaItems.size <= 1) {
+                            closeOverlayWithAnimation()
+                        } else {
+                            // Slide to next item without closing
+                            displayIndex = nextIndex
+                            viewModel.exitSelectionMode()
+                        }
+                    }
+                }
             } else {
                 // For older versions, show confirmation dialog first
                 showDeleteDialog = true
@@ -332,6 +370,22 @@ fun MediaOverlay(
             } catch (e: Exception) {
                 Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+    
+    val toggleFavorite: () -> Unit = {
+        mediaItems.getOrNull(currentIndex)?.let { item ->
+            // Toggle the favorite state
+            val currentState = favoriteStates[item.id] ?: item.isFavorite
+            val newState = !currentState
+            favoriteStates[item.id] = newState
+            
+            // Persist to database via ViewModel
+            viewModel.toggleFavorite(item.id, newState)
+            
+            // Show pill message
+            favoriteMessage = if (newState) "Added to favourites" else "Removed from favourites"
+            showFavoritePill = true
         }
     }
     
@@ -1114,61 +1168,116 @@ fun MediaOverlay(
                                     tint = Color.White
                                 )
                             }
+                            // Dropdown attached to top bar, flush to right edge, bottom-left rounded
                             DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false },
-                            modifier = Modifier.background(
-                                Color(0xFF2C2C2C),
-                                shape = MaterialTheme.shapes.medium
-                            )
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Edit", color = Color.White) },
-                                onClick = {
-                                    menuExpanded = false
-                                    editItem()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Set as wallpaper", color = Color.White) },
-                                onClick = {
-                                    menuExpanded = false
-                                    setAsWallpaper()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Details", color = Color.White) },
-                                onClick = {
-                                    menuExpanded = false
-                                    showDetailsPanel = true
-                                    scope.launch {
-                                        detailsPanelProgress = 1f
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                modifier = Modifier
+                                    .widthIn(min = 220.dp)
+                                    .background(
+                                        Color.Black,
+                                        shape = RoundedCornerShape(
+                                            topStart = 0.dp,
+                                            topEnd = 0.dp,
+                                            bottomEnd = 0.dp,
+                                            bottomStart = 12.dp
+                                        )
+                                    ),
+                                offset = DpOffset(x = 0.dp, y = 0.dp)
+                            ) {
+                                // 1. Set as wallpaper
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            FontIcon(
+                                                unicode = FontIcons.Image,
+                                                contentDescription = null,
+                                                tint = Color.White.copy(alpha = 0.9f),
+                                                size = 24.sp
+                                            )
+                                            Text("Set as wallpaper", color = Color.White)
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        setAsWallpaper()
                                     }
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Copy to album", color = Color.White) },
-                                onClick = {
-                                    menuExpanded = false
-                                    // TODO: Copy to album
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Move to album", color = Color.White) },
-                                onClick = {
-                                    menuExpanded = false
-                                    // TODO: Move to album
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Set as duplicate", color = Color.White) },
-                                onClick = {
-                                    menuExpanded = false
-                                    // TODO: Set as duplicate
-                                }
-                            )
+                                )
+                                // 2. Copy to album
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            FontIcon(
+                                                unicode = FontIcons.Copy,
+                                                contentDescription = null,
+                                                tint = Color.White.copy(alpha = 0.9f),
+                                                size = 24.sp
+                                            )
+                                            Text("Copy to album", color = Color.White)
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        // TODO: Copy to album
+                                    }
+                                )
+                                // 3. 3. Move to album
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            FontIcon(
+                                                unicode = FontIcons.Move,
+                                                contentDescription = null,
+                                                tint = Color.White.copy(alpha = 0.9f),
+                                                size = 24.sp
+                                            )
+                                            Text("Move to album", color = Color.White)
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        // TODO: Move to album
+                                    }
+                                )
+                                // 4. Details
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            FontIcon(
+                                                unicode = FontIcons.Info,
+                                                contentDescription = null,
+                                                tint = Color.White.copy(alpha = 0.9f),
+                                                size = 24.sp
+                                            )
+                                            Text("Details", color = Color.White)
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        showDetailsPanel = true
+                                        scope.launch {
+                                            detailsPanelProgress = 1f
+                                        }
+                                    }
+                                )
+                            }
                         }
-                    }
                     }
                 }
             }
@@ -1219,12 +1328,22 @@ fun MediaOverlay(
                             )
                         }
                     } else {
-                        // Normal mode: All actions
-                        // Favorite (empty star at 1st position)
-                        IconButton(onClick = { /* Toggle favorite */ }) {
+                        // Normal mode: Star → Edit → Share → Delete
+                        // Favorite (toggles between filled and unfilled star)
+                        val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
+                        IconButton(onClick = toggleFavorite) {
                             FontIcon(
-                                unicode = FontIcons.StarOutline,
-                                contentDescription = "Favorite",
+                                unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
+                                contentDescription = if (isFavorited) "Remove from favorites" else "Add to favorites",
+                                tint = if (isFavorited) Color(0xFFFFD700) else Color.White
+                            )
+                        }
+                        
+                        // Edit
+                        IconButton(onClick = editItem) {
+                            FontIcon(
+                                unicode = FontIcons.Edit,
+                                contentDescription = "Edit",
                                 tint = Color.White
                             )
                         }
@@ -1238,13 +1357,6 @@ fun MediaOverlay(
                             )
                         }
                         
-                        // Mute/Unmute button (only for videos, in center)
-                        exoPlayer?.let { player ->
-                            if (currentItem?.isVideo == true) {
-                                MuteUnmuteButton(exoPlayer = player)
-                            }
-                        }
-                        
                         // Delete
                         IconButton(onClick = deleteItem) {
                             FontIcon(
@@ -1253,16 +1365,48 @@ fun MediaOverlay(
                                 tint = Color.White
                             )
                         }
-                        
-                        // More options
-                        IconButton(onClick = { /* More options */ }) {
-                            FontIcon(
-                                unicode = FontIcons.MoreVert,
-                                contentDescription = "More",
-                                tint = Color.White
-                            )
-                        }
                     }
+                }
+            }
+        }
+
+        // Favorite message pill - appears above bottom bar with animation
+        AnimatedVisibility(
+            visible = showFavoritePill,
+            enter = fadeIn(animationSpec = tween(200)) + slideInVertically(
+                initialOffsetY = { it / 2 },
+                animationSpec = tween(300, easing = FastOutSlowInEasing)
+            ),
+            exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(
+                targetOffsetY = { it / 2 },
+                animationSpec = tween(200, easing = FastOutLinearInEasing)
+            ),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 80.dp) // Space above bottom bar
+        ) {
+            Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 6.dp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FontIcon(
+                        unicode = FontIcons.Star,
+                        contentDescription = null,
+                        size = 18.sp,
+                        tint = Color(0xFFFFD700)
+                    )
+                    Text(
+                        text = favoriteMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
         }
@@ -1564,6 +1708,58 @@ private fun CustomVideoControls(
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.9f)
                         )
+                    }
+                    
+                    // Right-aligned controls: Mute/Unmute and Fullscreen
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    ) {
+                        // Mute/Unmute button with background like play/pause
+                        Surface(
+                            onClick = {
+                                isMuted = !isMuted
+                                exoPlayer.volume = if (isMuted) 0f else 1f
+                            },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FontIcon(
+                                    unicode = if (isMuted) FontIcons.VolumeOff else FontIcons.VolumeUp,
+                                    contentDescription = if (isMuted) "Unmute" else "Mute",
+                                    tint = Color.White,
+                                    size = 20.sp
+                                )
+                            }
+                        }
+                        
+                        // Fullscreen button with background like play/pause
+                        Surface(
+                            onClick = {
+                                // TODO: Implement fullscreen toggle
+                            },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FontIcon(
+                                    unicode = FontIcons.Fullscreen,
+                                    contentDescription = "Fullscreen",
+                                    tint = Color.White,
+                                    size = 20.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
