@@ -30,6 +30,7 @@ import coil.compose.AsyncImage
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.ui.icons.FontIcon
@@ -303,101 +304,45 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                                     val row = chunkedMedia[rowIndex]
                                     row.forEachIndexed { colIndex, item ->
                                         val index = rowIndex * 3 + colIndex
-                                        key(item.id) { // Stable key for performance
-                                            var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
-                                            
+                                        key(item.id) {
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .aspectRatio(1f)
                                             ) {
-                                            AsyncImage(
-                                                model = item.uri,
-                                                contentDescription = item.displayName,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                                MediaThumbnail(
+                                                    item = item,
+                                                    isSelected = false,
+                                                    isSelectionMode = false,
+                                                    shape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                                         index = index,
                                                         totalItems = matchedMedia.size,
                                                         columns = 3
-                                                    ))
-                                                    .onGloballyPositioned { coordinates ->
-                                                        val position = coordinates.positionInWindow()
-                                                        val size = coordinates.size
-                                                        thumbnailBounds = Rect(
-                                                            position.x,
-                                                            position.y,
-                                                            position.x + size.width,
-                                                            position.y + size.height
-                                                        )
-                                                    }
-                                                    .clickable {
+                                                    ),
+                                                    onClick = { bounds ->
                                                         // Save search to recent searches
                                                         viewModel.addRecentSearch(searchQuery)
                                                         
-                                                        // Pass matched media list directly to overlay
-                                                        thumbnailBounds?.let { bounds ->
-                                                            viewModel.showMediaOverlay(
-                                                                mediaType = "search",
-                                                                albumId = "search_results",
-                                                                selectedIndex = index,
-                                                                thumbnailBounds = MediaViewModel.ThumbnailBounds(
-                                                                    startLeft = bounds.left,
-                                                                    startTop = bounds.top,
-                                                                    startWidth = bounds.width,
-                                                                    startHeight = bounds.height
-                                                                ),
-                                                                searchQuery = searchQuery
-                                                            )
-                                                        } ?: run {
-                                                            viewModel.showMediaOverlay(
-                                                                mediaType = "search",
-                                                                albumId = "search_results",
-                                                                selectedIndex = index,
-                                                                thumbnailBounds = null,
-                                                                searchQuery = searchQuery
-                                                            )
-                                                        }
+                                                        viewModel.showMediaOverlay(
+                                                            mediaType = "search",
+                                                            albumId = "search_results",
+                                                            selectedIndex = index,
+                                                            thumbnailBounds = bounds?.let {
+                                                                MediaViewModel.ThumbnailBounds(
+                                                                    startLeft = it.left,
+                                                                    startTop = it.top,
+                                                                    startWidth = it.width,
+                                                                    startHeight = it.height
+                                                                )
+                                                            },
+                                                            searchQuery = searchQuery
+                                                        )
                                                     },
-                                                contentScale = ContentScale.Crop
-                                            )
-                                            
-                                            // Video indicator - pill-shaped with duration
-                                            if (item.isVideo) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .align(Alignment.BottomEnd)
-                                                        .padding(6.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .background(
-                                                                color = Color.Black.copy(alpha = 0.75f),
-                                                                shape = RoundedCornerShape(50) // Pill shape
-                                                            )
-                                                            .padding(horizontal = 6.dp, vertical = 3.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                                    ) {
-                                                        FontIcon(
-                                                            unicode = FontIcons.PlayArrow,
-                                                            contentDescription = "Video",
-                                                            size = 14.sp,
-                                                            tint = Color.White
-                                                        )
-                                                        Text(
-                                                            text = formatDuration(item.duration),
-                                                            color = Color.White,
-                                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                                fontSize = 11.sp,
-                                                                fontWeight = FontWeight.Medium
-                                                            )
-                                                        )
-                                                    }
-                                                }
+                                                    onLongClick = {},
+                                                    showFavorite = true
+                                                )
                                             }
                                         }
-                                    }
                                     }
                                     
                                     // Fill remaining space if row is not complete
@@ -621,14 +566,3 @@ fun AlbumResultItem(name: String, count: Int, thumbnailUri: android.net.Uri, onC
     }
 }
 
-// Helper function to format video duration
-private fun formatDuration(durationMs: Long): String {
-    val seconds = (durationMs / 1000) % 60
-    val minutes = (durationMs / (1000 * 60)) % 60
-    val hours = durationMs / (1000 * 60 * 60)
-    
-    return when {
-        hours > 0 -> String.format("%d:%02d:%02d", hours, minutes, seconds)
-        else -> String.format("%d:%02d", minutes, seconds)
-    }
-}
