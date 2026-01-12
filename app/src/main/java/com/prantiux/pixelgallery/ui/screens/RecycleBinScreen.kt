@@ -37,6 +37,7 @@ import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.PermissionRequestScreen
+import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import kotlinx.coroutines.launch
 import com.prantiux.pixelgallery.ui.icons.FontIcon
@@ -234,134 +235,42 @@ fun RecycleBinContent(
                             items(group.items.size) { index ->
                                 val item = group.items[index]
                                 val isSelected = selectedItems.contains(item)
-                                val borderWidth = 16.dp
                                 val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                     index = index,
                                     totalItems = group.items.size,
                                     columns = 3
                                 )
-                                val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                                var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
                                 
-                                Box(
-                                    modifier = Modifier
-                                        .aspectRatio(1f)
-                                        .then(
-                                            if (isSelected) {
-                                                Modifier
-                                                    .background(color = borderColor, shape = gridShape)
-                                                    .border(width = borderWidth, color = borderColor, shape = gridShape)
-                                            } else Modifier
-                                        )
-                                ) {
-                                    AsyncImage(
-                                        model = item.uri,
-                                        contentDescription = item.displayName,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
-                                            .clip(gridShape)
-                                            .onGloballyPositioned { coordinates ->
-                                                val position = coordinates.positionInWindow()
-                                                val size = coordinates.size
-                                                thumbnailBounds = Rect(
-                                                    position.x,
-                                                    position.y,
-                                                    position.x + size.width,
-                                                    position.y + size.height
-                                                )
-                                            }
-                                            .combinedClickable(
-                                                onClick = {
-                                                    if (isSelectionMode) {
-                                                        viewModel.toggleTrashSelection(item)
-                                                    } else {
-                                                        thumbnailBounds?.let { bounds ->
-                                                            viewModel.showTrashMediaOverlay(
-                                                                selectedIndex = trashedItems.indexOf(item)
-                                                            )
-                                                        } ?: run {
-                                                            viewModel.showTrashMediaOverlay(
-                                                                selectedIndex = trashedItems.indexOf(item)
-                                                            )
-                                                        }
-                                                    }
-                                                },
-                                                onLongClick = {
-                                                    if (!isSelectionMode) {
-                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                                        viewModel.enterTrashSelectionMode(item)
-                                                    }
+                                MediaThumbnail(
+                                    item = item,
+                                    isSelected = isSelected,
+                                    isSelectionMode = isSelectionMode,
+                                    shape = gridShape,
+                                    onClick = { bounds ->
+                                        if (isSelectionMode) {
+                                            viewModel.toggleTrashSelection(item)
+                                        } else {
+                                            viewModel.showTrashMediaOverlay(
+                                                selectedIndex = trashedItems.indexOf(item),
+                                                thumbnailBounds = bounds?.let {
+                                                    MediaViewModel.ThumbnailBounds(
+                                                        startLeft = it.left,
+                                                        startTop = it.top,
+                                                        startWidth = it.width,
+                                                        startHeight = it.height
+                                                    )
                                                 }
-                                            ),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    
-                                    // Video indicator with duration
-                                    if (item.isVideo) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .background(
-                                                        color = Color.Black.copy(alpha = 0.75f),
-                                                        shape = RoundedCornerShape(50)
-                                                    )
-                                                    .padding(horizontal = 6.dp, vertical = 3.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                            ) {
-                                                FontIcon(
-                                                    unicode = FontIcons.PlayArrow,
-                                                    contentDescription = "Video",
-                                                    size = 14.sp,
-                                                    tint = Color.White
-                                                )
-                                                Text(
-                                                    text = formatDuration(item.duration),
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Medium
-                                                    )
-                                                )
-                                            }
+                                            )
                                         }
-                                    }
-                                    
-                                    // Selection indicator
-                                    if (isSelectionMode) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(8.dp)
-                                                .size(24.dp)
-                                                .background(
-                                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f) 
-                                                    else Color.White.copy(alpha = 0.7f),
-                                                    CircleShape
-                                                )
-                                                .border(
-                                                    width = if (isSelected) 0.dp else 2.dp,
-                                                    color = if (isSelected) Color.Transparent else Color.Gray.copy(alpha = 0.5f),
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isSelected) {
-                                                FontIcon(
-                                                    unicode = FontIcons.Done,
-                                                    contentDescription = "Selected",
-                                                    size = 16.sp,
-                                                    tint = Color.White
-                                                )
-                                            }
+                                    },
+                                    onLongClick = {
+                                        if (!isSelectionMode) {
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            viewModel.enterTrashSelectionMode(item)
                                         }
-                                    }
-                                }
+                                    },
+                                    showFavorite = true
+                                )
                             }
                         }
                     }
@@ -442,14 +351,3 @@ private fun groupByDaysLeft(items: List<MediaItem>): List<TrashedGroup> {
         }
 }
 
-// Format video duration
-private fun formatDuration(durationMs: Long): String {
-    val seconds = (durationMs / 1000) % 60
-    val minutes = (durationMs / (1000 * 60)) % 60
-    val hours = durationMs / (1000 * 60 * 60)
-    
-    return when {
-        hours > 0 -> String.format("%d:%02d:%02d", hours, minutes, seconds)
-        else -> String.format("%d:%02d", minutes, seconds)
-    }
-}
