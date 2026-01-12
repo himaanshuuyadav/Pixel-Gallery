@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
+
 package com.prantiux.pixelgallery.navigation
 
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -57,35 +60,36 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     }
     object AllAlbums : Screen("all_albums", "All Albums")
     object RecycleBin : Screen("recycle_bin", "Recycle Bin")
+    object Favorites : Screen("favorites", "Favourites")
 }
 
-// Smooth transition animations for navigation
+// Expressive transition animations for navigation (Material 3 standard)
 private fun enterTransition() = fadeIn(
-    animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
 ) + slideInVertically(
-    initialOffsetY = { it / 20 },
-    animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+    initialOffsetY = { it / 15 },
+    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
 )
 
 private fun exitTransition() = fadeOut(
-    animationSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing)
+    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
 ) + slideOutVertically(
-    targetOffsetY = { -it / 20 },
-    animationSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing)
+    targetOffsetY = { -it / 15 },
+    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
 )
 
 private fun popEnterTransition() = fadeIn(
-    animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
 ) + slideInVertically(
-    initialOffsetY = { -it / 20 },
-    animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+    initialOffsetY = { -it / 15 },
+    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
 )
 
 private fun popExitTransition() = fadeOut(
-    animationSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing)
+    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
 ) + slideOutVertically(
-    targetOffsetY = { it / 20 },
-    animationSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing)
+    targetOffsetY = { it / 15 },
+    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
 )
 
 @Composable
@@ -256,7 +260,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
     )
     
     val selectionModeItems = listOf(
-        NavItem("copy", "Copy to", FontIcons.Add),
+        NavItem("copy", "Copy to", FontIcons.Copy),
         NavItem("share", "Share", FontIcons.Share),
         NavItem("delete", "Delete", FontIcons.Delete),
         NavItem("more", "More", FontIcons.MoreVert)
@@ -298,6 +302,9 @@ fun AppNavigation(viewModel: MediaViewModel) {
                     onNavigateToRecycleBin = {
                         navController.navigate(Screen.RecycleBin.route)
                     },
+                    onNavigateToFavorites = {
+                        navController.navigate(Screen.Favorites.route)
+                    },
                     viewModel = viewModel
                 )
             }
@@ -325,6 +332,19 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 popExitTransition = { popExitTransition() }
             ) {
                 RecycleBinScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            
+            composable(
+                route = Screen.Favorites.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                FavoritesScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
@@ -379,8 +399,11 @@ fun AppNavigation(viewModel: MediaViewModel) {
             // Get search results for overlay
             val searchResults by viewModel.searchResults.collectAsState()
             
+            // Get favorite items for overlay
+            val favoriteItems by viewModel.favoriteItems.collectAsState()
+            
             // Filter media based on overlay state (album or all media)
-            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, searchResults) {
+            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, searchResults, favoriteItems) {
                 when (overlayState.mediaType) {
                     "album" -> allMedia.filter { it.bucketId == overlayState.albumId }
                         .sortedByDescending { it.dateAdded }
@@ -388,6 +411,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
                         // Use actual search results from SearchEngine, not simple filter
                         searchResults?.matchedMedia ?: emptyList()
                     }
+                    "favorites" -> favoriteItems
                     else -> allMedia
                 }
             }
@@ -447,7 +471,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
                         },
                     items = if (isSelectionMode && currentRoute == Screen.Photos.route) {
                         listOf(
-                            NavItem("copy", "Copy", FontIcons.Add),
+                            NavItem("copy", "Copy to", FontIcons.Copy),
                             NavItem("share", "Share", FontIcons.Share),
                             NavItem("delete", "Delete", FontIcons.Delete),
                             NavItem("more", "More", FontIcons.MoreVert)
