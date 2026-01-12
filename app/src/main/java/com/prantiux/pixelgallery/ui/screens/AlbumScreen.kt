@@ -1,7 +1,12 @@
 package com.prantiux.pixelgallery.ui.screens
 
+import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -18,22 +23,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AlbumDetailScreen(
     viewModel: MediaViewModel,
@@ -43,6 +52,15 @@ fun AlbumDetailScreen(
 ) {
     val images by viewModel.images.collectAsState()
     val videos by viewModel.videos.collectAsState()
+    val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    val selectedItems by viewModel.selectedItems.collectAsState()
+    val view = LocalView.current
+    val context = LocalContext.current
+    
+    // Add BackHandler to exit selection mode on back press
+    BackHandler(enabled = isSelectionMode) {
+        viewModel.exitSelectionMode()
+    }
     
     // Combine images and videos for this album
     val albumMedia = (images + videos)
@@ -99,102 +117,61 @@ fun AlbumDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     itemsIndexed(albumMedia) { index, item ->
-                        var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
+                        val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                            index = index,
+                            totalItems = albumMedia.size,
+                            columns = columns
+                        )
                         
-                        Box(modifier = Modifier.aspectRatio(1f)) {
-                            AsyncImage(
-                                model = item.uri,
-                                contentDescription = item.displayName,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                                        index = index,
-                                        totalItems = albumMedia.size,
-                                        columns = columns
-                                    ))
-                                    .onGloballyPositioned { coordinates ->
-                                        val position = coordinates.positionInWindow()
-                                        val size = coordinates.size
-                                        thumbnailBounds = Rect(
-                                            position.x,
-                                            position.y,
-                                            position.x + size.width,
-                                            position.y + size.height
-                                        )
-                                    }
-                                    .clickable {
-                                        thumbnailBounds?.let { bounds ->
-                                            viewModel.showMediaOverlay(
-                                                mediaType = "album",
-                                                albumId = albumId,
-                                                selectedIndex = index,
-                                                thumbnailBounds = MediaViewModel.ThumbnailBounds(
-                                                    startLeft = bounds.left,
-                                                    startTop = bounds.top,
-                                                    startWidth = bounds.width,
-                                                    startHeight = bounds.height
-                                                )
-                                            )
-                                        } ?: run {
-                                            viewModel.showMediaOverlay(
-                                                mediaType = "album",
-                                                albumId = albumId,
-                                                selectedIndex = index,
-                                                thumbnailBounds = null
-                                            )
-                                        }
-                                    },
-                                contentScale = ContentScale.Crop
-                            )
-                            // Video indicator - small play icon with duration in top right
-                            if (item.isVideo) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .background(
-                                                color = Color.Black.copy(alpha = 0.7f),
-                                                shape = RoundedCornerShape(4.dp)
-                                            )
-                                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        FontIcon(
-                                            unicode = FontIcons.PlayArrow,
-                                            contentDescription = "Video",
-                                            size = 12.sp,
-                                            tint = Color.White
-                                        )
-                                        Text(
-                                            text = formatVideoDuration(item.duration),
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        SelectableMediaItem(
+                            item = item,
+                            isSelectionMode = isSelectionMode,
+                            selectedItems = selectedItems,
+                            viewModel = viewModel,
+                            view = view,
+                            shape = gridShape,
+                            mediaType = "album",
+                            albumId = albumId,
+                            index = index,
+                            showFavorite = true
+                        )
                     }
                 }
             }
         }
+        
+        // Floating navbar for selection mode
+        if (isSelectionMode) {
+            val navBarInset = androidx.compose.foundation.layout.WindowInsets.navigationBars
+                .asPaddingValues().calculateBottomPadding()
+            val bottomPadding = if (navBarInset > 0.dp) 8.dp else 24.dp
+            
+            com.prantiux.pixelgallery.navigation.PixelStyleFloatingNavBar(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(bottom = bottomPadding),
+                items = listOf(
+                    com.prantiux.pixelgallery.navigation.NavItem("copy", "Copy to", FontIcons.Copy),
+                    com.prantiux.pixelgallery.navigation.NavItem("share", "Share", FontIcons.Share),
+                    com.prantiux.pixelgallery.navigation.NavItem("delete", "Delete", FontIcons.Delete),
+                    com.prantiux.pixelgallery.navigation.NavItem("more", "More", FontIcons.MoreVert)
+                ),
+                selectedRoute = "",
+                onItemSelected = { item ->
+                    when (item.route) {
+                        "copy" -> { /* TODO: Copy to album functionality */ }
+                        "share" -> { viewModel.shareSelectedItems(context) }
+                        "delete" -> {
+                            viewModel.deleteSelectedItems(context) { success ->
+                                if (success) viewModel.exitSelectionMode()
+                            }
+                        }
+                        "more" -> { /* TODO: More options */ }
+                    }
+                }
+            )
+        }
     }
-    }
-}
-
-private fun formatVideoDuration(durationMs: Long): String {
-    val seconds = (durationMs / 1000) % 60
-    val minutes = (durationMs / (1000 * 60)) % 60
-    val hours = durationMs / (1000 * 60 * 60)
-    
-    return when {
-        hours > 0 -> String.format("%d:%02d:%02d", hours, minutes, seconds)
-        else -> String.format("%d:%02d", minutes, seconds)
     }
 }
