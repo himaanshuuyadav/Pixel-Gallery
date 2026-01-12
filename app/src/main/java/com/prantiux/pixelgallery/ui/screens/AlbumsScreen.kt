@@ -60,6 +60,7 @@ fun AlbumsScreen(
     onNavigateToAlbum: (String) -> Unit,
     onNavigateToAllAlbums: () -> Unit,
     onNavigateToRecycleBin: () -> Unit = {},
+    onNavigateToFavorites: () -> Unit = {},
     viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -157,7 +158,7 @@ fun AlbumsScreen(
                     // Special Action Buttons
                     item {
                         SpecialActionButtons(
-                            onStarredClick = { /* TODO */ },
+                            onStarredClick = onNavigateToFavorites,
                             onSecureClick = { /* TODO */ },
                             onRecycleBinClick = onNavigateToRecycleBin
                         )
@@ -854,7 +855,7 @@ fun SpecialActionButtons(
         ) {
             SpecialActionButton(
                 iconUnicode = FontIcons.Star,
-                label = "Starred",
+                label = "Favourites",
                 description = "Your favorite photos",
                 onClick = onStarredClick
             )
