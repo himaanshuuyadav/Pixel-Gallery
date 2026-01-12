@@ -16,5 +16,6 @@ data class MediaItem(
     val width: Int = 0,
     val height: Int = 0,
     val path: String = "",
-    val dateExpires: Long = 0 // For trash items - when they will be permanently deleted
+    val dateExpires: Long = 0, // For trash items - when they will be permanently deleted
+    val isFavorite: Boolean = false // Track favorite status
 )
