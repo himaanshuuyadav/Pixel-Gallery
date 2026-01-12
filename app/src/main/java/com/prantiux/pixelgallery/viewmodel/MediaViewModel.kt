@@ -5,6 +5,8 @@ import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.prantiux.pixelgallery.data.AlbumRepository
+import com.prantiux.pixelgallery.data.AppDatabase
+import com.prantiux.pixelgallery.data.FavoriteEntity
 import com.prantiux.pixelgallery.data.MediaRepository
 import com.prantiux.pixelgallery.data.RecentSearchesDataStore
 import com.prantiux.pixelgallery.model.Album
@@ -26,12 +28,19 @@ class MediaViewModel : ViewModel() {
     private lateinit var repository: MediaRepository
     private lateinit var albumRepository: AlbumRepository
     private lateinit var recentSearchesDataStore: RecentSearchesDataStore
+    private lateinit var database: AppDatabase
 
     private val _images = MutableStateFlow<List<MediaItem>>(emptyList())
     val images: StateFlow<List<MediaItem>> = _images.asStateFlow()
 
     private val _videos = MutableStateFlow<List<MediaItem>>(emptyList())
     val videos: StateFlow<List<MediaItem>> = _videos.asStateFlow()
+    
+    private val _favoriteIds = MutableStateFlow<Set<Long>>(emptySet())
+    val favoriteIds: StateFlow<Set<Long>> = _favoriteIds.asStateFlow()
+    
+    private val _favoriteItems = MutableStateFlow<List<MediaItem>>(emptyList())
+    val favoriteItems: StateFlow<List<MediaItem>> = _favoriteItems.asStateFlow()
 
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
@@ -154,6 +163,17 @@ class MediaViewModel : ViewModel() {
         repository = MediaRepository(context)
         albumRepository = AlbumRepository(context)
         recentSearchesDataStore = RecentSearchesDataStore(context)
+        database = AppDatabase.getDatabase(context)
+        
+        // Load favorite IDs from database
+        viewModelScope.launch {
+            try {
+                val ids = database.favoriteDao().getAllFavoriteIds()
+                _favoriteIds.value = ids.toSet()
+            } catch (e: Exception) {
+                // Ignore errors
+            }
+        }
         
         // Load recent searches from DataStore (collect in viewModelScope - will cancel when VM is cleared)
         viewModelScope.launch {
@@ -204,6 +224,8 @@ class MediaViewModel : ViewModel() {
     }
 
     private fun applySorting() {
+        val favoriteIdSet = _favoriteIds.value
+        
         _images.value = when (_sortMode.value) {
             SortMode.DATE_DESC -> allImages.sortedByDescending { it.dateAdded }
             SortMode.DATE_ASC -> allImages.sortedBy { it.dateAdded }
@@ -211,7 +233,7 @@ class MediaViewModel : ViewModel() {
             SortMode.NAME_DESC -> allImages.sortedByDescending { it.displayName.lowercase() }
             SortMode.SIZE_DESC -> allImages.sortedByDescending { it.size }
             SortMode.SIZE_ASC -> allImages.sortedBy { it.size }
-        }
+        }.map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
 
         _videos.value = when (_sortMode.value) {
             SortMode.DATE_DESC -> allVideos.sortedByDescending { it.dateAdded }
@@ -220,7 +242,13 @@ class MediaViewModel : ViewModel() {
             SortMode.NAME_DESC -> allVideos.sortedByDescending { it.displayName.lowercase() }
             SortMode.SIZE_DESC -> allVideos.sortedByDescending { it.size }
             SortMode.SIZE_ASC -> allVideos.sortedBy { it.size }
+        }.map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
+        
+        // Update favorite items list
+        val allMedia = (allImages + allVideos).map { 
+            it.copy(isFavorite = favoriteIdSet.contains(it.id)) 
         }
+        _favoriteItems.value = allMedia.filter { it.isFavorite }.sortedByDescending { it.dateAdded }
     }
 
     fun delete(item: MediaItem, onComplete: (Boolean) -> Unit) {
@@ -584,5 +612,24 @@ class MediaViewModel : ViewModel() {
             thumbnailBounds = thumbnailBounds,
             searchQuery = null
         )
+    }
+    
+    // Favorites functions
+    fun toggleFavorite(mediaId: Long, newState: Boolean) {
+        viewModelScope.launch {
+            try {
+                if (newState) {
+                    database.favoriteDao().addFavorite(FavoriteEntity(mediaId))
+                    _favoriteIds.value = _favoriteIds.value + mediaId
+                } else {
+                    database.favoriteDao().removeFavorite(mediaId)
+                    _favoriteIds.value = _favoriteIds.value - mediaId
+                }
+                // Reapply sorting to update isFavorite flags
+                applySorting()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 }
