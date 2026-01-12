@@ -88,6 +88,9 @@ object FontIcons {
     const val Add = "\ue145"
     const val Home = "\ue410"  // photo icon
     const val Person = "\uefb2"  // photo_library icon
+    const val Edit = "\ue3c9"  // edit icon
+    const val Copy = "\ue173"  // content_copy icon
+    const val Move = "\uf1ff"  // drive_file_move icon
     
     // Empty States
     const val SearchOff = "\uea76"
