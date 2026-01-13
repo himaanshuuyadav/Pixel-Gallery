@@ -22,7 +22,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -458,6 +460,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 
                 val selectedItems by viewModel.selectedItems.collectAsState()
                 val context = androidx.compose.ui.platform.LocalContext.current
+                var showMoreMenu by remember { mutableStateOf(false) }
 
                 // Use regular navbar layout but with different icons in selection mode
                 PixelStyleFloatingNavBar(
@@ -492,7 +495,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
                                         // Handle result for older Android versions
                                     }
                                 }
-                                "more" -> { /* TODO: More options */ }
+                                "more" -> { showMoreMenu = true }
                             }
                         } else {
                             // Normal navigation
@@ -504,6 +507,88 @@ fun AppNavigation(viewModel: MediaViewModel) {
                         }
                     }
                 )
+                
+                // More options dropdown for selection mode
+                if (isSelectionMode && currentRoute == Screen.Photos.route && showMoreMenu) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = navBarInset + 80.dp, end = 16.dp)
+                    ) {
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false },
+                            modifier = Modifier
+                                .widthIn(min = 200.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceContainer,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                        ) {
+                            // Set as wallpaper
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Image,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            size = 24.sp
+                                        )
+                                        Text(
+                                            "Set as wallpaper",
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    selectedItems.firstOrNull()?.let { item ->
+                                        if (!item.isVideo) {
+                                            val wallpaperIntent = android.content.Intent(android.content.Intent.ACTION_ATTACH_DATA).apply {
+                                                setDataAndType(item.uri, "image/*")
+                                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(android.content.Intent.createChooser(wallpaperIntent, "Set as"))
+                                        } else {
+                                            android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            )
+                            // Move to album
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Move,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            size = 24.sp
+                                        )
+                                        Text(
+                                            "Move to album",
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    // TODO: Implement move to album
+                                    android.widget.Toast.makeText(context, "Move to album coming soon", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
