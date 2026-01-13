@@ -31,7 +31,9 @@ class MediaRepository(private val context: Context) {
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Images.Media.WIDTH,
             MediaStore.Images.Media.HEIGHT,
-            MediaStore.Images.Media.DATA
+            MediaStore.Images.Media.DATA,
+            MediaStore.Images.Media.LATITUDE,
+            MediaStore.Images.Media.LONGITUDE
         )
 
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
@@ -53,6 +55,8 @@ class MediaRepository(private val context: Context) {
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
             val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+            val latitudeColumn = cursor.getColumnIndex(MediaStore.Images.Media.LATITUDE)
+            val longitudeColumn = cursor.getColumnIndex(MediaStore.Images.Media.LONGITUDE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -65,6 +69,14 @@ class MediaRepository(private val context: Context) {
                 val width = cursor.getInt(widthColumn)
                 val height = cursor.getInt(heightColumn)
                 val path = cursor.getString(dataColumn) ?: ""
+                
+                // Fetch GPS coordinates
+                val latitude = if (latitudeColumn != -1 && !cursor.isNull(latitudeColumn)) {
+                    cursor.getDouble(latitudeColumn)
+                } else null
+                val longitude = if (longitudeColumn != -1 && !cursor.isNull(longitudeColumn)) {
+                    cursor.getDouble(longitudeColumn)
+                } else null
 
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -75,6 +87,8 @@ class MediaRepository(private val context: Context) {
                     MediaItem(
                         id = id,
                         uri = contentUri,
+                        latitude = latitude,
+                        longitude = longitude,
                         displayName = name,
                         dateAdded = dateAdded,
                         size = size,
@@ -111,7 +125,9 @@ class MediaRepository(private val context: Context) {
             MediaStore.Video.Media.DURATION,
             MediaStore.Video.Media.WIDTH,
             MediaStore.Video.Media.HEIGHT,
-            MediaStore.Video.Media.DATA
+            MediaStore.Video.Media.DATA,
+            MediaStore.Video.Media.LATITUDE,
+            MediaStore.Video.Media.LONGITUDE
         )
 
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
@@ -134,6 +150,8 @@ class MediaRepository(private val context: Context) {
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.HEIGHT)
             val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+            val latitudeColumn = cursor.getColumnIndex(MediaStore.Video.Media.LATITUDE)
+            val longitudeColumn = cursor.getColumnIndex(MediaStore.Video.Media.LONGITUDE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -147,6 +165,14 @@ class MediaRepository(private val context: Context) {
                 val width = cursor.getInt(widthColumn)
                 val height = cursor.getInt(heightColumn)
                 val path = cursor.getString(dataColumn) ?: ""
+                
+                // Fetch GPS coordinates
+                val latitude = if (latitudeColumn != -1 && !cursor.isNull(latitudeColumn)) {
+                    cursor.getDouble(latitudeColumn)
+                } else null
+                val longitude = if (longitudeColumn != -1 && !cursor.isNull(longitudeColumn)) {
+                    cursor.getDouble(longitudeColumn)
+                } else null
 
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -167,7 +193,9 @@ class MediaRepository(private val context: Context) {
                         duration = duration,
                         width = width,
                         height = height,
-                        path = path
+                        path = path,
+                        latitude = latitude,
+                        longitude = longitude
                     )
                 )
             }
