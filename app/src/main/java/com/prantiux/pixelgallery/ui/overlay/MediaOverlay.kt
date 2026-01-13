@@ -1168,7 +1168,7 @@ fun MediaOverlay(
                                     tint = Color.White
                                 )
                             }
-                            // Dropdown attached to top bar, flush to right edge, bottom-left rounded
+                            // Dropdown attached to top bar, flush to right edge, top-left and bottom-left rounded
                             DropdownMenu(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
@@ -1177,13 +1177,13 @@ fun MediaOverlay(
                                     .background(
                                         Color.Black,
                                         shape = RoundedCornerShape(
-                                            topStart = 0.dp,
+                                            topStart = 12.dp,
                                             topEnd = 0.dp,
                                             bottomEnd = 0.dp,
                                             bottomStart = 12.dp
                                         )
                                     ),
-                                offset = DpOffset(x = 0.dp, y = 0.dp)
+                                offset = DpOffset(x = 8.dp, y = 0.dp)
                             ) {
                                 // 1. Set as wallpaper
                                 DropdownMenuItem(
@@ -1486,11 +1486,24 @@ fun MediaOverlay(
                                 ).format(java.util.Date(item.dateAdded * 1000))
                             )
                             
-                            // Location (if available)
+                            // GPS Location (if available)
+                            if (item.latitude != null && item.longitude != null) {
+                                DetailSection(
+                                    label = "GPS Location",
+                                    value = "${item.latitude}, ${item.longitude}"
+                                )
+                            } else if (item.location != null) {
+                                DetailSection(
+                                    label = "Location",
+                                    value = item.location
+                                )
+                            }
+                            
+                            // File Location
                             if (item.path.contains("/")) {
                                 val locationPath = item.path.substringBeforeLast("/")
                                 DetailSection(
-                                    label = "Location",
+                                    label = "File Location",
                                     value = locationPath
                                 )
                             }
