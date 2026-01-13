@@ -17,5 +17,8 @@ data class MediaItem(
     val height: Int = 0,
     val path: String = "",
     val dateExpires: Long = 0, // For trash items - when they will be permanently deleted
-    val isFavorite: Boolean = false // Track favorite status
+    val isFavorite: Boolean = false, // Track favorite status
+    val latitude: Double? = null, // GPS latitude
+    val longitude: Double? = null, // GPS longitude
+    val location: String? = null // Resolved location name
 )
