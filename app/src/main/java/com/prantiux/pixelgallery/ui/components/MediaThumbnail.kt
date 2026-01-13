@@ -61,7 +61,10 @@ fun MediaThumbnail(
 ) {
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     val borderWidth = 16.dp
-    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+    
+    // Use 12dp for selected inner image, keep original shape for outer border
+    val innerShape = if (isSelected) RoundedCornerShape(24.dp) else shape
     
     Box(
         modifier = modifier
@@ -70,11 +73,6 @@ fun MediaThumbnail(
                 if (isSelected) {
                     Modifier
                         .background(
-                            color = borderColor,
-                            shape = shape
-                        )
-                        .border(
-                            width = borderWidth,
                             color = borderColor,
                             shape = shape
                         )
@@ -91,7 +89,7 @@ fun MediaThumbnail(
                         Modifier.padding(borderWidth)
                     } else Modifier
                 )
-                .clip(shape)
+                .clip(innerShape)
                 .onGloballyPositioned { coordinates ->
                     val position = coordinates.positionInWindow()
                     val size = coordinates.size
@@ -212,13 +210,13 @@ fun SelectionCheckmark(
         modifier = modifier
             .size(24.dp)
             .background(
-                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f) 
-                else Color.White.copy(alpha = 0.7f),
+                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f) 
+                else Color.Transparent,
                 CircleShape
             )
             .border(
                 width = if (isSelected) 0.dp else 2.dp,
-                color = if (isSelected) Color.Transparent else Color.Gray.copy(alpha = 0.5f),
+                color = if (isSelected) Color.Transparent else MaterialTheme.colorScheme.onSurfaceVariant,
                 shape = CircleShape
             ),
         contentAlignment = Alignment.Center
@@ -228,7 +226,7 @@ fun SelectionCheckmark(
                 unicode = FontIcons.Done,
                 contentDescription = "Selected",
                 size = 16.sp,
-                tint = Color.White
+                tint = MaterialTheme.colorScheme.onPrimary
             )
         }
     }
