@@ -49,6 +49,7 @@ import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.viewmodel.SortMode
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 import com.prantiux.pixelgallery.ui.components.PermissionRequestScreen
 import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
@@ -63,7 +64,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 data class MediaGroup(
     val date: String,
     val displayDate: String,
-    val items: List<MediaItem>
+    val items: List<MediaItem>,
+    val mostCommonLocation: String? = null
 )
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
@@ -216,7 +218,7 @@ fun PhotosContent(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         groupedMedia.forEach { group ->
-                        // Date Header - spans all columns with checkbox when in selection mode
+                        // Date Header - spans all columns with checkbox or location when in selection mode
                         item(span = { GridItemSpan(3) }) {
                             Row(
                                 modifier = Modifier
@@ -225,6 +227,7 @@ fun PhotosContent(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Date text
                                 Text(
                                     text = group.displayDate,
                                     style = MaterialTheme.typography.titleSmall,
@@ -232,6 +235,16 @@ fun PhotosContent(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 
+                                // Show location if available and not in selection mode
+                                if (!isSelectionMode && group.mostCommonLocation != null) {
+                                    Text(
+                                        text = group.mostCommonLocation,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                
+                                // Show checkbox in selection mode
                                 if (isSelectionMode) {
                                     val allSelected = group.items.all { selectedItems.contains(it) }
                                     Box(
@@ -244,7 +257,7 @@ fun PhotosContent(
                                                 shape = CircleShape
                                             )
                                             .background(
-                                                if (allSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                                if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f)  else Color.Transparent,
                                                 CircleShape
                                             )
                                             .clickable {
@@ -261,7 +274,7 @@ fun PhotosContent(
                                                 unicode = FontIcons.Done,
                                                 contentDescription = "Selected",
                                                 size = 16.sp,
-                                                tint = Color.White
+                                                tint = MaterialTheme.colorScheme.onPrimary
                                             )
                                         }
                                     }
@@ -274,173 +287,51 @@ fun PhotosContent(
                             val item = group.items[index]
                             val globalIndex = allMedia.indexOf(item)
                             val isSelected = selectedItems.contains(item)
-                            var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
-                            val borderWidth = 16.dp
                             val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                 index = index,
                                 totalItems = group.items.size,
                                 columns = 3
                             )
-                            // Much darker version of accent color for border
-                            val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                             
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .then(
-                                        if (isSelected) {
-                                            Modifier
-                                                .background(
-                                                    color = borderColor,
-                                                    shape = gridShape
+                            MediaThumbnail(
+                                item = item,
+                                isSelected = isSelected,
+                                isSelectionMode = isSelectionMode,
+                                shape = gridShape,
+                                onClick = { bounds ->
+                                    if (isSelectionMode) {
+                                        viewModel.toggleSelection(item)
+                                    } else {
+                                        bounds?.let {
+                                            viewModel.showMediaOverlay(
+                                                mediaType = "photos",
+                                                albumId = "all",
+                                                selectedIndex = globalIndex,
+                                                thumbnailBounds = MediaViewModel.ThumbnailBounds(
+                                                    startLeft = it.left,
+                                                    startTop = it.top,
+                                                    startWidth = it.width,
+                                                    startHeight = it.height
                                                 )
-                                                .border(
-                                                    width = borderWidth,
-                                                    color = borderColor,
-                                                    shape = gridShape
-                                                )
-                                        } else Modifier
-                                    )
-                            ) {
-                                AsyncImage(
-                                    model = item.uri,
-                                    contentDescription = item.displayName,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .then(
-                                            if (isSelected) {
-                                                Modifier.padding(borderWidth)
-                                            } else Modifier
-                                        )
-                                        .clip(gridShape)
-                                        .onGloballyPositioned { coordinates ->
-                                            val position = coordinates.positionInWindow()
-                                            val size = coordinates.size
-                                            thumbnailBounds = Rect(
-                                                position.x,
-                                                position.y,
-                                                position.x + size.width,
-                                                position.y + size.height
                                             )
-                                        }
-                                        .combinedClickable(
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    viewModel.toggleSelection(item)
-                                                } else {
-                                                    thumbnailBounds?.let { bounds ->
-                                                        viewModel.showMediaOverlay(
-                                                            mediaType = "photos",
-                                                            albumId = "all",
-                                                            selectedIndex = globalIndex,
-                                                            thumbnailBounds = MediaViewModel.ThumbnailBounds(
-                                                                startLeft = bounds.left,
-                                                                startTop = bounds.top,
-                                                                startWidth = bounds.width,
-                                                                startHeight = bounds.height
-                                                            )
-                                                        )
-                                                    } ?: run {
-                                                        // Fallback without bounds
-                                                        viewModel.showMediaOverlay(
-                                                            mediaType = "photos",
-                                                            albumId = "all",
-                                                            selectedIndex = globalIndex,
-                                                            thumbnailBounds = null
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            onLongClick = {
-                                                if (!isSelectionMode) {
-                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                                    viewModel.enterSelectionMode(item)
-                                                }
-                                            }
-                                        ),
-                                    contentScale = ContentScale.Crop
-                                )
-                                
-                                // Video indicator - pill-shaped with duration (always at bottom right)
-                                if (item.isVideo) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .background(
-                                                    color = Color.Black.copy(alpha = 0.75f),
-                                                    shape = RoundedCornerShape(50) // Pill shape
-                                                )
-                                                .padding(horizontal = 6.dp, vertical = 3.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                        ) {
-                                            FontIcon(
-                                                unicode = FontIcons.PlayArrow,
-                                                contentDescription = "Video",
-                                                size = 14.sp,
-                                                tint = Color.White
-                                            )
-                                            Text(
-                                                text = formatDuration(item.duration),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Medium
-                                                )
+                                        } ?: run {
+                                            viewModel.showMediaOverlay(
+                                                mediaType = "photos",
+                                                albumId = "all",
+                                                selectedIndex = globalIndex,
+                                                thumbnailBounds = null
                                             )
                                         }
                                     }
-                                }
-                                
-                                // Favorite indicator (gold star at top-left)
-                                if (item.isFavorite && !isSelectionMode) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
-                                    ) {
-                                        FontIcon(
-                                            unicode = FontIcons.Star,
-                                            contentDescription = "Favorited",
-                                            size = 16.sp,
-                                            tint = Color(0xFFFFD700)
-                                        )
+                                },
+                                onLongClick = {
+                                    if (!isSelectionMode) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                        viewModel.enterSelectionMode(item)
                                     }
-                                }
-                                
-                                // Selection indicator with dark accent color (render last so it's on top)
-                                if (isSelectionMode) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(8.dp)
-                                            .size(24.dp)
-                                            .background(
-                                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.7f),
-                                                CircleShape
-                                            )
-                                            .border(
-                                                width = if (isSelected) 0.dp else 2.dp,
-                                                color = if (isSelected) Color.Transparent else Color.Gray.copy(alpha = 0.5f),
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isSelected) {
-                                            FontIcon(
-                                                unicode = FontIcons.Done,
-                                                contentDescription = "Selected",
-                                                size = 16.sp,
-                                                tint = Color.White
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                                },
+                                showFavorite = true
+                            )
                         }
                     }
                     }
@@ -660,7 +551,16 @@ fun groupMediaByDate(media: List<MediaItem>): List<MediaGroup> {
                 SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(calendar.time)
             }
         }
-        MediaGroup(date, displayDate, items)
+        
+        // Find most common location for this date
+        val mostCommonLocation = items
+            .mapNotNull { it.location }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+        
+        MediaGroup(date, displayDate, items, mostCommonLocation)
     }.sortedByDescending { it.date }
 }
 
