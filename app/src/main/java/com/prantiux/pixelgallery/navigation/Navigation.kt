@@ -2,6 +2,7 @@
 
 package com.prantiux.pixelgallery.navigation
 
+import android.util.Log
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -31,6 +32,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,6 +95,44 @@ private fun popExitTransition() = fadeOut(
     targetOffsetY = { it / 15 },
     animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
 )
+
+/**
+ * Draws a solid background behind the system navigation bar.
+ * 
+ * WHY THIS WORKS:
+ * - WindowInsets.navigationBars provides the exact height of the system navigation bar
+ * - windowInsetsBottomHeight creates a Spacer with that exact height
+ * - Background modifier fills that space with solid color
+ * - Works on all Android versions (not specific to Android 15+)
+ * 
+ * IMPORTANT:
+ * - Must be placed BEHIND all other content in the root container
+ * - Uses MaterialTheme.colorScheme.surface for background
+ * - Logs dimensions for debugging
+ */
+@Composable
+fun NavigationBarBackground() {
+    val backgroundColor = MaterialTheme.colorScheme.surface
+    val density = LocalDensity.current
+    val navBarHeight = WindowInsets.navigationBars.getBottom(density)
+    
+    // Log for debugging
+    androidx.compose.runtime.LaunchedEffect(navBarHeight, backgroundColor) {
+        Log.d("NavigationBarBackground", "Drawing nav bar background: height=${navBarHeight}px, color=#${Integer.toHexString(backgroundColor.toArgb())}")
+        if (navBarHeight == 0) {
+            Log.w("NavigationBarBackground", "Navigation bar height is 0 - background will not be visible")
+        } else {
+            Log.i("NavigationBarBackground", "✓ Background drawable created: ${navBarHeight}px tall")
+        }
+    }
+    
+    Spacer(
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsBottomHeight(WindowInsets.navigationBars)
+            .background(backgroundColor)
+    )
+}
 
 @Composable
 fun PixelStyleFloatingNavBar(
@@ -272,6 +312,15 @@ fun AppNavigation(viewModel: MediaViewModel) {
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
+            // Global navigation bar background - MUST be first to render behind all content
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                NavigationBarBackground()
+            }
+            
             NavHost(
                 navController = navController,
                 startDestination = Screen.Photos.route,
