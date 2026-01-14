@@ -2,6 +2,9 @@
 
 package com.prantiux.pixelgallery.ui.components
 
+import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,7 +63,17 @@ fun MediaThumbnail(
     showFavorite: Boolean = true
 ) {
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
-    val borderWidth = 16.dp
+    
+    // Animate border width with Material 3 expressive easing
+    val borderWidth by animateDpAsState(
+        targetValue = if (isSelected) 16.dp else 0.dp,
+        animationSpec = tween(
+            durationMillis = 350,
+            easing = EaseInOutCubic
+        ),
+        label = "borderWidth"
+    )
+    
     val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
     
     // Use 12dp for selected inner image, keep original shape for outer border
