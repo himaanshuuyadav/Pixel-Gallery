@@ -174,17 +174,27 @@ fun AlbumsScreen(
  */
 @Composable
 fun AlbumsHeader() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
+    val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    
+    // Set status bar to match header background
+    com.prantiux.pixelgallery.ui.components.SetStatusBarColor(headerColor)
+    
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = headerColor
     ) {
-        Text(
-            text = "Albums",
-            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+        ) {
+            Text(
+                text = "Albums",
+                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+            )
+        }
     }
 }
 
