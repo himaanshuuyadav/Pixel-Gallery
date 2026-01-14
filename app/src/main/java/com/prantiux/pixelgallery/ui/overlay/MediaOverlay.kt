@@ -2,14 +2,19 @@
 
 package com.prantiux.pixelgallery.ui.overlay
 
+import android.app.Activity
 import android.app.WallpaperManager
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import android.view.View
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
@@ -47,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -62,6 +69,142 @@ import kotlin.math.roundToInt
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 
+/**
+ * ============================================================================
+ * SLOT-BASED ARCHITECTURE - PRODUCTION-GRADE GALLERY IMPLEMENTATION
+ * ============================================================================
+ * 
+ * This MediaOverlay uses a professional slot-based rendering system that
+ * eliminates image blinking during swipes - matching Google Photos/Samsung Gallery.
+ * 
+ * KEY CONCEPTS:
+ * 
+ * 1. THREE PERSISTENT SLOTS:
+ *    - Composables are NEVER destroyed during swipes
+ *    - Keyed by position (PREV, CENTER, NEXT) - not by media ID
+ *    - Only the MediaItem data inside slots changes
+ * 
+ * 2. SLOT ROTATION (Not Composable Recreation):
+ *    User swipes left:
+ *      Before: [PREV: img9] [CENTER: img10] [NEXT: img11]
+ *      After:  [PREV: img10] [CENTER: img11] [NEXT: img12]
+ *    
+ *    CRITICAL: The PREV, CENTER, NEXT composables stay alive!
+ *    Only their mediaItem property changes.
+ * 
+ * 3. WHY THIS ELIMINATES BLINKING:
+ *    - AsyncImage painters remain cached in memory
+ *    - No composable destruction = no black placeholder state
+ *    - Coil's image cache is preserved across rotations
+ * 
+ * 4. WHAT WAS REMOVED:
+ *    - displayIndex variable (dead code - never used)
+ *    - favoriteStates local cache (redundant - already in MediaItem)
+ *    - Index-driven rendering (prev/current/next recalculated each frame)
+ *    - Duplicate transform logic (video player had same code as images)
+ * 
+ * 5. PERFORMANCE IMPROVEMENTS:
+ *    - derivedStateOf prevents unnecessary recompositions
+ *    - Stable keys (by SlotPosition) optimize Compose diff algorithm
+ *    - Single source of truth for transforms (MediaSlot composable)
+ * 
+ * DEBUGGING:
+ * - Search logs for "SlotManager" to see slot rotation events
+ * - Each swipe logs: threshold check, animation, rotation, index update
+ * 
+ * @author Refactored to production-grade architecture (Jan 2026)
+ */
+
+// ============= SLOT-BASED ARCHITECTURE =============
+// Prevents image blinking by using stable composable slots
+
+/**
+ * Slot positions for the three-image carousel.
+ * These are STABLE - composables keyed by position never get destroyed.
+ */
+private enum class SlotPosition {
+    PREV,    // Left slot  (offset: -screenWidth)
+    CENTER,  // Center slot (offset: 0)
+    NEXT     // Right slot (offset: +screenWidth)
+}
+
+/**
+ * Represents a single image slot with its media data and position.
+ * Only the mediaItem changes during rotation - slot itself is stable.
+ */
+private data class ImageSlot(
+    val position: SlotPosition,
+    val mediaItem: MediaItem?,
+    val baseOffsetX: Float  // Fixed offset for this slot position
+)
+
+/**
+ * Manages the three-slot carousel and handles slot rotation.
+ * KEY INSIGHT: Slots never change, only their content rotates.
+ */
+private class SlotManager(
+    private val mediaItems: List<MediaItem>,
+    initialIndex: Int,
+    private val screenWidth: Float
+) {
+    var centerIndex by mutableIntStateOf(initialIndex)
+    
+    /**
+     * Returns the three slots with current media items.
+     * Called on every recomposition but slots themselves are stable.
+     */
+    fun getSlots(): List<ImageSlot> {
+        Log.d("SlotManager", "getSlots() - centerIndex=$centerIndex, total=${mediaItems.size}")
+        return listOf(
+            ImageSlot(
+                position = SlotPosition.PREV,
+                mediaItem = mediaItems.getOrNull(centerIndex - 1),
+                baseOffsetX = -screenWidth
+            ),
+            ImageSlot(
+                position = SlotPosition.CENTER,
+                mediaItem = mediaItems.getOrNull(centerIndex),
+                baseOffsetX = 0f
+            ),
+            ImageSlot(
+                position = SlotPosition.NEXT,
+                mediaItem = mediaItems.getOrNull(centerIndex + 1),
+                baseOffsetX = screenWidth
+            )
+        )
+    }
+    
+    /**
+     * Rotate slots forward (user swiped left, next image becomes center).
+     * This ONLY changes data, not composables.
+     */
+    fun rotateForward(): Boolean {
+        return if (centerIndex < mediaItems.size - 1) {
+            centerIndex++
+            Log.d("SlotManager", "rotateForward() - new centerIndex=$centerIndex")
+            true
+        } else {
+            Log.d("SlotManager", "rotateForward() - BLOCKED at end")
+            false
+        }
+    }
+    
+    /**
+     * Rotate slots backward (user swiped right, prev image becomes center).
+     */
+    fun rotateBackward(): Boolean {
+        return if (centerIndex > 0) {
+            centerIndex--
+            Log.d("SlotManager", "rotateBackward() - new centerIndex=$centerIndex")
+            true
+        } else {
+            Log.d("SlotManager", "rotateBackward() - BLOCKED at start")
+            false
+        }
+    }
+    
+    fun getCurrentItem(): MediaItem? = mediaItems.getOrNull(centerIndex)
+}
 
 // Gesture direction locking
 private enum class GestureMode {
@@ -94,21 +237,52 @@ fun MediaOverlay(
     val view = LocalView.current
     val context = LocalContext.current
     
+    // Set solid black colors for system bars during media overlay using modern API
+    SideEffect {
+        val window = (view.context as? Activity)?.window
+        if (window != null) {
+            // Use modern WindowInsetsController API
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.insetsController?.setSystemBarsAppearance(
+                    0,  // Dark content (light icons/text)
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or 
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                )
+            }
+            // Set scrim colors to transparent black for edge-to-edge
+            window.statusBarColor = android.graphics.Color.BLACK
+            window.navigationBarColor = android.graphics.Color.BLACK
+        }
+    }
+    
     // Check if this is trash mode
     val isTrashMode = overlayState.mediaType == "trash"
     
     val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
     val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
 
+    // ============= SLOT MANAGER - CORE OF BLINK-FREE ARCHITECTURE =============
+    val slotManager = remember(mediaItems) {
+        SlotManager(
+            mediaItems = mediaItems,
+            initialIndex = overlayState.selectedIndex,
+            screenWidth = screenWidth
+        )
+    }
+    
+    // Derive slots from manager - this updates when centerIndex changes
+    val slots by remember {
+        derivedStateOf { slotManager.getSlots() }
+    }
+    
+    // Current item from slot manager (not from index calculation)
+    val currentItem by remember {
+        derivedStateOf { slotManager.getCurrentItem() }
+    }
+
     // Animation progress
     var animationProgress by remember { mutableFloatStateOf(0f) }
     var isClosing by remember { mutableStateOf(false) }
-
-    // Current index state
-    var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
-    
-    // Track the index being displayed during transition (prevents blink)
-    var displayIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
     
     // Zoom state
     var scale by remember { mutableFloatStateOf(1f) }
@@ -135,11 +309,6 @@ fun MediaOverlay(
     var showControls by remember { mutableStateOf(false) }
     var showDetailsPanel by remember { mutableStateOf(false) }
     
-    // Favorite states - track which items are favorited
-    val favoriteStates = remember { mutableStateMapOf<Long, Boolean>().apply {
-        mediaItems.forEach { item -> put(item.id, item.isFavorite) }
-    } }
-    
     // Favorite message pill state
     var showFavoritePill by remember { mutableStateOf(false) }
     var favoriteMessage by remember { mutableStateOf("") }
@@ -149,32 +318,6 @@ fun MediaOverlay(
         if (showFavoritePill) {
             kotlinx.coroutines.delay(2000)
             showFavoritePill = false
-        }
-    }
-    
-    // System UI control for immersive mode
-    DisposableEffect(overlayState.isVisible, showControls) {
-        val window = (view.context as? android.app.Activity)?.window
-        window?.let {
-            if (showControls) {
-                // Show system bars
-                androidx.core.view.WindowInsetsControllerCompat(it, view).apply {
-                    show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                    systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-                }
-            } else {
-                // Hide system bars (immersive)
-                androidx.core.view.WindowInsetsControllerCompat(it, view).apply {
-                    hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                    systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                }
-            }
-        }
-        onDispose {
-            // Restore system bars on exit
-            window?.let {
-                androidx.core.view.WindowInsetsControllerCompat(it, view).show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            }
         }
     }
     
@@ -189,15 +332,16 @@ fun MediaOverlay(
     }
     
     // Update video playback when current item changes
-    LaunchedEffect(currentIndex, mediaItems) {
+    LaunchedEffect(currentItem) {
         exoPlayer?.let { player ->
-            val currentItem = mediaItems.getOrNull(currentIndex)
-            if (currentItem?.isVideo == true) {
-                val mediaItem = ExoMediaItem.fromUri(currentItem.uri)
+            val item = currentItem  // Local copy for smart cast
+            if (item?.isVideo == true) {
+                val mediaItem = ExoMediaItem.fromUri(item.uri)
                 player.setMediaItem(mediaItem)
                 player.prepare()
                 player.playWhenReady = true
                 isPlaying = true
+                Log.d("SlotManager", "Video playback started for: ${item.displayName}")
             } else {
                 player.pause()
                 player.clearMediaItems()
@@ -255,8 +399,8 @@ fun MediaOverlay(
     // Opening animation
     LaunchedEffect(overlayState.isVisible) {
         if (overlayState.isVisible && !isClosing) {
-            currentIndex = overlayState.selectedIndex
-            displayIndex = overlayState.selectedIndex
+            // Reset slot manager to initial index
+            slotManager.centerIndex = overlayState.selectedIndex
             animationProgress = 0f
             scale = 1f
             offsetX = 0f
@@ -267,6 +411,8 @@ fun MediaOverlay(
             verticalOffset.snapTo(0f)
             detailsPanelProgress = 0f
             showDetailsPanel = false
+            
+            Log.d("SlotManager", "Opening overlay at index ${overlayState.selectedIndex}")
             
             animate(
                 initialValue = 0f,
@@ -279,12 +425,12 @@ fun MediaOverlay(
         }
     }
 
-    // Current media item (use displayIndex to prevent blink during transitions)
-    val currentItem = mediaItems.getOrNull(displayIndex)
+    // Current media item for action handlers
+    val centerItem = currentItem
     
-    // Action handlers (defined after currentItem and closeOverlayWithAnimation)
+    // Action handlers (defined after centerItem and closeOverlayWithAnimation)
     val shareItem: () -> Unit = {
-        mediaItems.getOrNull(currentIndex)?.let { item ->
+        centerItem?.let { item ->
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = item.mimeType
                 putExtra(Intent.EXTRA_STREAM, item.uri)
@@ -295,7 +441,7 @@ fun MediaOverlay(
     }
     
     val deleteItem: () -> Unit = {
-        mediaItems.getOrNull(currentIndex)?.let { item ->
+        centerItem?.let { item ->
             if (isTrashMode) {
                 // In trash mode, trigger system delete dialog directly without closing overlay
                 viewModel.permanentlyDelete(context, item)
@@ -307,18 +453,18 @@ fun MediaOverlay(
                 viewModel.deleteSelectedItems(context) { success ->
                     if (success) {
                         // After successful deletion, slide to next item
-                        val nextIndex = if (currentIndex < mediaItems.size - 1) {
-                            currentIndex // Stay at same index, next item shifts into position
+                        val nextIndex = if (slotManager.centerIndex < mediaItems.size - 1) {
+                            slotManager.centerIndex // Stay at same index, next item shifts into position
                         } else {
-                            (currentIndex - 1).coerceAtLeast(0) // Go to previous if was last
+                            (slotManager.centerIndex - 1).coerceAtLeast(0) // Go to previous if was last
                         }
                         
                         // If no more items, close overlay
                         if (mediaItems.size <= 1) {
                             closeOverlayWithAnimation()
                         } else {
-                            // Slide to next item without closing
-                            displayIndex = nextIndex
+                            // Update slot manager index
+                            slotManager.centerIndex = nextIndex
                             viewModel.exitSelectionMode()
                         }
                     }
@@ -333,7 +479,7 @@ fun MediaOverlay(
     // Restore from trash action (only for trash mode)
     val restoreItem: () -> Unit = {
         if (isTrashMode) {
-            mediaItems.getOrNull(currentIndex)?.let { item ->
+            centerItem?.let { item ->
                 // Trigger system restore dialog directly
                 viewModel.restoreFromTrash(context, item)
                 closeOverlayWithAnimation()
@@ -342,7 +488,7 @@ fun MediaOverlay(
     }
     
     val editItem: () -> Unit = {
-        mediaItems.getOrNull(currentIndex)?.let { item ->
+        centerItem?.let { item ->
             val editIntent = Intent(Intent.ACTION_EDIT).apply {
                 setDataAndType(item.uri, item.mimeType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -356,7 +502,7 @@ fun MediaOverlay(
     }
     
     val setAsWallpaper: () -> Unit = {
-        mediaItems.getOrNull(currentIndex)?.let { item ->
+        centerItem?.let { item ->
             if (item.isVideo) {
                 Toast.makeText(context, "Cannot set video as wallpaper", Toast.LENGTH_SHORT).show()
                 return@let
@@ -374,11 +520,9 @@ fun MediaOverlay(
     }
     
     val toggleFavorite: () -> Unit = {
-        mediaItems.getOrNull(currentIndex)?.let { item ->
-            // Toggle the favorite state
-            val currentState = favoriteStates[item.id] ?: item.isFavorite
-            val newState = !currentState
-            favoriteStates[item.id] = newState
+        centerItem?.let { item ->
+            // Toggle the favorite state directly (no local cache needed)
+            val newState = !item.isFavorite
             
             // Persist to database via ViewModel
             viewModel.toggleFavorite(item.id, newState)
@@ -391,7 +535,7 @@ fun MediaOverlay(
     
     // Double-tap zoom handler (images only)
     val handleDoubleTap: () -> Unit = {
-        if (currentItem?.isVideo != true && animationProgress >= 1f && !isClosing) {
+        if (centerItem?.isVideo != true && animationProgress >= 1f && !isClosing) {
             scope.launch {
                 val targetScale = if (scale > 1f) 1f else 2f
                 val targetOffsetX = if (targetScale == 1f) 0f else offsetX
@@ -553,10 +697,10 @@ fun MediaOverlay(
                                 scope.launch {
                                     // Apply resistance at edges
                                     var adjustedDx = dx
-                                    if (currentIndex == 0 && horizontalOffset.value + dx > 0f) {
+                                    if (slotManager.centerIndex == 0 && horizontalOffset.value + dx > 0f) {
                                         // At first image, resist right swipe
                                         adjustedDx *= 0.15f
-                                    } else if (currentIndex == mediaItems.size - 1 && horizontalOffset.value + dx < 0f) {
+                                    } else if (slotManager.centerIndex == mediaItems.size - 1 && horizontalOffset.value + dx < 0f) {
                                         // At last image, resist left swipe
                                         adjustedDx *= 0.15f
                                     }
@@ -568,8 +712,6 @@ fun MediaOverlay(
                                     lastMoveTime = currentTime
                                     
                                     horizontalOffset.snapTo(horizontalOffset.value + adjustedDx)
-                                    // 5️⃣ LOG OFFSET STATE UPDATE
-                                    Log.d("GESTURE_DEBUG", "OFFSET UPDATE - horizontal=${horizontalOffset.value}, velocity=$velocityX")
                                 }
                             }
                             
@@ -634,10 +776,14 @@ fun MediaOverlay(
                             scope.launch {
                                 // Fast swipe or sufficient distance
                                 if (abs(horizontalOffset.value) > distanceThreshold || abs(velocityX) > velocityThreshold) {
-                                    // Complete gesture - animate then change image
-                                    val targetOffset = if (horizontalOffset.value < 0) -screenWidth else screenWidth
+                                    // Determine swipe direction
+                                    val swipingLeft = horizontalOffset.value < 0
                                     
-                                    // Animate slide to next/prev
+                                    Log.d("SlotManager", "Swipe threshold passed - offset=${horizontalOffset.value}, velocity=$velocityX, direction=${if (swipingLeft) "LEFT" else "RIGHT"}")
+                                    
+                                    // Animate to completion
+                                    val targetOffset = if (swipingLeft) -screenWidth else screenWidth
+                                    
                                     horizontalOffset.animateTo(
                                         targetValue = targetOffset,
                                         animationSpec = tween(
@@ -646,25 +792,38 @@ fun MediaOverlay(
                                         )
                                     )
                                     
-                                    // Update index AFTER animation completes
-                                    if (horizontalOffset.value < 0 && currentIndex < mediaItems.size - 1) {
-                                        currentIndex++
-                                        viewModel.updateOverlayIndex(currentIndex)
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SWITCH_IMAGE_NEXT (index=$currentIndex)")
-                                    } else if (horizontalOffset.value > 0 && currentIndex > 0) {
-                                        currentIndex--
-                                        viewModel.updateOverlayIndex(currentIndex)
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SWITCH_IMAGE_PREV (index=$currentIndex)")
+                                    Log.d("SlotManager", "Animation completed - rotating slots")
+                                    
+                                    // CRITICAL: Rotate slot data (not composables)
+                                    val rotated = if (swipingLeft) {
+                                        slotManager.rotateForward()
                                     } else {
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → THRESHOLD_PASSED_BUT_AT_BOUNDARY")
+                                        slotManager.rotateBackward()
                                     }
                                     
-                                    // Reset offset to center, then update display index to prevent blink
-                                    horizontalOffset.snapTo(0f)
-                                    displayIndex = currentIndex
+                                    if (rotated) {
+                                        // Update ViewModel index for external state
+                                        viewModel.updateOverlayIndex(slotManager.centerIndex)
+                                        
+                                        // Reset offset to 0 WITHOUT animation
+                                        // This makes the new center slot appear at screen center
+                                        horizontalOffset.snapTo(0f)
+                                        
+                                        Log.d("SlotManager", "Slot rotation complete - new center=${slotManager.centerIndex}")
+                                    } else {
+                                        // Hit boundary, snap back
+                                        Log.d("SlotManager", "Boundary hit - snapping back")
+                                        horizontalOffset.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
                                 } else {
-                                    Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK (offset too small)")
-                                    // Snap back to center with simple tween
+                                    Log.d("SlotManager", "Snap back - offset (${horizontalOffset.value}) below threshold ($distanceThreshold)")
+                                    // Snap back to center
                                     horizontalOffset.animateTo(
                                         targetValue = 0f,
                                         animationSpec = tween(
@@ -824,207 +983,82 @@ fun MediaOverlay(
                 .background(Color.Black.copy(alpha = backgroundAlpha))
         )
 
-        // Media image
-        currentItem?.let { item ->
-            // Previous image (if exists) - use displayIndex to prevent blink
-            val prevItem = mediaItems.getOrNull(displayIndex - 1)
-            val nextItem = mediaItems.getOrNull(displayIndex + 1)
-            
-            // Render previous, current, and next images for smooth horizontal swipe
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Previous image
-                prevItem?.let { prev ->
-                    AsyncImage(
-                        model = prev.uri,
-                        contentDescription = prev.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(end = 4.dp)  // Small gap between images
-                            .graphicsLayer {
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                this.translationX = horizontalOffset.value - screenWidth
-                            }
-                    )
-                }
-                
-                // Current image
-                AsyncImage(
-                    model = item.uri,
-                    contentDescription = item.displayName,
-                    contentScale = if (detailsPanelProgress > 0.05f) ContentScale.Crop else ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            // Double-tap detection for images (before single tap)
-                            detectTapGestures(
-                                onDoubleTap = { handleDoubleTap() },
-                                onTap = {
-                                    // Single tap to toggle UI or close details
-                                    if (animationProgress >= 1f && !isClosing) {
-                                        if (showDetailsPanel || detailsPanelProgress > 0.1f) {
-                                            // Close details panel
-                                            showDetailsPanel = false
-                                            scope.launch {
-                                                animate(
-                                                    initialValue = detailsPanelProgress,
-                                                    targetValue = 0f,
-                                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                                                ) { value, _ ->
-                                                    detailsPanelProgress = value
-                                                }
-                                                verticalOffset.snapTo(0f)
-                                                showControls = true
-                                            }
-                                        } else {
-                                            showControls = !showControls
-                                        }
+        // ============= SLOT-BASED RENDERING - NO COMPOSABLE RECREATION =============
+        // Media images rendered using stable slots
+        slots.forEach { slot ->
+            // KEY: Stable composable identity by position
+            // Only slot.mediaItem changes during rotation, not the composable itself
+            key(slot.position) {
+                MediaSlot(
+                    mediaItem = slot.mediaItem,
+                    baseOffsetX = slot.baseOffsetX,
+                    gestureOffsetX = horizontalOffset.value,
+                    detailsPanelProgress = detailsPanelProgress,
+                    animationProgress = animationProgress,
+                    isClosing = isClosing,
+                    closingFromSwipe = closingFromSwipe,
+                    openingTranslationX = openingTranslationX,
+                    openingTranslationY = openingTranslationY,
+                    openingScaleX = openingScaleX,
+                    openingScaleY = openingScaleY,
+                    verticalOffset = verticalOffset.value,
+                    closeProgress = closeProgress,
+                    gestureMode = gestureMode,
+                    screenWidth = screenWidth,
+                    screenHeight = screenHeight,
+                    thumbnailBounds = overlayState.thumbnailBounds,
+                    scale = scale,
+                    offsetX = offsetX,
+                    offsetY = offsetY,
+                    onTap = {
+                        // Single tap to toggle UI or close details
+                        if (animationProgress >= 1f && !isClosing) {
+                            if (showDetailsPanel || detailsPanelProgress > 0.1f) {
+                                // Close details panel
+                                showDetailsPanel = false
+                                scope.launch {
+                                    animate(
+                                        initialValue = detailsPanelProgress,
+                                        targetValue = 0f,
+                                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                    ) { value, _ ->
+                                        detailsPanelProgress = value
                                     }
-                                }
-                            )
-                        }
-                        .graphicsLayer {
-                            // Opening animation only
-                            if (animationProgress < 1f && !isClosing) {
-                                // Opening animation - thumbnail to fullscreen
-                                this.translationX = openingTranslationX
-                                this.translationY = openingTranslationY
-                                this.scaleX = openingScaleX
-                                this.scaleY = openingScaleY
-                                transformOrigin = TransformOrigin(0f, 0f)
-                            } else if (isClosing && !closingFromSwipe) {
-                                // Back button close - use opening animation in reverse
-                                this.translationX = openingTranslationX
-                                this.translationY = openingTranslationY
-                                this.scaleX = openingScaleX
-                                this.scaleY = openingScaleY
-                                transformOrigin = TransformOrigin(0f, 0f)
-                            } else if (closingFromSwipe && isClosing) {
-                                // Swipe close - animate from current state to thumbnail
-                                transformOrigin = TransformOrigin(0f, 0f)
-                                
-                                // Calculate target thumbnail bounds
-                                val thumbnailBounds = overlayState.thumbnailBounds
-                                if (thumbnailBounds != null) {
-                                    val targetX = thumbnailBounds.startLeft
-                                    val targetY = thumbnailBounds.startTop
-                                    val targetScaleX = thumbnailBounds.startWidth / screenWidth
-                                    val targetScaleY = thumbnailBounds.startHeight / screenHeight
-                                    
-                                    // Transition from current position to thumbnail
-                                    // animationProgress goes from 1 to 0, so closeProgress goes from 0 to 1
-                                    val closeTransitionProgress = 1f - animationProgress
-                                    
-                                    // Start from gesture offsets, end at thumbnail position
-                                    val startX = horizontalOffset.value
-                                    val startY = verticalOffset.value
-                                    val startScale = 1f - closeProgress * 0.15f
-                                    
-                                    this.translationX = startX + (targetX - startX) * closeTransitionProgress
-                                    this.translationY = startY + (targetY - startY) * closeTransitionProgress
-                                    this.scaleX = startScale + (targetScaleX - startScale) * closeTransitionProgress
-                                    this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
-                                } else {
-                                    // Fallback if no thumbnail bounds
-                                    this.translationX = horizontalOffset.value
-                                    this.translationY = verticalOffset.value
-                                    this.scaleX = 1f - closeProgress * 0.15f
-                                    this.scaleY = 1f - closeProgress * 0.15f
+                                    verticalOffset.snapTo(0f)
+                                    showControls = true
                                 }
                             } else {
-                                // Gesture-driven state (normal interaction)
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                
-                                // Details panel transition - image moves to top half
-                                val detailsActivationThreshold = 0.05f
-                                if (detailsPanelProgress > detailsActivationThreshold) {
-                                    // Calculate effective progress after activation threshold
-                                    val effectiveProgress = ((detailsPanelProgress - detailsActivationThreshold) / 
-                                        (1f - detailsActivationThreshold)).coerceIn(0f, 1f)
-                                    
-                                    // Image slides up, clamped to half screen max
-                                    val imageMaxOffset = screenHeight * 0.25f
-                                    this.translationY = -imageMaxOffset * effectiveProgress
-                                    transformOrigin = TransformOrigin(0.5f, 0f)
-                                } else if (detailsPanelProgress > 0f) {
-                                    // Details active but below threshold - no transformation yet
-                                    this.translationY = 0f
-                                } else {
-                                    // Horizontal swipe offset from Animatable
-                                    this.translationX = horizontalOffset.value
-                                    
-                                    // Subtle scale during horizontal swipe (for depth)
-                                    if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
-                                        val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
-                                        val scaleAmount = swipeProgress * 0.05f
-                                        this.scaleX = 1f - scaleAmount
-                                        this.scaleY = 1f - scaleAmount
-                                    }
-                                    
-                                    // Vertical offset from Animatable (only when details NOT active)
-                                    this.translationY = verticalOffset.value
-                                    
-                                    // Vertical close - scale down effect (1f → 0.85f)
-                                    if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                        val scaleAmount = 0.15f * closeProgress
-                                        this.scaleX = 1f - scaleAmount
-                                        this.scaleY = 1f - scaleAmount
-                                    }
-                                    
-                                    // Zoom transforms (only when zoomed)
-                                    if (scale > 1f) {
-                                        this.scaleX *= scale
-                                        this.scaleY *= scale
-                                        this.translationX += offsetX
-                                        this.translationY += offsetY
-                                    }
-                                }
+                                showControls = !showControls
                             }
                         }
-                        .pointerInput(Unit) {
-                            // Pinch zoom (highest priority) - disabled for videos
-                            if (item.isVideo != true) {
-                                detectTransformGestures { _, pan, zoom, _ ->
-                                    if (animationProgress >= 1f && !isClosing) {
-                                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                        scale = newScale
-                                        
-                                        if (scale > 1f) {
-                                            gestureMode = GestureMode.ZOOM
-                                            offsetX += pan.x
-                                            offsetY += pan.y
-                                        } else {
-                                            offsetX = 0f
-                                            offsetY = 0f
-                                            gestureMode = GestureMode.NONE
-                                        }
-                                    }
-                                }
+                    },
+                    onDoubleTap = handleDoubleTap,
+                    onZoomGesture = { centroid, panChange, zoomChange ->
+                        if (animationProgress >= 1f && !isClosing) {
+                            val newScale = (scale * zoomChange).coerceIn(1f, 5f)
+                            scale = newScale
+                            
+                            if (scale > 1f) {
+                                gestureMode = GestureMode.ZOOM
+                                offsetX += panChange.x
+                                offsetY += panChange.y
+                            } else {
+                                offsetX = 0f
+                                offsetY = 0f
+                                gestureMode = GestureMode.NONE
                             }
                         }
+                    }
                 )
-                
-                // Next image
-                nextItem?.let { next ->
-                    AsyncImage(
-                        model = next.uri,
-                        contentDescription = next.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(start = 4.dp)  // Small gap between images
-                            .graphicsLayer {
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                this.translationX = horizontalOffset.value + screenWidth
-                            }
-                    )
-                }
             }
         }
         
+        // Track fullscreen state across all components
+        var isAnyVideoFullscreen by remember { mutableStateOf(false) }
+        
         // Video player overlay (when video is playing)
         exoPlayer?.let { player ->
-            if (currentItem?.isVideo == true) {
+            if (centerItem?.isVideo == true) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1086,8 +1120,10 @@ fun MediaOverlay(
                 )
                 
                 // Custom video controls overlay
+                var isVideoFullscreen by remember { mutableStateOf(false) }
+                
                 AnimatedVisibility(
-                    visible = controlsVisible,
+                    visible = controlsVisible && !isVideoFullscreen,
                     enter = fadeIn(animationSpec = tween(300)),
                     exit = fadeOut(animationSpec = tween(300))
                 ) {
@@ -1102,15 +1138,19 @@ fun MediaOverlay(
                                 player.play()
                                 isPlaying = true
                             }
+                        },
+                        onFullscreenChange = { isFullscreen ->
+                            isVideoFullscreen = isFullscreen
+                            isAnyVideoFullscreen = isFullscreen
                         }
                     )
                 }
             }
         }
 }
-        // Top header (animated)
+        // Top header (animated) - hide during fullscreen
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible && !isAnyVideoFullscreen,
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier
@@ -1148,7 +1188,7 @@ fun MediaOverlay(
                         
                         // Date + Time
                         Text(
-                            text = currentItem?.let {
+                            text = centerItem?.let {
                                 val dateFormat = java.text.SimpleDateFormat("MMM d, yyyy • h:mm a", java.util.Locale.getDefault())
                                 dateFormat.format(java.util.Date(it.dateAdded * 1000))
                             } ?: "",
@@ -1330,7 +1370,7 @@ fun MediaOverlay(
                     } else {
                         // Normal mode: Star → Edit → Share → Delete
                         // Favorite (toggles between filled and unfilled star)
-                        val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
+                        val isFavorited = centerItem?.isFavorite ?: false
                         IconButton(onClick = toggleFavorite) {
                             FontIcon(
                                 unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
@@ -1463,7 +1503,7 @@ fun MediaOverlay(
                     
                     Spacer(modifier = Modifier.height(20.dp))
                     
-                    currentItem?.let { item ->
+                    centerItem?.let { item ->
                         // Progressive fade-in for metadata sections
                         val textAlpha = ((detailsPanelProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
                         
@@ -1541,7 +1581,7 @@ fun MediaOverlay(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        mediaItems.getOrNull(currentIndex)?.let { item ->
+                        centerItem?.let { item ->
                             try {
                                 val deleted = context.contentResolver.delete(item.uri, null, null)
                                 if (deleted > 0) {
@@ -1569,6 +1609,156 @@ fun MediaOverlay(
     }
 }
 
+// ============= MEDIA SLOT COMPOSABLE =============
+/**
+ * A single stable image slot that never gets destroyed during swipes.
+ * Only the mediaItem data changes during rotation.
+ * 
+ * @param mediaItem The media to display (null if slot is empty)
+ * @param baseOffsetX The fixed offset for this slot (-screenWidth, 0, or +screenWidth)
+ * @param gestureOffsetX The dynamic gesture offset applied to all slots
+ */
+@Composable
+private fun MediaSlot(
+    mediaItem: MediaItem?,
+    baseOffsetX: Float,
+    gestureOffsetX: Float,
+    detailsPanelProgress: Float,
+    animationProgress: Float,
+    isClosing: Boolean,
+    closingFromSwipe: Boolean,
+    openingTranslationX: Float,
+    openingTranslationY: Float,
+    openingScaleX: Float,
+    openingScaleY: Float,
+    verticalOffset: Float,
+    closeProgress: Float,
+    gestureMode: GestureMode,
+    screenWidth: Float,
+    screenHeight: Float,
+    thumbnailBounds: MediaViewModel.ThumbnailBounds?,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    onTap: () -> Unit,
+    onDoubleTap: () -> Unit,
+    onZoomGesture: (Offset, Offset, Float) -> Unit
+) {
+    // If slot is empty (at boundaries), don't render anything
+    if (mediaItem == null) return
+    
+    Log.d("SlotManager", "Rendering slot at baseOffset=$baseOffsetX for media: ${mediaItem.displayName}")
+    
+    AsyncImage(
+        model = mediaItem.uri,
+        contentDescription = mediaItem.displayName,
+        contentScale = if (detailsPanelProgress > 0.05f) ContentScale.Crop else ContentScale.Fit,
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { onTap() }
+                )
+            }
+            .graphicsLayer {
+                // Opening animation only
+                if (animationProgress < 1f && !isClosing) {
+                    // Opening animation - thumbnail to fullscreen
+                    this.translationX = openingTranslationX
+                    this.translationY = openingTranslationY
+                    this.scaleX = openingScaleX
+                    this.scaleY = openingScaleY
+                    transformOrigin = TransformOrigin(0f, 0f)
+                } else if (isClosing && !closingFromSwipe) {
+                    // Back button close - use opening animation in reverse
+                    this.translationX = openingTranslationX
+                    this.translationY = openingTranslationY
+                    this.scaleX = openingScaleX
+                    this.scaleY = openingScaleY
+                    transformOrigin = TransformOrigin(0f, 0f)
+                } else if (closingFromSwipe && isClosing) {
+                    // Swipe close - animate from current state to thumbnail
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    
+                    if (thumbnailBounds != null) {
+                        val targetX = thumbnailBounds.startLeft
+                        val targetY = thumbnailBounds.startTop
+                        val targetScaleX = thumbnailBounds.startWidth / screenWidth
+                        val targetScaleY = thumbnailBounds.startHeight / screenHeight
+                        
+                        val closeTransitionProgress = 1f - animationProgress
+                        
+                        val startX = gestureOffsetX
+                        val startY = verticalOffset
+                        val startScale = 1f - closeProgress * 0.15f
+                        
+                        this.translationX = startX + (targetX - startX) * closeTransitionProgress
+                        this.translationY = startY + (targetY - startY) * closeTransitionProgress
+                        this.scaleX = startScale + (targetScaleX - startScale) * closeTransitionProgress
+                        this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
+                    } else {
+                        this.translationX = gestureOffsetX
+                        this.translationY = verticalOffset
+                        this.scaleX = 1f - closeProgress * 0.15f
+                        this.scaleY = 1f - closeProgress * 0.15f
+                    }
+                } else {
+                    // Gesture-driven state (normal interaction)
+                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                    
+                    // Details panel transition
+                    val detailsActivationThreshold = 0.05f
+                    if (detailsPanelProgress > detailsActivationThreshold) {
+                        val effectiveProgress = ((detailsPanelProgress - detailsActivationThreshold) / 
+                            (1f - detailsActivationThreshold)).coerceIn(0f, 1f)
+                        
+                        val imageMaxOffset = screenHeight * 0.25f
+                        this.translationY = -imageMaxOffset * effectiveProgress
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                    } else {
+                        // BASE POSITION: Slot's fixed offset + gesture offset
+                        this.translationX = baseOffsetX + gestureOffsetX
+                        
+                        // Subtle scale during horizontal swipe
+                        if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
+                            val swipeProgress = (abs(gestureOffsetX) / screenWidth).coerceIn(0f, 1f)
+                            val scaleAmount = swipeProgress * 0.05f
+                            this.scaleX = 1f - scaleAmount
+                            this.scaleY = 1f - scaleAmount
+                        }
+                        
+                        // Vertical offset
+                        this.translationY = verticalOffset
+                        
+                        // Vertical close scale
+                        if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                            val scaleAmount = 0.15f * closeProgress
+                            this.scaleX = 1f - scaleAmount
+                            this.scaleY = 1f - scaleAmount
+                        }
+                        
+                        // Zoom transforms
+                        if (scale > 1f) {
+                            this.scaleX *= scale
+                            this.scaleY *= scale
+                            this.translationX += offsetX
+                            this.translationY += offsetY
+                        }
+                    }
+                }
+            }
+            .pointerInput(Unit) {
+                // Pinch zoom (disabled for videos)
+                if (mediaItem.isVideo != true) {
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        onZoomGesture(centroid, pan, zoom)
+                    }
+                }
+            }
+    )
+}
+
 /**
  * Custom video controls overlay with Material 3 design
  */
@@ -1576,12 +1766,22 @@ fun MediaOverlay(
 private fun CustomVideoControls(
     exoPlayer: ExoPlayer,
     isPlaying: Boolean,
-    onPlayPauseClick: () -> Unit
+    onPlayPauseClick: () -> Unit,
+    onFullscreenChange: (Boolean) -> Unit = {}
 ) {
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var videoEnded by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(exoPlayer.volume == 0f) }
+    var isFullscreen by remember { mutableStateOf(false) }
+    
+    val context = LocalContext.current
+    val activity = context as? Activity
+    
+    // Notify parent about fullscreen changes
+    LaunchedEffect(isFullscreen) {
+        onFullscreenChange(isFullscreen)
+    }
     
     // Calculate bottom bar height: IconButton (48dp) + vertical padding (12dp * 2) + navigation bars
     val density = LocalDensity.current
@@ -1598,14 +1798,24 @@ private fun CustomVideoControls(
         }
     }
     
-    // Animated button shape based on state with smooth transition
-    val buttonShape by animateFloatAsState(
+    // Animated button shape for play/pause with spring animation
+    val playButtonShape by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "buttonShape"
+        label = "playButtonShape"
+    )
+    
+    // Animated button shape for mute with spring animation
+    val muteButtonShape by animateFloatAsState(
+        targetValue = if (isMuted) 0f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "muteButtonShape"
     )
     
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1615,8 +1825,9 @@ private fun CustomVideoControls(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .padding(bottom = bottomBarHeight) // Attached to bottom bar, no spacing
-                .pointerInput(Unit) {
+                .pointerInput(isFullscreen) {
                     // Block ALL gestures in this area (video controls zone)
+                    // In fullscreen, also block to prevent any interaction
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
@@ -1658,7 +1869,7 @@ private fun CustomVideoControls(
                 // Play/Pause button and Time display - button left, time center
                 Box(modifier = Modifier.fillMaxWidth()) {
                     // Play/Pause/Restart button (left-aligned)
-                    val shape = if (buttonShape > 0.5f) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    val playShape = if (playButtonShape > 0.5f) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
                     
                     Surface(
                         onClick = {
@@ -1671,7 +1882,7 @@ private fun CustomVideoControls(
                                 onPlayPauseClick()
                             }
                         },
-                        shape = shape,
+                        shape = playShape,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                         modifier = Modifier
                             .size(36.dp)
@@ -1729,13 +1940,15 @@ private fun CustomVideoControls(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.align(Alignment.CenterEnd)
                     ) {
-                        // Mute/Unmute button with background like play/pause
+                        // Mute/Unmute button with animated rounded square background
+                        val muteShape = if (muteButtonShape > 0.5f) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                        
                         Surface(
                             onClick = {
                                 isMuted = !isMuted
                                 exoPlayer.volume = if (isMuted) 0f else 1f
                             },
-                            shape = CircleShape,
+                            shape = muteShape,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -1752,10 +1965,30 @@ private fun CustomVideoControls(
                             }
                         }
                         
-                        // Fullscreen button with background like play/pause
+                        // Fullscreen button
                         Surface(
                             onClick = {
-                                // TODO: Implement fullscreen toggle
+                                activity?.let { act ->
+                                    val window = act.window
+                                    val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+                                    
+                                    isFullscreen = !isFullscreen
+                                    if (isFullscreen) {
+                                        // Enter fullscreen landscape mode
+                                        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                        
+                                        // Hide system bars with modern API
+                                        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+                                        insetsController.systemBarsBehavior = 
+                                            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                                    } else {
+                                        // Exit fullscreen - restore portrait
+                                        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                        
+                                        // Show system bars
+                                        insetsController.show(WindowInsetsCompat.Type.systemBars())
+                                    }
+                                }
                             },
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
@@ -1766,8 +1999,8 @@ private fun CustomVideoControls(
                                 contentAlignment = Alignment.Center
                             ) {
                                 FontIcon(
-                                    unicode = FontIcons.Fullscreen,
-                                    contentDescription = "Fullscreen",
+                                    unicode = if (isFullscreen) FontIcons.FullscreenExit else FontIcons.Fullscreen,
+                                    contentDescription = if (isFullscreen) "Exit Fullscreen" else "Fullscreen",
                                     tint = Color.White,
                                     size = 20.sp
                                 )
