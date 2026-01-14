@@ -192,39 +192,45 @@ fun RecycleBinContent(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     
-                                    // Show checkbox only in selection mode
-                                    if (isSelectionMode) {
-                                        val allSelected = group.items.all { selectedItems.contains(it) }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(CircleShape)
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = if (allSelected) MaterialTheme.colorScheme.primary 
-                                                           else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    shape = CircleShape
-                                                )
-                                                .background(
-                                                    if (allSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                                    CircleShape
-                                                )
-                                                .clickable {
-                                                    if (allSelected) {
-                                                        viewModel.deselectTrashGroup(group.items)
-                                                    } else {
-                                                        viewModel.selectTrashGroup(group.items)
-                                                    }
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (allSelected) {
-                                                FontIcon(
-                                                    unicode = FontIcons.Done,
-                                                    contentDescription = "Selected",
-                                                    size = 16.sp,
-                                                    tint = Color.White
-                                                )
+                                    // Always reserve space for checkbox to prevent layout shift
+                                    Box(
+                                        modifier = Modifier.size(24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        // Show checkbox only in selection mode
+                                        if (isSelectionMode) {
+                                            val allSelected = group.items.all { selectedItems.contains(it) }
+                                            android.util.Log.d("RecycleBinScreen", "Selection mode - checkbox for ${group.daysLeftRange}: allSelected=$allSelected")
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clip(CircleShape)
+                                                    .border(
+                                                        width = 2.dp,
+                                                        color = if (allSelected) Color.Transparent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        shape = CircleShape
+                                                    )
+                                                    .background(
+                                                        if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f) else Color.Transparent,
+                                                        CircleShape
+                                                    )
+                                                    .clickable {
+                                                        if (allSelected) {
+                                                            viewModel.deselectTrashGroup(group.items)
+                                                        } else {
+                                                            viewModel.selectTrashGroup(group.items)
+                                                        }
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (allSelected) {
+                                                    FontIcon(
+                                                        unicode = FontIcons.Done,
+                                                        contentDescription = "Selected",
+                                                        size = 16.sp,
+                                                        tint = MaterialTheme.colorScheme.onPrimary
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -319,7 +325,13 @@ fun RecycleBinContent(
 
 // Group items by days left until expiry
 private fun groupByDaysLeft(items: List<MediaItem>): List<TrashedGroup> {
-    val currentTime = System.currentTimeMillis() / 1000
+    // Get midnight of current day (start of today)
+    val calendar = java.util.Calendar.getInstance()
+    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    calendar.set(java.util.Calendar.MINUTE, 0)
+    calendar.set(java.util.Calendar.SECOND, 0)
+    calendar.set(java.util.Calendar.MILLISECOND, 0)
+    val todayMidnight = calendar.timeInMillis / 1000
     
     val groups = mutableMapOf<Int, MutableList<MediaItem>>()
     
@@ -327,9 +339,17 @@ private fun groupByDaysLeft(items: List<MediaItem>): List<TrashedGroup> {
         // Use DATE_EXPIRES directly from MediaItem (already set by MediaStore)
         val expiryTime = item.dateExpires
         
-        // Calculate full days remaining using ceiling division to match Google Files
-        val secondsLeft = expiryTime - currentTime
-        val daysLeft = ((secondsLeft + (24 * 60 * 60 - 1)) / (24 * 60 * 60)).toInt().coerceAtLeast(0)
+        // Get midnight of expiry day
+        calendar.timeInMillis = expiryTime * 1000
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val expiryMidnight = calendar.timeInMillis / 1000
+        
+        // Calculate days between midnights
+        val secondsBetween = expiryMidnight - todayMidnight
+        val daysLeft = (secondsBetween / (24 * 60 * 60)).toInt().coerceAtLeast(0)
         
         groups.getOrPut(daysLeft) { mutableListOf() }.add(item)
     }
