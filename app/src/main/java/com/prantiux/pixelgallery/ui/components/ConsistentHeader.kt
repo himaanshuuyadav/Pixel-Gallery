@@ -2,15 +2,52 @@
 
 package com.prantiux.pixelgallery.ui.components
 
+import android.app.Activity
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.WindowCompat
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+
+private const val TAG = "SystemBars"
+
+/**
+ * Sets the status bar color to match the provided header background color
+ * and adjusts icon colors based on luminance
+ */
+@Composable
+fun SetStatusBarColor(color: Color) {
+    val view = LocalView.current
+    
+    SideEffect {
+        val window = (view.context as? Activity)?.window
+        if (window != null) {
+            val colorArgb = color.toArgb()
+            
+            // Set status bar color to match header
+            window.statusBarColor = colorArgb
+            Log.d(TAG, "SetStatusBarColor: #${Integer.toHexString(colorArgb)}")
+            
+            // Calculate luminance to determine if icons should be light or dark
+            val isLightStatusBar = ColorUtils.calculateLuminance(colorArgb) > 0.55
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = isLightStatusBar
+            Log.d(TAG, "isAppearanceLightStatusBars = $isLightStatusBar")
+        } else {
+            Log.w(TAG, "SetStatusBarColor: window is null, cannot set status bar color")
+        }
+    }
+}
 
 /**
  * Main tab header component with large title
@@ -22,9 +59,14 @@ fun MainTabHeader(
     modifier: Modifier = Modifier,
     actions: (@Composable () -> Unit)? = null
 ) {
+    val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    
+    // Set status bar to match header background
+    SetStatusBarColor(headerColor)
+    
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        color = headerColor
     ) {
         Column(
             modifier = Modifier
@@ -61,9 +103,14 @@ fun ConsistentHeader(
     onNavigateBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    
+    // Set status bar to match header background
+    SetStatusBarColor(headerColor)
+    
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        color = headerColor
     ) {
         Column(
             modifier = Modifier
