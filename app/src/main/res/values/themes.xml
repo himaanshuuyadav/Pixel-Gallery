@@ -1,3 +1,9 @@
 <resources>
-    <style name="Theme.PixelGallery" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.PixelGallery" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Solid black system bars - NOT transparent -->
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+        <!-- Disable window background that might cause transparency -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
 </resources>
