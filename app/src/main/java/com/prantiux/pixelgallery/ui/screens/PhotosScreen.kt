@@ -164,27 +164,10 @@ fun PhotosContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header - use same header component, just change title and add close button
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-            ) {
-                com.prantiux.pixelgallery.ui.components.MainTabHeader(
-                    title = if (isSelectionMode) "${selectedItems.size} selected" else "Gallery",
-                    actions = if (isSelectionMode) {
-                        {
-                            IconButton(onClick = { viewModel.exitSelectionMode() }) {
-                                FontIcon(
-                                    unicode = FontIcons.Close,
-                                    contentDescription = "Close selection",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    } else null
-                )
-            }
+            // Header - always show Gallery title
+            com.prantiux.pixelgallery.ui.components.MainTabHeader(
+                title = "Gallery"
+            )
             
             // Gallery content
             Box(
@@ -218,7 +201,7 @@ fun PhotosContent(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         groupedMedia.forEach { group ->
-                        // Date Header - spans all columns with checkbox or location when in selection mode
+                        // Date Header - spans all columns with checkbox when in selection mode
                         item(span = { GridItemSpan(3) }) {
                             Row(
                                 modifier = Modifier
@@ -235,47 +218,45 @@ fun PhotosContent(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 
-                                // Show location if available and not in selection mode
-                                if (!isSelectionMode && group.mostCommonLocation != null) {
-                                    Text(
-                                        text = group.mostCommonLocation,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                
-                                // Show checkbox in selection mode
-                                if (isSelectionMode) {
-                                    val allSelected = group.items.all { selectedItems.contains(it) }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .border(
-                                                width = 2.dp,
-                                                color = if (allSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                shape = CircleShape
-                                            )
-                                            .background(
-                                                if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f)  else Color.Transparent,
-                                                CircleShape
-                                            )
-                                            .clickable {
-                                                if (allSelected) {
-                                                    viewModel.deselectAllInGroup(group.items)
-                                                } else {
-                                                    viewModel.selectAllInGroup(group.items)
-                                                }
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (allSelected) {
-                                            FontIcon(
-                                                unicode = FontIcons.Done,
-                                                contentDescription = "Selected",
-                                                size = 16.sp,
-                                                tint = MaterialTheme.colorScheme.onPrimary
-                                            )
+                                // Always reserve space for checkbox to prevent layout shift
+                                Box(
+                                    modifier = Modifier.size(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelectionMode) {
+                                        // Show checkbox in selection mode
+                                        val allSelected = group.items.all { selectedItems.contains(it) }
+                                        Log.d("PhotosScreen", "Selection mode - checkbox for ${group.displayDate}: allSelected=$allSelected")
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = if (allSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    shape = CircleShape
+                                                )
+                                                .background(
+                                                    if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f)  else Color.Transparent,
+                                                    CircleShape
+                                                )
+                                                .clickable {
+                                                    if (allSelected) {
+                                                        viewModel.deselectAllInGroup(group.items)
+                                                    } else {
+                                                        viewModel.selectAllInGroup(group.items)
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (allSelected) {
+                                                FontIcon(
+                                                    unicode = FontIcons.Done,
+                                                    contentDescription = "Selected",
+                                                    size = 16.sp,
+                                                    tint = MaterialTheme.colorScheme.onPrimary
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -414,12 +395,12 @@ fun PhotosContent(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .offset(y = with(density) { displayOffset.toDp() })
-                        .width(if (isDraggingScrollbar) 24.dp else 12.dp)
+                        .width(if (isDraggingScrollbar) 24.dp else 6.dp)
                         .height(80.dp)
                         .alpha(if (scrollbarVisible || isDraggingScrollbar) 1f else 0f)
                         .background(
                             MaterialTheme.colorScheme.primary.copy(alpha = if (isDraggingScrollbar) 0.9f else 0.7f),
-                            RoundedCornerShape(if (isDraggingScrollbar) 12.dp else 8.dp)
+                            RoundedCornerShape(if (isDraggingScrollbar) 12.dp else 6.dp)
                         )
                         .pointerInput(Unit) {
                             detectDragGestures(
