@@ -50,6 +50,23 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
     
     // Real recent searches from DataStore
     val recentSearches by viewModel.recentSearches.collectAsState()
+    
+    // Material 3 Expressive: Adaptive loading with delay threshold
+    // Show loader only if search takes longer than 100ms (prevents flicker on fast searches)
+    var showLoadingIndicator by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(isSearching) {
+        if (isSearching) {
+            // Delay showing loader to prevent flicker on instant searches
+            kotlinx.coroutines.delay(100)
+            if (isSearching) {
+                showLoadingIndicator = true
+            }
+        } else {
+            // Hide immediately when results arrive
+            showLoadingIndicator = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refresh(context)
@@ -194,18 +211,17 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                         }
                     }
                 }
-                isSearching -> {
-                    // Show Material 3 expressive loading animation
+                // Material 3 Expressive: Adaptive loading with 100ms delay
+                // Shows LoadingIndicator only if search takes longer than 100ms
+                showLoadingIndicator && searchQuery.isNotBlank() -> {
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(48.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            strokeWidth = 4.dp
+                        com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
+                            size = 56.dp
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
