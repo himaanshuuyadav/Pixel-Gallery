@@ -75,6 +75,8 @@ fun AlbumsScreen(
     LaunchedEffect(Unit) {
         scope.launch {
             try {
+                // Material 3 Expressive: Album categorization takes 200ms-1s (SHORT operation)
+                // Show indeterminate loading indicator for proper user feedback
                 val repository = AlbumRepository(context)
                 val result = repository.loadCategorizedAlbums()
                 categorizedAlbums = result
@@ -88,12 +90,7 @@ fun AlbumsScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = MaterialTheme.colorScheme.primary
-            )
-        } else if (categorizedAlbums == null || categorizedAlbums!!.mainAlbums.isEmpty()) {
+        if (categorizedAlbums == null || categorizedAlbums!!.mainAlbums.isEmpty()) {
             Text(
                 text = "No albums found",
                 modifier = Modifier.align(Alignment.Center),
