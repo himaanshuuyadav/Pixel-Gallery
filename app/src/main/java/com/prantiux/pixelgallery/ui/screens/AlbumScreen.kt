@@ -140,6 +140,16 @@ fun AlbumDetailScreen(
             }
         }
         
+        // Selection Top Bar - overlay above navigation bar
+        com.prantiux.pixelgallery.ui.components.SelectionTopBar(
+            isVisible = isSelectionMode,
+            selectedCount = selectedItems.size,
+            onCancelSelection = { viewModel.exitSelectionMode() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
+        )
+        
         // Floating navbar for selection mode
         if (isSelectionMode) {
             val navBarInset = androidx.compose.foundation.layout.WindowInsets.navigationBars
@@ -151,6 +161,7 @@ fun AlbumDetailScreen(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(bottom = bottomPadding),
+                isSelectionMode = true,
                 items = listOf(
                     com.prantiux.pixelgallery.navigation.NavItem("copy", "Copy to", FontIcons.Copy),
                     com.prantiux.pixelgallery.navigation.NavItem("share", "Share", FontIcons.Share),
