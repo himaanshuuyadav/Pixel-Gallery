@@ -84,6 +84,9 @@ dependencies {
     // Material3 - REQUIRED MINIMUM ALPHA VERSION (EXPLICIT)
     implementation("androidx.compose.material3:material3:1.5.0-alpha11")
     implementation("androidx.compose.material3:material3-window-size-class:1.5.0-alpha11")
+    
+    // Graphics Shapes for LoadingIndicator polygons (Material 3 Expressive)
+    implementation("androidx.graphics:graphics-shapes:1.0.1")
 
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.8.5")
