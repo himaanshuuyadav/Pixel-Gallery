@@ -130,6 +130,15 @@ fun PhotosContent(
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
     
+    // Track if initial load is complete - only show loader on first load or after delete/refresh
+    var hasLoadedOnce by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(images, videos, isLoading) {
+        if ((images.isNotEmpty() || videos.isNotEmpty()) && !isLoading) {
+            hasLoadedOnce = true
+        }
+    }
+    
     // Combine images and videos
     val allMedia = remember(images, videos) {
         (images + videos).sortedByDescending { it.dateAdded }
@@ -178,8 +187,13 @@ fun PhotosContent(
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     )
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                // Material 3 Expressive: Show LoadingIndicator only on first load or after grid refresh
+                // Not shown on tab switches to prevent unnecessary visual noise
+                if (isLoading && !hasLoadedOnce) {
+                    com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        size = 48.dp
+                    )
                 } else if (allMedia.isEmpty()) {
                     Text(
                         "No media found",
@@ -505,6 +519,16 @@ fun PhotosContent(
                 )
             }
         }
+        
+        // Selection Top Bar - overlay above navigation bar
+        com.prantiux.pixelgallery.ui.components.SelectionTopBar(
+            isVisible = isSelectionMode,
+            selectedCount = selectedItems.size,
+            onCancelSelection = { viewModel.exitSelectionMode() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
+        )
     }
 }
 
