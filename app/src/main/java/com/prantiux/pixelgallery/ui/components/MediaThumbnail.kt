@@ -2,9 +2,8 @@
 
 package com.prantiux.pixelgallery.ui.components
 
-import androidx.compose.animation.core.EaseInOutCubic
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import android.util.Log
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,15 +63,40 @@ fun MediaThumbnail(
 ) {
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     
-    // Animate border width with Material 3 expressive easing
-    val borderWidth by animateDpAsState(
+    // Log selection state changes for debugging
+    LaunchedEffect(isSelected) {
+        Log.d("MediaThumbnail", "[${item.id}] Selection changed: isSelected=$isSelected")
+    }
+    
+    // Different animation for selection vs deselection for better visibility
+    val borderWidthRaw by animateDpAsState(
         targetValue = if (isSelected) 16.dp else 0.dp,
-        animationSpec = tween(
-            durationMillis = 350,
-            easing = EaseInOutCubic
-        ),
-        label = "borderWidth"
+        animationSpec = if (isSelected) {
+            // Selection: Fast spring with bounce
+            spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
+        } else {
+            // Deselection: Slower tween for more visible animation (350ms like selection)
+            tween(
+                durationMillis = 350,
+                easing = FastOutSlowInEasing
+            )
+        },
+        label = "borderWidth",
+        finishedListener = { finalValue ->
+            Log.d("MediaThumbnail", "[${item.id}] Border animation finished: finalValue=$finalValue, isSelected=$isSelected")
+        }
     )
+    
+    // CRITICAL: Clamp to 0dp minimum to prevent negative border width
+    val borderWidth = borderWidthRaw.coerceAtLeast(0.dp)
+    
+    // Log current border width for debugging
+    LaunchedEffect(borderWidth) {
+        Log.d("MediaThumbnail", "[${item.id}] Border width changed: ${borderWidth.value}dp (raw=${borderWidthRaw.value}dp, target=${if (isSelected) 16 else 0}dp)")
+    }
     
     val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
     
