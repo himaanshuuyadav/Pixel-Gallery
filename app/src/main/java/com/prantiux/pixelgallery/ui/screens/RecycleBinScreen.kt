@@ -136,8 +136,13 @@ fun RecycleBinContent(
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     )
             ) {
+                // Material 3 Expressive: Show LoadingIndicator for MediaStore trashed query (200ms-1s)
+                // Uses shape-morphing expressive motion for SHORT operations
                 if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        size = 48.dp
+                    )
                 } else if (trashedItems.isEmpty()) {
                     Column(
                         modifier = Modifier.align(Alignment.Center),
@@ -284,6 +289,17 @@ fun RecycleBinContent(
             }
         }
         
+        // Selection Top Bar - overlay above navigation bar
+        val navBarHeight = calculateFloatingNavBarHeight()
+        com.prantiux.pixelgallery.ui.components.SelectionTopBar(
+            isVisible = isSelectionMode,
+            selectedCount = selectedItems.size,
+            onCancelSelection = { viewModel.exitTrashSelectionMode() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
+        )
+        
         // Floating navbar for selection mode
         if (isSelectionMode) {
             val navBarInset = androidx.compose.foundation.layout.WindowInsets.navigationBars
@@ -295,6 +311,7 @@ fun RecycleBinContent(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(bottom = bottomPadding),
+                isSelectionMode = true,
                 items = listOf(
                     NavItem("restore", "Restore", FontIcons.Refresh),
                     NavItem("delete", "Delete", FontIcons.Delete)
