@@ -193,6 +193,8 @@ class MediaViewModel : ViewModel() {
         }
         
         viewModelScope.launch {
+            // Material 3 Expressive: MediaStore queries take 200ms-2s (SHORT operation)
+            // Show indeterminate loading indicator for proper user feedback
             _isLoading.value = true
             try {
                 // Load all media
@@ -397,7 +399,9 @@ class MediaViewModel : ViewModel() {
         _searchQuery.value = query
         _isSearching.value = true
         
-        // Debounce search by 300ms
+        // Material 3 Expressive: 300ms debounce prevents unnecessary searches during typing.
+        // Search execution is instant (<100ms) on cached data, so no visible loader needed.
+        // The isSearching state is kept for potential future network-based search.
         searchJob = viewModelScope.launch {
             delay(300)
             
@@ -480,6 +484,8 @@ class MediaViewModel : ViewModel() {
     // Recycle Bin functions
     fun loadTrashedItems(context: Context) {
         viewModelScope.launch {
+            // Material 3 Expressive: Loading trashed items takes 200ms-1s (SHORT operation)
+            // Show indeterminate loading indicator for proper user feedback
             _isLoadingTrash.value = true
             _trashedItems.value = repository.loadTrashedItems(context)
             _isLoadingTrash.value = false
