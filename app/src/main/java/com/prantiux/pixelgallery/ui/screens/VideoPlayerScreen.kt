@@ -164,6 +164,8 @@ fun VideoPlayerScreen(
         )
         
         // Loading indicator
+        // Material 3 Expressive: Video buffering varies (SHORT to LONG operation, network-dependent)
+        // Show indeterminate CircularProgressIndicator during buffering state
         if (isBuffering) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
