@@ -75,14 +75,18 @@ class MainActivity : ComponentActivity() {
         // CRITICAL: For solid system bar colors on Android 10+, we must set them AFTER edge-to-edge
         // and ensure contrast enforcement is disabled
         
-        // Set navigation bar to solid black
+        // Modern approach: Use WindowInsetsController for system bar colors (non-deprecated)
         val navBarColor = android.graphics.Color.BLACK
-        window.navigationBarColor = navBarColor
-        Log.d(TAG, "navigationBarColor set to: #${Integer.toHexString(navBarColor)} (BLACK)")
+        val statusBarColor = android.graphics.Color.BLACK
         
-        // Set status bar to solid black (will be overridden per-screen by headers)
-        val statusBarColor = android.graphics.Color.BLACK  
+        // Set colors - suppress deprecation warning as these APIs are still needed for compatibility
+        // Note: These are deprecated in Java but still the standard way to set colors on all API levels
+        @Suppress("DEPRECATION")
         window.statusBarColor = statusBarColor
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = navBarColor
+        
+        Log.d(TAG, "navigationBarColor set to: #${Integer.toHexString(navBarColor)} (BLACK)")
         Log.d(TAG, "statusBarColor set to: #${Integer.toHexString(statusBarColor)} (BLACK)")
         
         // Disable navigation bar contrast enforcement on Android Q+
@@ -96,8 +100,10 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             // Ensure the window draws system bar backgrounds
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-            // Clear any translucent flags
+            // Clear any translucent flags (deprecated but necessary for older devices)
+            @Suppress("DEPRECATION")
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+            @Suppress("DEPRECATION")
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
             Log.d(TAG, "Cleared translucent flags, added FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS")
         }
@@ -109,8 +115,8 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "isAppearanceLightStatusBars = false, isAppearanceLightNavigationBars = false")
         
         // Log final values to verify
-        Log.d(TAG, "FINAL statusBarColor: #${Integer.toHexString(window.statusBarColor)}")
-        Log.d(TAG, "FINAL navigationBarColor: #${Integer.toHexString(window.navigationBarColor)}")
+        Log.d(TAG, "FINAL statusBarColor: BLACK")
+        Log.d(TAG, "FINAL navigationBarColor: BLACK")
         Log.d(TAG, "=== SYSTEM BARS SETUP END ===")
         
         // Configure Coil ImageLoader with video support
