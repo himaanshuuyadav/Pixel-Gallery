@@ -139,7 +139,8 @@ fun PixelStyleFloatingNavBar(
     items: List<NavItem>,
     selectedRoute: String,
     onItemSelected: (NavItem) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSelectionMode: Boolean = false
 ) {
     // Get system navigation bar inset
     val navBarInsetPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -152,7 +153,11 @@ fun PixelStyleFloatingNavBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(72.dp),
-            shape = RoundedCornerShape(26.dp),
+            shape = if (isSelectionMode) {
+                RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 26.dp, bottomEnd = 26.dp)
+            } else {
+                RoundedCornerShape(26.dp)
+            },
             color = MaterialTheme.colorScheme.surfaceContainer, // Make pill fully opaque
             tonalElevation = 0.dp,
             shadowElevation = 4.dp
@@ -473,7 +478,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
             if (overlayState.mediaType != "trash") {
                 androidx.compose.ui.layout.Layout(
                     content = {
-                        MediaOverlay(
+                        com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
                             viewModel = viewModel,
                             overlayState = overlayState,
                             mediaItems = overlayMediaItems,
@@ -521,6 +526,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
                             translationY = (1f - navBarAnimProgress) * 200f
                             alpha = navBarAnimProgress
                         },
+                    isSelectionMode = isSelectionMode && currentRoute == Screen.Photos.route,
                     items = if (isSelectionMode && currentRoute == Screen.Photos.route) {
                         listOf(
                             NavItem("copy", "Copy to", FontIcons.Copy),
