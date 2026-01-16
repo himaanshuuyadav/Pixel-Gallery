@@ -113,6 +113,9 @@ dependencies {
     // Palette API for dynamic color extraction
     implementation("androidx.palette:palette-ktx:1.0.0")
     
+    // ExifInterface for GPS metadata extraction
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    
     // DataStore for preferences
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     
