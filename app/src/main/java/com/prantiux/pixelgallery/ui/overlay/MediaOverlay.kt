@@ -68,6 +68,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import com.prantiux.pixelgallery.ui.components.DetailsBottomSheetContent
 
 
 // Gesture direction locking
@@ -154,7 +155,7 @@ fun MediaOverlay(
     var gestureMode by remember { mutableStateOf(GestureMode.NONE) }
     val horizontalOffset = remember { Animatable(0f) }
     val verticalOffset = remember { Animatable(0f) }
-    var detailsPanelProgress by remember { mutableFloatStateOf(0f) }
+    val detailsPanelProgress = remember { Animatable(0f) }
     
     // Track if closing from downward swipe (to prevent opening animation reversal)
     var closingFromSwipe by remember { mutableStateOf(false) }
@@ -267,7 +268,7 @@ fun MediaOverlay(
             closingFromSwipe = false
             horizontalOffset.snapTo(0f)
             verticalOffset.snapTo(0f)
-            detailsPanelProgress = 0f
+            detailsPanelProgress.snapTo(0f)
             showDetailsPanel = false
             
             animate(
@@ -461,8 +462,7 @@ fun MediaOverlay(
         !isClosing && 
         animationProgress >= 0.8f && 
         gestureMode != GestureMode.VERTICAL_UP &&
-        !showDetailsPanel &&
-        detailsPanelProgress < 0.05f &&  // Hide controls when details start emerging
+        detailsPanelProgress.value < 0.01f &&  // Hide immediately when details gesture starts
         closeProgress == 0f  // Hide controls when downward swipe starts
 
     Box(
@@ -576,23 +576,23 @@ fun MediaOverlay(
                             }
                             
                             GestureMode.VERTICAL_UP -> {
-                                // REMOVED: change.consume()
                                 scope.launch {
                                     verticalOffset.snapTo(verticalOffset.value + dy)
                                     Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
-                                }
-                                // Calculate progress based on drag distance (threshold = 50% screen height)
-                                val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
-                                detailsPanelProgress = progress
-                                
-                                // Immediately fade out controls as user starts dragging
-                                if (progress > 0.05f) {
-                                    showControls = false
+                                    
+                                    // Calculate progress based on drag distance (threshold = 50% screen height)
+                                    val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
+                                    detailsPanelProgress.snapTo(progress)
+                                    
+                                    // Hide controls immediately when gesture starts
+                                    if (progress > 0.01f) {
+                                        showControls = false
+                                    }
                                 }
                             }
                             
                             GestureMode.VERTICAL_DOWN -> {
-                                // REMOVED: change.consume()
+                                // Track downward swipe for overlay close
                                 scope.launch {
                                     verticalOffset.snapTo(verticalOffset.value + dy)
                                     Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
@@ -603,18 +603,6 @@ fun MediaOverlay(
                                 val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
                                 velocityY = (dy / deltaTime) * 1000f  // pixels per second
                                 lastMoveTime = currentTime
-                                
-                                // If details panel is active, close it first (don't close image)
-                                if (detailsPanelProgress > 0f) {
-                                    // Reverse animate details panel based on drag
-                                    val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
-                                    detailsPanelProgress = (1f - progress).coerceIn(0f, 1f)
-                                    
-                                    // Fade controls back in as details close
-                                    if (detailsPanelProgress < 0.3f) {
-                                        showControls = true
-                                    }
-                                }
                             }
                             
                             else -> {
@@ -686,35 +674,33 @@ fun MediaOverlay(
                         }
                         
                         GestureMode.VERTICAL_UP -> {
-                            Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=$detailsPanelProgress, threshold=0.5f")
+                            Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=${detailsPanelProgress.value}, threshold=0.3f")
                             
                             scope.launch {
-                                if (detailsPanelProgress >= 0.5f) {
+                                if (detailsPanelProgress.value >= 0.3f) {
                                     // Complete gesture - lock details panel at 100%
                                     showDetailsPanel = true
                                     Log.d("GESTURE_DEBUG", "GESTURE RESULT → LOCK_DETAILS")
-                                    animate(
-                                        initialValue = detailsPanelProgress,
-                                        targetValue = 1f,
-                                        animationSpec = spring(
-                                            stiffness = Spring.StiffnessMediumLow,
-                                            dampingRatio = Spring.DampingRatioNoBouncy
+                                    launch {
+                                        detailsPanelProgress.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
                                         )
-                                    ) { value, _ ->
-                                        detailsPanelProgress = value
                                     }
                                 } else {
                                     // Snap back - collapse details
                                     Log.d("GESTURE_DEBUG", "GESTURE RESULT → COLLAPSE_DETAILS")
-                                    animate(
-                                        initialValue = detailsPanelProgress,
-                                        targetValue = 0f,
-                                        animationSpec = spring(
-                                            stiffness = Spring.StiffnessMediumLow,
-                                            dampingRatio = Spring.DampingRatioNoBouncy
+                                    launch {
+                                        detailsPanelProgress.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
                                         )
-                                    ) { value, _ ->
-                                        detailsPanelProgress = value
                                     }
                                     showDetailsPanel = false
                                     showControls = true
@@ -725,40 +711,38 @@ fun MediaOverlay(
                         
                         GestureMode.VERTICAL_DOWN -> {
                             // If details panel is active, close it first
-                            if (detailsPanelProgress > 0f) {
-                                Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=$detailsPanelProgress, velocityY=$velocityY")
+                            if (detailsPanelProgress.value > 0f) {
+                                Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=${detailsPanelProgress.value}, velocityY=$velocityY")
                                 
                                 scope.launch {
-                                    // Close if EITHER: dragged > 50% OR fast downward swipe
-                                    val shouldCloseDetails = detailsPanelProgress < 0.5f || velocityY > 1200f
+                                    // Close if dragged down significantly OR fast downward swipe
+                                    val shouldCloseDetails = detailsPanelProgress.value < 0.7f || velocityY > 1200f
                                     
                                     if (shouldCloseDetails) {
                                         // Complete close - collapse details
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_DETAILS (progress=$detailsPanelProgress, velocity=$velocityY)")
-                                        animate(
-                                            initialValue = detailsPanelProgress,
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                stiffness = Spring.StiffnessMediumLow,
-                                                dampingRatio = Spring.DampingRatioNoBouncy
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_DETAILS")
+                                        launch {
+                                            detailsPanelProgress.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
                                             )
-                                        ) { value, _ ->
-                                            detailsPanelProgress = value
                                         }
                                         showDetailsPanel = false
                                         showControls = true
                                     } else {
                                         // Snap back to open
                                         Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK_TO_OPEN_DETAILS")
-                                        animate(
-                                            initialValue = detailsPanelProgress,
-                                            targetValue = 1f,
-                                            animationSpec = spring(
-                                                stiffness = Spring.StiffnessMediumLow,
-                                                dampingRatio = Spring.DampingRatioNoBouncy
+                                        launch {
+                                            detailsPanelProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
                                             )
-                                        ) { value, _ ->
-                                            detailsPanelProgress = value
                                         }
                                         showDetailsPanel = true
                                     }
@@ -773,7 +757,7 @@ fun MediaOverlay(
                                 scope.launch {
                                     if (abs(verticalOffset.value) > threshold) {
                                         // Complete close gesture - animate to thumbnail
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_OVERLAY (return to thumbnail)")
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_OVERLAY")
                                         closingFromSwipe = true
                                         isClosing = true
                                         showControls = false
@@ -802,7 +786,7 @@ fun MediaOverlay(
                                         onDismiss()
                                     } else {
                                         // Snap back
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK (close cancelled)")
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → SNAP_BACK")
                                         verticalOffset.animateTo(
                                             targetValue = 0f,
                                             animationSpec = spring(
@@ -863,7 +847,7 @@ fun MediaOverlay(
                 AsyncImage(
                     model = item.uri,
                     contentDescription = item.displayName,
-                    contentScale = if (detailsPanelProgress > 0.05f) ContentScale.Crop else ContentScale.Fit,
+                    contentScale = if (detailsPanelProgress.value > 0.01f) ContentScale.Crop else ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(Unit) {
@@ -871,25 +855,9 @@ fun MediaOverlay(
                             detectTapGestures(
                                 onDoubleTap = { handleDoubleTap() },
                                 onTap = {
-                                    // Single tap to toggle UI or close details
+                                    // Single tap to toggle UI
                                     if (animationProgress >= 1f && !isClosing) {
-                                        if (showDetailsPanel || detailsPanelProgress > 0.1f) {
-                                            // Close details panel
-                                            showDetailsPanel = false
-                                            scope.launch {
-                                                animate(
-                                                    initialValue = detailsPanelProgress,
-                                                    targetValue = 0f,
-                                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                                                ) { value, _ ->
-                                                    detailsPanelProgress = value
-                                                }
-                                                verticalOffset.snapTo(0f)
-                                                showControls = true
-                                            }
-                                        } else {
-                                            showControls = !showControls
-                                        }
+                                        showControls = !showControls
                                     }
                                 }
                             )
@@ -946,20 +914,12 @@ fun MediaOverlay(
                                 // Gesture-driven state (normal interaction)
                                 transformOrigin = TransformOrigin(0.5f, 0.5f)
                                 
-                                // Details panel transition - image moves to top half
-                                val detailsActivationThreshold = 0.05f
-                                if (detailsPanelProgress > detailsActivationThreshold) {
-                                    // Calculate effective progress after activation threshold
-                                    val effectiveProgress = ((detailsPanelProgress - detailsActivationThreshold) / 
-                                        (1f - detailsActivationThreshold)).coerceIn(0f, 1f)
-                                    
-                                    // Image slides up, clamped to half screen max
-                                    val imageMaxOffset = screenHeight * 0.25f
-                                    this.translationY = -imageMaxOffset * effectiveProgress
+                                // Details panel active - move image to upper half
+                                if (detailsPanelProgress.value > 0.01f) {
+                                    // Image slides up to fit in upper half
+                                    val imageOffset = screenHeight * 0.25f * detailsPanelProgress.value
+                                    this.translationY = -imageOffset
                                     transformOrigin = TransformOrigin(0.5f, 0f)
-                                } else if (detailsPanelProgress > 0f) {
-                                    // Details active but below threshold - no transformation yet
-                                    this.translationY = 0f
                                 } else {
                                     // Horizontal swipe offset from Animatable
                                     this.translationX = horizontalOffset.value
@@ -972,7 +932,7 @@ fun MediaOverlay(
                                         this.scaleY = 1f - scaleAmount
                                     }
                                     
-                                    // Vertical offset from Animatable (only when details NOT active)
+                                    // Vertical offset from Animatable
                                     this.translationY = verticalOffset.value
                                     
                                     // Vertical close - scale down effect (1f → 0.85f)
@@ -1068,17 +1028,22 @@ fun MediaOverlay(
                                 this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
                             }
                         } else {
+                            // Gesture-driven state (normal interaction)
                             transformOrigin = TransformOrigin(0.5f, 0.5f)
-                            val detailsActivationThreshold = 0.05f
-                            if (detailsPanelProgress > detailsActivationThreshold) {
-                                val effectiveProgress = ((detailsPanelProgress - detailsActivationThreshold) / 
-                                    (1f - detailsActivationThreshold)).coerceIn(0f, 1f)
-                                val imageMaxOffset = screenHeight * 0.25f
-                                this.translationY = -imageMaxOffset * effectiveProgress
+                            
+                            // Details panel active - move video to upper half
+                            if (detailsPanelProgress.value > 0.01f) {
+                                val imageOffset = screenHeight * 0.25f * detailsPanelProgress.value
+                                this.translationY = -imageOffset
                                 transformOrigin = TransformOrigin(0.5f, 0f)
                             } else {
+                                // Horizontal swipe offset
                                 this.translationX = horizontalOffset.value
+                                
+                                // Vertical offset
                                 this.translationY = verticalOffset.value
+                                
+                                // Vertical close - scale down effect
                                 if (gestureMode == GestureMode.VERTICAL_DOWN) {
                                     val scaleAmount = 0.15f * closeProgress
                                     this.scaleX = 1f - scaleAmount
@@ -1291,8 +1256,15 @@ fun MediaOverlay(
                                     onClick = {
                                         menuExpanded = false
                                         showDetailsPanel = true
+                                        showControls = false
                                         scope.launch {
-                                            detailsPanelProgress = 1f
+                                            detailsPanelProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
                                         }
                                     }
                                 )
@@ -1430,126 +1402,61 @@ fun MediaOverlay(
                 }
             }
         }
-
-        // Details panel - Material 3 Expressive, bottom half
-        if (detailsPanelProgress > 0f) {
+        
+        // Gesture-driven Details Panel - slides up from bottom
+        if (detailsPanelProgress.value > 0f) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .fillMaxHeight(0.5f * detailsPanelProgress)
+                    .fillMaxHeight((0.6f * detailsPanelProgress.value).coerceAtMost(0.6f))  // Max 60% height
                     .graphicsLayer {
-                        // Slide up from bottom, driven by progress
-                        val slideOffset = (1f - detailsPanelProgress) * size.height
+                        // No gap at bottom - directly attached
+                        val slideOffset = (1f - detailsPanelProgress.value) * size.height
                         translationY = slideOffset
-                        alpha = detailsPanelProgress.coerceIn(0f, 1f)
+                        alpha = detailsPanelProgress.value.coerceIn(0f, 1f)
+                    }
+                    .pointerInput(Unit) {
+                        // Consume all touch events inside the panel to prevent parent gesture handling
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                // Consume all pointer events to prevent overlay gestures
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
                     },
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = MaterialTheme.shapes.extraLarge.copy(
-                    bottomStart = CornerSize(0.dp),
-                    bottomEnd = CornerSize(0.dp)
+                shape = RoundedCornerShape(
+                    topStart = 28.dp,
+                    topEnd = 28.dp,
+                    bottomStart = 0.dp,
+                    bottomEnd = 0.dp
                 ),
                 tonalElevation = 3.dp
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 20.dp)
-                ) {
-                    // Drag handle
-                    Box(
-                        modifier = Modifier
-                            .width(48.dp)
-                            .height(4.dp)
-                            .background(
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                shape = MaterialTheme.shapes.extraLarge
-                            )
-                            .align(Alignment.CenterHorizontally)
-                    )
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
-                    
-                    // Details title
-                    Text(
-                        text = "Details",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.graphicsLayer {
-                            alpha = ((detailsPanelProgress - 0.3f) / 0.7f).coerceIn(0f, 1f)
+                currentItem?.let { item ->
+                    DetailsBottomSheetContent(
+                        mediaItem = item,
+                        onEditMetadata = {
+                            scope.launch {
+                                detailsPanelProgress.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                                showDetailsPanel = false
+                                showControls = true
+                            }
+                            editItem()
                         }
                     )
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
-                    currentItem?.let { item ->
-                        // Progressive fade-in for metadata sections
-                        val textAlpha = ((detailsPanelProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
-                        
-                        Column(
-                            modifier = Modifier.graphicsLayer { alpha = textAlpha },
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            // File name
-                            DetailSection(
-                                label = "Name",
-                                value = item.displayName
-                            )
-                            
-                            // Date and time
-                            DetailSection(
-                                label = "Date",
-                                value = java.text.SimpleDateFormat(
-                                    "MMMM dd, yyyy • h:mm a",
-                                    java.util.Locale.getDefault()
-                                ).format(java.util.Date(item.dateAdded * 1000))
-                            )
-                            
-                            // GPS Location (if available)
-                            if (item.latitude != null && item.longitude != null) {
-                                DetailSection(
-                                    label = "GPS Location",
-                                    value = "${item.latitude}, ${item.longitude}"
-                                )
-                            } else if (item.location != null) {
-                                DetailSection(
-                                    label = "Location",
-                                    value = item.location
-                                )
-                            }
-                            
-                            // File Location
-                            if (item.path.contains("/")) {
-                                val locationPath = item.path.substringBeforeLast("/")
-                                DetailSection(
-                                    label = "File Location",
-                                    value = locationPath
-                                )
-                            }
-                            
-                            // Size
-                            val sizeKB = item.size / 1024
-                            val sizeFormatted = if (sizeKB > 1024) {
-                                String.format("%.2f MB", sizeKB / 1024.0)
-                            } else {
-                                "$sizeKB KB"
-                            }
-                            DetailSection(
-                                label = "Size",
-                                value = sizeFormatted
-                            )
-                            
-                            // Full path
-                            DetailSection(
-                                label = "Path",
-                                value = item.path
-                            )
-                        }
-                    }
                 }
             }
         }
+
     }
     
     // Delete confirmation dialog (only for older Android versions, not for trash)
