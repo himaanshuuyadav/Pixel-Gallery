@@ -6,12 +6,39 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.MediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
 
 class MediaRepository(private val context: Context) {
+
+    /**
+     * Extract GPS coordinates from image EXIF data
+     * MediaStore GPS columns are deprecated and return null on Android 10+
+     */
+    private fun getGpsCoordinates(uri: Uri): Pair<Double?, Double?> {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                val exif = ExifInterface(inputStream)
+                val latLong = FloatArray(2)
+                val hasGps = exif.getLatLong(latLong)
+                
+                if (hasGps) {
+                    android.util.Log.d("MediaRepository", "✓✓ EXIF GPS found: (${latLong[0]}, ${latLong[1]})")
+                    Pair(latLong[0].toDouble(), latLong[1].toDouble())
+                } else {
+                    android.util.Log.d("MediaRepository", "✗ No EXIF GPS data")
+                    Pair(null, null)
+                }
+            } ?: Pair(null, null)
+        } catch (e: IOException) {
+            android.util.Log.e("MediaRepository", "Error reading EXIF: ${e.message}")
+            Pair(null, null)
+        }
+    }
 
     suspend fun loadImages(): List<MediaItem> = withContext(Dispatchers.IO) {
         val items = mutableListOf<MediaItem>()
@@ -31,9 +58,7 @@ class MediaRepository(private val context: Context) {
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Images.Media.WIDTH,
             MediaStore.Images.Media.HEIGHT,
-            MediaStore.Images.Media.DATA,
-            MediaStore.Images.Media.LATITUDE,
-            MediaStore.Images.Media.LONGITUDE
+            MediaStore.Images.Media.DATA
         )
 
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
@@ -55,8 +80,6 @@ class MediaRepository(private val context: Context) {
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
             val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
-            val latitudeColumn = cursor.getColumnIndex(MediaStore.Images.Media.LATITUDE)
-            val longitudeColumn = cursor.getColumnIndex(MediaStore.Images.Media.LONGITUDE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -70,18 +93,17 @@ class MediaRepository(private val context: Context) {
                 val height = cursor.getInt(heightColumn)
                 val path = cursor.getString(dataColumn) ?: ""
                 
-                // Fetch GPS coordinates
-                val latitude = if (latitudeColumn != -1 && !cursor.isNull(latitudeColumn)) {
-                    cursor.getDouble(latitudeColumn)
-                } else null
-                val longitude = if (longitudeColumn != -1 && !cursor.isNull(longitudeColumn)) {
-                    cursor.getDouble(longitudeColumn)
-                } else null
-
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     id
                 )
+                
+                // Get GPS from EXIF data (MediaStore GPS columns are deprecated)
+                android.util.Log.d("MediaRepository", "=== IMAGE GPS DEBUG ===")
+                android.util.Log.d("MediaRepository", "Image: $name")
+                android.util.Log.d("MediaRepository", "Path: $path")
+                
+                val (latitude, longitude) = getGpsCoordinates(contentUri)
 
                 items.add(
                     MediaItem(
@@ -125,9 +147,7 @@ class MediaRepository(private val context: Context) {
             MediaStore.Video.Media.DURATION,
             MediaStore.Video.Media.WIDTH,
             MediaStore.Video.Media.HEIGHT,
-            MediaStore.Video.Media.DATA,
-            MediaStore.Video.Media.LATITUDE,
-            MediaStore.Video.Media.LONGITUDE
+            MediaStore.Video.Media.DATA
         )
 
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
@@ -150,8 +170,6 @@ class MediaRepository(private val context: Context) {
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.HEIGHT)
             val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
-            val latitudeColumn = cursor.getColumnIndex(MediaStore.Video.Media.LATITUDE)
-            val longitudeColumn = cursor.getColumnIndex(MediaStore.Video.Media.LONGITUDE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -166,18 +184,17 @@ class MediaRepository(private val context: Context) {
                 val height = cursor.getInt(heightColumn)
                 val path = cursor.getString(dataColumn) ?: ""
                 
-                // Fetch GPS coordinates
-                val latitude = if (latitudeColumn != -1 && !cursor.isNull(latitudeColumn)) {
-                    cursor.getDouble(latitudeColumn)
-                } else null
-                val longitude = if (longitudeColumn != -1 && !cursor.isNull(longitudeColumn)) {
-                    cursor.getDouble(longitudeColumn)
-                } else null
-
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     id
                 )
+                
+                // Get GPS from EXIF data (MediaStore GPS columns are deprecated)
+                android.util.Log.d("MediaRepository", "=== VIDEO GPS DEBUG ===")
+                android.util.Log.d("MediaRepository", "Video: $name")
+                android.util.Log.d("MediaRepository", "Path: $path")
+                
+                val (latitude, longitude) = getGpsCoordinates(contentUri)
 
                 items.add(
                     MediaItem(
