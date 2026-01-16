@@ -91,6 +91,8 @@ object FontIcons {
     const val Edit = "\ue3c9"  // edit icon
     const val Copy = "\ue173"  // content_copy icon
     const val Move = "\uf1ff"  // drive_file_move icon
+    const val Folder = "\ue2c7"  // folder icon
+    const val LocationOn = "\ue0c8"  // location_on icon (filled pin)
     
     // Empty States
     const val SearchOff = "\uea76"
