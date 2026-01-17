@@ -124,6 +124,13 @@ class ImageLabelWorker(
                         Log.d(TAG, "  ✅ Labels: $labelText")
                         successCount++
                         
+                        // Update progress after each successful labeling
+                        val currentProcessed = processedIds.size + successCount
+                        setProgressAsync(workDataOf(
+                            KEY_PROGRESS to currentProcessed,
+                            KEY_TOTAL to totalImages
+                        ))
+                        
                         // Recycle bitmap
                         bitmap.recycle()
                     } else {
