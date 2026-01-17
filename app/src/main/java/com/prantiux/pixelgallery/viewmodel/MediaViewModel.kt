@@ -4,11 +4,14 @@ import android.content.Context
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.data.AppDatabase
 import com.prantiux.pixelgallery.data.FavoriteEntity
 import com.prantiux.pixelgallery.data.MediaRepository
 import com.prantiux.pixelgallery.data.RecentSearchesDataStore
+import com.prantiux.pixelgallery.ml.ImageLabelWorker
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
 import com.prantiux.pixelgallery.model.MediaItem
@@ -181,6 +184,9 @@ class MediaViewModel : ViewModel() {
                 // Ignore errors
             }
         }
+        
+        // Observe WorkManager for ML labeling progress
+        observeLabelingProgress(context)
         
         // Load recent searches from DataStore (collect in viewModelScope - will cancel when VM is cleared)
         viewModelScope.launch {
@@ -675,6 +681,30 @@ class MediaViewModel : ViewModel() {
     }
     
     // ML Labeling functions
+    private fun observeLabelingProgress(context: Context) {
+        val workManager = WorkManager.getInstance(context)
+        viewModelScope.launch {
+            workManager.getWorkInfosByTagFlow("image_labeling").collect { workInfoList ->
+                val runningWork = workInfoList.firstOrNull { 
+                    it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED 
+                }
+                
+                _isLabelingInProgress.value = runningWork != null
+                
+                // Get progress from any work (running or completed)
+                val latestWork = workInfoList.firstOrNull()
+                if (latestWork != null) {
+                    val progress = latestWork.progress.getInt(ImageLabelWorker.KEY_PROGRESS, 0)
+                    val total = latestWork.progress.getInt(ImageLabelWorker.KEY_TOTAL, 0)
+                    
+                    if (total > 0) {
+                        _labelingProgress.value = Pair(progress, total)
+                    }
+                }
+            }
+        }
+    }
+    
     fun updateLabelingProgress(processed: Int, total: Int) {
         _labelingProgress.value = Pair(processed, total)
     }
