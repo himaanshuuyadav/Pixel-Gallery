@@ -90,14 +90,17 @@ fun AlbumsScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (categorizedAlbums == null || categorizedAlbums!!.mainAlbums.isEmpty()) {
+        // Only show "no albums" if loading is complete AND still no albums
+        // This prevents showing "no albums" briefly during initial load
+        if (!isLoading && (categorizedAlbums == null || categorizedAlbums!!.mainAlbums.isEmpty())) {
             Text(
                 text = "No albums found",
                 modifier = Modifier.align(Alignment.Center),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-        } else {
+        } else if (!isLoading && categorizedAlbums != null) {
+            val albums = categorizedAlbums!!
             val navBarHeight = calculateFloatingNavBarHeight()
             
             Column(modifier = Modifier.fillMaxSize()) {
@@ -116,7 +119,7 @@ fun AlbumsScreen(
                     // Main Album Tabs (rectangular pills) with View All button
                     item {
                         MainAlbumTabs(
-                            albums = categorizedAlbums!!.mainAlbums,
+                            albums = albums.mainAlbums,
                             selectedIndex = selectedMainAlbumIndex,
                             onTabSelected = { index ->
                                 selectedMainAlbumIndex = index
@@ -126,27 +129,27 @@ fun AlbumsScreen(
                     }
 
                     // Highlighted section for selected album
-                    if (selectedMainAlbumIndex < categorizedAlbums!!.mainAlbums.size) {
+                    if (selectedMainAlbumIndex < albums.mainAlbums.size) {
                         item {
                             HighlightAlbumSection(
-                                albums = categorizedAlbums!!.mainAlbums,
+                                albums = albums.mainAlbums,
                                 viewModel = viewModel,
                                 currentTabIndex = selectedMainAlbumIndex,
                                 onTabChange = { newIndex ->
                                     selectedMainAlbumIndex = newIndex
                                 },
                                 onViewAllClick = { 
-                                    onNavigateToAlbum(categorizedAlbums!!.mainAlbums[selectedMainAlbumIndex].id) 
+                                    onNavigateToAlbum(albums.mainAlbums[selectedMainAlbumIndex].id) 
                                 }
                             )
                         }
                     }
 
                     // Other Albums Section
-                    if (categorizedAlbums!!.otherAlbums.isNotEmpty()) {
+                    if (albums.otherAlbums.isNotEmpty()) {
                         item {
                             OtherAlbumsSection(
-                                albums = categorizedAlbums!!.otherAlbums,
+                                albums = albums.otherAlbums,
                                 onAlbumClick = onNavigateToAlbum
                             )
                         }
