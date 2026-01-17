@@ -51,6 +51,32 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
     // Real recent searches from DataStore
     val recentSearches by viewModel.recentSearches.collectAsState()
     
+    // ML Labeling progress state
+    val isLabelingInProgress by viewModel.isLabelingInProgress.collectAsState()
+    val labelingProgress by viewModel.labelingProgress.collectAsState()
+    val isCharging = remember { 
+        mutableStateOf(com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context))
+    }
+    
+    // Track next batch status
+    var nextBatchStatus by remember { mutableStateOf("Checking...") }
+    
+    // Update charging state and calculate next batch timing
+    LaunchedEffect(Unit) {
+        while (true) {
+            isCharging.value = com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context)
+            
+            // Simple next batch calculation based on current state
+            nextBatchStatus = when {
+                isLabelingInProgress -> "Running now"
+                labelingProgress?.let { (p, t) -> p < t } == true -> "Retry in ~10s"
+                else -> "Complete"
+            }
+            
+            kotlinx.coroutines.delay(5000) // Check every 5 seconds
+        }
+    }
+    
     // Material 3 Expressive: Adaptive loading with delay threshold
     // Show loader only if search takes longer than 100ms (prevents flicker on fast searches)
     var showLoadingIndicator by remember { mutableStateOf(false) }
@@ -139,6 +165,270 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
                     ) {
+                        // ML LABELING DEBUG PANEL - Completely Redesigned
+                        item {
+                            val progress = labelingProgress?.let { (processed, total) ->
+                                if (total > 0) processed.toFloat() / total.toFloat() else 0f
+                            } ?: 0f
+                            
+                            val isComplete = labelingProgress?.let { (processed, total) ->
+                                processed == total && total > 0
+                            } ?: false
+                            
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                color = if (isComplete) 
+                                    MaterialTheme.colorScheme.primaryContainer 
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(16.dp),
+                                shadowElevation = 4.dp
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp)
+                                ) {
+                                    // Header with icon and title
+                                    Row(
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = if (isComplete) "✅" else "🤖",
+                                                style = MaterialTheme.typography.headlineSmall
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = "ML Image Labeling",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                        // Status Badge
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = when {
+                                                isComplete -> MaterialTheme.colorScheme.primary
+                                                isLabelingInProgress -> MaterialTheme.colorScheme.tertiary
+                                                else -> MaterialTheme.colorScheme.surfaceContainer
+                                            }
+                                        ) {
+                                            Text(
+                                                text = when {
+                                                    isComplete -> "DONE"
+                                                    isLabelingInProgress -> "RUNNING"
+                                                    else -> "IDLE"
+                                                },
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = when {
+                                                    isComplete -> MaterialTheme.colorScheme.onPrimary
+                                                    isLabelingInProgress -> MaterialTheme.colorScheme.onTertiary
+                                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                                }
+                                            )
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    
+                                    // Large Progress Display
+                                    Row(
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.Bottom,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Images Labeled",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = labelingProgress?.let { (processed, total) ->
+                                                    "$processed / $total"
+                                                } ?: "0 / 0",
+                                                style = MaterialTheme.typography.headlineMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        // Large Percentage
+                                        Text(
+                                            text = "${(progress * 100).toInt()}%",
+                                            style = MaterialTheme.typography.displaySmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (isComplete) 
+                                                MaterialTheme.colorScheme.primary 
+                                            else MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    
+                                    // Progress Bar with better visibility
+                                    LinearProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(4.dp)),
+                                        color = if (isComplete) 
+                                            MaterialTheme.colorScheme.primary 
+                                        else MaterialTheme.colorScheme.tertiary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceContainer
+                                    )
+                                    
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    
+                                    HorizontalDivider()
+                                    
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    
+                                    // Detailed Status Grid
+                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        // Charging Status
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "⚡",
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Device Charging",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            Text(
+                                                text = if (isCharging.value) "Yes" else "No",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isCharging.value) 
+                                                    MaterialTheme.colorScheme.tertiary
+                                                else MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                        
+                                        // ML Engine Status
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "🧠",
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "ML Engine",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            Text(
+                                                text = if (isLabelingInProgress) "Active" else "Standby",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isLabelingInProgress) 
+                                                    MaterialTheme.colorScheme.tertiary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        
+                                        // Completion Status
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = if (isComplete) "✅" else "📊",
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Status",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            Text(
+                                                text = when {
+                                                    isComplete -> "Labeling Complete!"
+                                                    isLabelingInProgress -> "Processing..."
+                                                    labelingProgress?.first ?: 0 > 0 -> "In Progress"
+                                                    else -> "Not Started"
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = when {
+                                                    isComplete -> MaterialTheme.colorScheme.primary
+                                                    isLabelingInProgress -> MaterialTheme.colorScheme.tertiary
+                                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                                }
+                                            )
+                                        }
+                                        
+                                        // Next Batch Schedule (only show if not complete)
+                                        if (!isComplete) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(
+                                                        text = "⏰",
+                                                        style = MaterialTheme.typography.titleMedium
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Next Batch",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                                Text(
+                                                    text = nextBatchStatus,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isLabelingInProgress) 
+                                                        MaterialTheme.colorScheme.tertiary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Info message
+                                    if (!isComplete) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
+                                        ) {
+                                            Text(
+                                                text = "💡 ML runs in background without affecting app performance",
+                                                modifier = Modifier.padding(12.dp),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Recent Searches
                         if (recentSearches.isNotEmpty()) {
                             item {
