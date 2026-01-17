@@ -11,11 +11,14 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
 import com.prantiux.pixelgallery.navigation.AppNavigation
 import com.prantiux.pixelgallery.ui.theme.PixelGalleryTheme
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 private const val TAG = "MainActivity"
 
@@ -128,6 +131,37 @@ class MainActivity : ComponentActivity() {
         coil.Coil.setImageLoader(imageLoader)
         
         viewModel.initialize(this)
+        
+        // Initialize ML-based image labeling scheduler (non-blocking, runs in background)
+        // This does NOT affect gallery loading performance
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Schedule periodic work (runs when charging)
+            com.prantiux.pixelgallery.ml.ImageLabelScheduler.schedulePeriodicLabeling(this@MainActivity)
+            
+            // Trigger immediate labeling if device is charging
+            com.prantiux.pixelgallery.ml.ImageLabelScheduler.triggerImmediateLabelingIfCharging(this@MainActivity)
+        }
+        
+        // Observe labeling work progress (updates UI state)
+        com.prantiux.pixelgallery.ml.ImageLabelScheduler.getLabelingWorkInfo(this).observe(this) { workInfoList ->
+            val workInfo = workInfoList?.firstOrNull()
+            if (workInfo != null) {
+                val isRunning = workInfo.state == androidx.work.WorkInfo.State.RUNNING
+                viewModel.setLabelingInProgress(isRunning)
+                
+                if (isRunning) {
+                    val progress = workInfo.progress.getInt(
+                        com.prantiux.pixelgallery.ml.ImageLabelWorker.KEY_PROGRESS, 0
+                    )
+                    val total = workInfo.progress.getInt(
+                        com.prantiux.pixelgallery.ml.ImageLabelWorker.KEY_TOTAL, 0
+                    )
+                    if (total > 0) {
+                        viewModel.updateLabelingProgress(progress, total)
+                    }
+                }
+            }
+        }
         
         // Set the trash request launcher in the ViewModel
         viewModel.setTrashRequestLauncher { pendingIntent ->
