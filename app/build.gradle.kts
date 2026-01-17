@@ -127,6 +127,15 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+    
+    // ML Kit - On-device Image Labeling (100% offline)
+    implementation("com.google.mlkit:image-labeling:17.0.8")
+    
+    // Kotlin Coroutines Play Services (for ML Kit Task.await())
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+    
+    // WorkManager for background ML processing
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     // Core
     implementation("androidx.core:core-ktx:1.15.0")
