@@ -98,19 +98,15 @@ class MediaRepository(private val context: Context) {
                     id
                 )
                 
-                // Get GPS from EXIF data (MediaStore GPS columns are deprecated)
-                android.util.Log.d("MediaRepository", "=== IMAGE GPS DEBUG ===")
-                android.util.Log.d("MediaRepository", "Image: $name")
-                android.util.Log.d("MediaRepository", "Path: $path")
-                
-                val (latitude, longitude) = getGpsCoordinates(contentUri)
+                // GPS reading removed to improve gallery load performance
+                // GPS data can be read on-demand when viewing individual images
 
                 items.add(
                     MediaItem(
                         id = id,
                         uri = contentUri,
-                        latitude = latitude,
-                        longitude = longitude,
+                        latitude = null,
+                        longitude = null,
                         displayName = name,
                         dateAdded = dateAdded,
                         size = size,
@@ -189,12 +185,8 @@ class MediaRepository(private val context: Context) {
                     id
                 )
                 
-                // Get GPS from EXIF data (MediaStore GPS columns are deprecated)
-                android.util.Log.d("MediaRepository", "=== VIDEO GPS DEBUG ===")
-                android.util.Log.d("MediaRepository", "Video: $name")
-                android.util.Log.d("MediaRepository", "Path: $path")
-                
-                val (latitude, longitude) = getGpsCoordinates(contentUri)
+                // GPS reading removed to improve gallery load performance
+                // GPS data can be read on-demand when viewing individual videos
 
                 items.add(
                     MediaItem(
@@ -211,8 +203,8 @@ class MediaRepository(private val context: Context) {
                         width = width,
                         height = height,
                         path = path,
-                        latitude = latitude,
-                        longitude = longitude
+                        latitude = null,
+                        longitude = null
                     )
                 )
             }
