@@ -130,14 +130,17 @@ fun PhotosContent(
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
     
-    // Track if initial load is complete - only show loader on first load or after delete/refresh
+    // Track if initial load is complete - only show loader on FIRST load after permission grant
     var hasLoadedOnce by remember { mutableStateOf(false) }
     
-    LaunchedEffect(images, videos, isLoading) {
-        if ((images.isNotEmpty() || videos.isNotEmpty()) && !isLoading) {
+    LaunchedEffect(images, videos) {
+        if (images.isNotEmpty() || videos.isNotEmpty()) {
             hasLoadedOnce = true
         }
     }
+    
+    // Only show loading on very first load when list is empty
+    val showLoading = isLoading && !hasLoadedOnce && images.isEmpty() && videos.isEmpty()
     
     // Combine images and videos
     val allMedia = remember(images, videos) {
@@ -187,20 +190,22 @@ fun PhotosContent(
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     )
             ) {
-                // Material 3 Expressive: Show LoadingIndicator only on first load or after grid refresh
-                // Not shown on tab switches to prevent unnecessary visual noise
-                if (isLoading && !hasLoadedOnce) {
+                // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
+                // Never show on subsequent navigations to prevent UI jank
+                // Show loading FIRST, only show "no media" after loading completes
+                if (showLoading) {
                     com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
                         modifier = Modifier.align(Alignment.Center),
                         size = 48.dp
                     )
-                } else if (allMedia.isEmpty()) {
+                } else if (!isLoading && allMedia.isEmpty()) {
+                    // Only show "no media" after loading is complete
                     Text(
                         "No media found",
                         modifier = Modifier.align(Alignment.Center),
                         style = MaterialTheme.typography.bodyLarge
                     )
-                } else {
+                } else if (!isLoading) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
                         state = gridState,
