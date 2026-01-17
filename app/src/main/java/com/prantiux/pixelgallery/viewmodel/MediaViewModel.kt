@@ -90,6 +90,13 @@ class MediaViewModel : ViewModel() {
     private var restoreRequestLauncher: ((android.app.PendingIntent) -> Unit)? = null
     private var permanentDeleteRequestLauncher: ((android.app.PendingIntent) -> Unit)? = null
     
+    // ML labeling progress state
+    private val _labelingProgress = MutableStateFlow<Pair<Int, Int>?>(null) // (processed, total)
+    val labelingProgress: StateFlow<Pair<Int, Int>?> = _labelingProgress.asStateFlow()
+    
+    private val _isLabelingInProgress = MutableStateFlow(false)
+    val isLabelingInProgress: StateFlow<Boolean> = _isLabelingInProgress.asStateFlow()
+    
     // Store URIs being processed
     private var pendingRestoreUris: List<android.net.Uri> = emptyList()
     private var pendingDeleteUris: List<android.net.Uri> = emptyList()
@@ -411,12 +418,40 @@ class MediaViewModel : ViewModel() {
             // Guard: ensure media is loaded
             if (cachedMedia.isEmpty()) {
                 _searchResults.value = SearchEngine.SearchResult(emptyList(), emptyList(), query)
+                _isSearching.value = false
                 return@launch
             }
             
-            // Perform search on cached data
-            val results = SearchEngine.search(query, cachedMedia)
-            _searchResults.value = results
+            // Perform traditional search on cached data (filename, date, location)
+            val traditionalResults = SearchEngine.search(query, cachedMedia)
+            
+            // Perform ML-based label search (if database initialized)
+            val mlResults = if (::database.isInitialized) {
+                try {
+                    val labelDao = database.mediaLabelDao()
+                    val labelMatches = labelDao.searchByLabel(query.lowercase())
+                    val matchedIds = labelMatches.map { it.mediaId }.toSet()
+                    
+                    // Filter cached media by matched IDs
+                    cachedMedia.filter { it.id in matchedIds }
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+            
+            // Combine results (traditional + ML-based)
+            // Remove duplicates by ID, prioritize traditional matches
+            val traditionalMedia = traditionalResults.matchedMedia
+            val combinedMedia = (traditionalMedia + mlResults)
+                .distinctBy { item -> item.id }
+            
+            _searchResults.value = SearchEngine.SearchResult(
+                matchedAlbums = traditionalResults.matchedAlbums,
+                matchedMedia = combinedMedia,
+                query = query
+            )
             _isSearching.value = false
         }
     }
@@ -637,5 +672,20 @@ class MediaViewModel : ViewModel() {
                 e.printStackTrace()
             }
         }
+    }
+    
+    // ML Labeling functions
+    fun updateLabelingProgress(processed: Int, total: Int) {
+        _labelingProgress.value = Pair(processed, total)
+    }
+    
+    fun setLabelingInProgress(inProgress: Boolean) {
+        _isLabelingInProgress.value = inProgress
+    }
+    
+    fun getLabelingProgressPercent(): Float {
+        val progress = _labelingProgress.value ?: return 0f
+        if (progress.second == 0) return 0f
+        return progress.first.toFloat() / progress.second.toFloat()
     }
 }
