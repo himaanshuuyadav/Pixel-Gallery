@@ -34,10 +34,10 @@ class ImageLabelWorker(
 
     companion object {
         private const val TAG = "ImageLabelWorker"
-        private const val BATCH_SIZE = 15 // Process 15 images per run
         private const val TARGET_IMAGE_SIZE = 224 // Downscale to 224x224 for ML
         const val KEY_PROGRESS = "progress"
         const val KEY_TOTAL = "total"
+        private const val PROGRESS_UPDATE_INTERVAL = 5 // Update progress every 5 images
     }
 
     override suspend fun doWork(): Result {
@@ -78,11 +78,11 @@ class ImageLabelWorker(
             }
             
             Log.d(TAG, "")
-            Log.d(TAG, "📦 Processing batch of ${kotlin.math.min(BATCH_SIZE, unprocessedImages.size)} images...")
+            Log.d(TAG, "📦 Processing ALL ${unprocessedImages.size} images continuously...")
             Log.d(TAG, "───────────────────────────────────────")
             
-            // Take batch for this run
-            val batch = unprocessedImages.take(BATCH_SIZE)
+            // Process ALL unprocessed images (no batching)
+            val batch = unprocessedImages
             
             // Initialize ML Kit Image Labeler (on-device only)
             val options = ImageLabelerOptions.Builder()
@@ -90,22 +90,21 @@ class ImageLabelWorker(
                 .build()
             val labeler = ImageLabeling.getClient(options)
             
-            // Process batch
+            // Process ALL images continuously with progress updates
             var successCount = 0
-            var batchIndex = 1
-            batch.forEach { mediaItem ->
+            batch.forEachIndexed { index, mediaItem ->
+                val currentNum = index + 1
+                val totalCount = batch.size
                 try {
-                    Log.d(TAG, "[$batchIndex/${batch.size}] Processing image ${mediaItem.id}: ${mediaItem.displayName}")
+                    // Log every image
+                    Log.d(TAG, "[$currentNum/$totalCount] ${mediaItem.displayName}")
                     
                     // Load downscaled bitmap
                     val bitmap = loadDownscaledBitmap(mediaItem.uri.toString(), TARGET_IMAGE_SIZE)
                     
                     if (bitmap != null) {
-                        Log.d(TAG, "  ↳ Bitmap loaded: ${bitmap.width}x${bitmap.height}")
-                        
                         // Run ML Kit labeling
                         val image = InputImage.fromBitmap(bitmap, 0)
-                        Log.d(TAG, "  ↳ Running ML Kit labeling...")
                         val labels = labeler.process(image).await()
                         
                         // Extract label text (lowercase for case-insensitive search)
@@ -121,22 +120,24 @@ class ImageLabelWorker(
                             )
                         )
                         
-                        Log.d(TAG, "  ✅ Labels: $labelText")
+                        Log.d(TAG, "  ✅ $labelText")
                         successCount++
                         
-                        // Update progress after each successful labeling
-                        val currentProcessed = processedIds.size + successCount
-                        setProgressAsync(workDataOf(
-                            KEY_PROGRESS to currentProcessed,
-                            KEY_TOTAL to totalImages
-                        ))
+                        // Update progress every 5 images for UI (not every single image)
+                        if (currentNum % PROGRESS_UPDATE_INTERVAL == 0 || currentNum == totalCount) {
+                            val currentProcessed = processedIds.size + successCount
+                            setProgressAsync(workDataOf(
+                                KEY_PROGRESS to currentProcessed,
+                                KEY_TOTAL to totalImages
+                            ))
+                            Log.d(TAG, "  📊 Progress: $currentProcessed / $totalImages (${(currentProcessed * 100 / totalImages)}%)")
+                        }
                         
                         // Recycle bitmap
                         bitmap.recycle()
                     } else {
                         Log.w(TAG, "  ⚠️  Failed to load bitmap")
                     }
-                    batchIndex++
                 } catch (e: Exception) {
                     Log.e(TAG, "  ❌ Error: ${e.message}")
                 }
@@ -149,30 +150,18 @@ class ImageLabelWorker(
             val progressPercent = (processedCount.toFloat() / totalImages * 100).toInt()
             
             Log.d(TAG, "")
-            Log.d(TAG, "───────────────────────────────────────")
-            Log.d(TAG, "📊 BATCH COMPLETE")
-            Log.d(TAG, "  • Successfully labeled: $successCount images")
-            Log.d(TAG, "  • Total progress: $processedCount / $totalImages ($progressPercent%)")
-            Log.d(TAG, "  • Remaining: ${totalImages - processedCount} images")
-            Log.d(TAG, "───────────────────────────────────────")
+            Log.d(TAG, "═══════════════════════════════════════")
+            Log.d(TAG, "🎉 ML LABELING COMPLETE!")
+            Log.d(TAG, "  • Successfully labeled: $successCount new images")
+            Log.d(TAG, "  • Total labeled: $processedCount / $totalImages ($progressPercent%)")
+            Log.d(TAG, "  • Failed: ${unprocessedImages.size - successCount} images")
+            Log.d(TAG, "✅ Ready for object-based search")
+            Log.d(TAG, "═══════════════════════════════════════")
             
-            // If more images remain, schedule retry
-            if (unprocessedImages.size > BATCH_SIZE) {
-                Log.d(TAG, "🔄 More images to process, scheduling next batch...")
-                Log.d(TAG, "═══════════════════════════════════════")
-                Result.retry()
-            } else {
-                Log.d(TAG, "")
-                Log.d(TAG, "═══════════════════════════════════════")
-                Log.d(TAG, "🎉 ML LABELING COMPLETE!")
-                Log.d(TAG, "📊 All $totalImages images have been labeled")
-                Log.d(TAG, "✅ Ready for object-based search")
-                Log.d(TAG, "═══════════════════════════════════════")
-                Result.success(workDataOf(
-                    KEY_PROGRESS to processedCount,
-                    KEY_TOTAL to totalImages
-                ))
-            }
+            Result.success(workDataOf(
+                KEY_PROGRESS to processedCount,
+                KEY_TOTAL to totalImages
+            ))
             
         } catch (e: Exception) {
             Log.e(TAG, "Worker failed", e)
