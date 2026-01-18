@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -20,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
@@ -56,6 +58,11 @@ fun AlbumDetailScreen(
     val selectedItems by viewModel.selectedItems.collectAsState()
     val view = LocalView.current
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    
+    // Remember grid state for scrollbar
+    val gridState = rememberLazyGridState()
     
     // Add BackHandler to exit selection mode on back press
     BackHandler(enabled = isSelectionMode) {
@@ -107,6 +114,7 @@ fun AlbumDetailScreen(
                 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
+                    state = gridState,
                     contentPadding = PaddingValues(
                         start = 2.dp,
                         end = 2.dp,
@@ -139,6 +147,17 @@ fun AlbumDetailScreen(
                 }
             }
         }
+        
+        // Unified Scrollbar Component with smooth scrolling (no jumping)
+        com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
+            modifier = Modifier.align(Alignment.TopEnd),
+            gridState = gridState,
+            mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.SMOOTH_SCROLLING,
+            topPadding = 88.dp + 16.dp,
+            totalItems = albumMedia.size,
+            coroutineScope = coroutineScope,
+            isDarkTheme = isDarkTheme
+        )
         
         // Selection Top Bar - overlay above navigation bar
         com.prantiux.pixelgallery.ui.components.SelectionTopBar(
