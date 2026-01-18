@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -114,10 +115,29 @@ fun RecycleBinContent(
     val coroutineScope = rememberCoroutineScope()
     val navBarHeight = calculateFloatingNavBarHeight()
     val view = LocalView.current
+    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    
+    // Scrollbar state for overlay
+    var scrollbarOverlayText by remember { mutableStateOf("") }
+    var showScrollbarOverlay by remember { mutableStateOf(false) }
+    
+    // Remember grid state for scrollbar
+    val gridState = rememberLazyGridState()
     
     // Group items by days left
     val groupedItems = remember(trashedItems) {
         groupByDaysLeft(trashedItems)
+    }
+    
+    // Prepare day-left group info for scrollbar
+    val dayLeftGroupsForScrollbar = remember(groupedItems) {
+        groupedItems.map { group ->
+            com.prantiux.pixelgallery.ui.components.DayLeftGroupInfo(
+                daysLeft = group.maxDaysLeft,
+                displayText = group.daysLeftRange,
+                itemCount = group.items.size
+            )
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -170,6 +190,7 @@ fun RecycleBinContent(
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
+                        state = gridState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             bottom = navBarHeight + 2.dp,
@@ -288,6 +309,22 @@ fun RecycleBinContent(
                 }
             }
         }
+        
+        // Unified Scrollbar Component with day-left jumping
+        com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
+            modifier = Modifier.align(Alignment.TopEnd),
+            gridState = gridState,
+            mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DAY_LEFT_JUMPING,
+            topPadding = 88.dp + 32.dp,
+            dayLeftGroups = dayLeftGroupsForScrollbar,
+            coroutineScope = coroutineScope,
+            isDarkTheme = isDarkTheme,
+            onScrollbarVisibilityChanged = { /* No ViewModel state needed */ },
+            onOverlayTextChanged = { text ->
+                scrollbarOverlayText = text
+                showScrollbarOverlay = text.isNotEmpty()
+            }
+        )
         
         // Selection Top Bar - overlay above navigation bar
         val navBarHeight = calculateFloatingNavBarHeight()
