@@ -112,6 +112,7 @@ fun PhotosContent(
     val selectedItems by viewModel.selectedItems.collectAsState()
     val scrollbarVisible by viewModel.scrollbarVisible.collectAsState()
     val scrollbarMonth by viewModel.scrollbarMonth.collectAsState()
+    val gridType by viewModel.gridType.collectAsState()
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
     
@@ -136,9 +137,18 @@ fun PhotosContent(
         (images + videos).sortedByDescending { it.dateAdded }
     }
     
-    // Group by date
-    val groupedMedia = remember(allMedia) {
-        groupMediaByDate(allMedia)
+    // Determine column count based on grid type
+    val columnCount = when (gridType) {
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY -> 3
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> 5
+    }
+    
+    // Group by date or month based on grid type
+    val groupedMedia = remember(allMedia, gridType) {
+        when (gridType) {
+            com.prantiux.pixelgallery.viewmodel.GridType.DAY -> groupMediaByDate(allMedia)
+            com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> groupMediaByMonth(allMedia)
+        }
     }
     
     // Remember scroll state to preserve position
@@ -202,7 +212,7 @@ fun PhotosContent(
                     )
                 } else if (!isLoading) {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
+                        columns = GridCells.Fixed(columnCount),
                         state = gridState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -216,7 +226,7 @@ fun PhotosContent(
                     ) {
                         groupedMedia.forEach { group ->
                         // Date Header - spans all columns with checkbox when in selection mode
-                        item(span = { GridItemSpan(3) }) {
+                        item(span = { GridItemSpan(columnCount) }) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -285,7 +295,7 @@ fun PhotosContent(
                             val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                 index = index,
                                 totalItems = group.items.size,
-                                columns = 3
+                                columns = columnCount
                             )
                             
                             MediaThumbnail(
@@ -339,7 +349,7 @@ fun PhotosContent(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
-            topPadding = 88.dp + 32.dp,
+            topPadding = 88.dp + 16.dp + 32.dp, // Align with first date header
             dateGroups = dateGroupsForScrollbar,
             coroutineScope = coroutineScope,
             isDarkTheme = isDarkTheme,
@@ -398,6 +408,38 @@ fun groupMediaByDate(media: List<MediaItem>): List<MediaGroup> {
             ?.key
         
         MediaGroup(date, displayDate, items, mostCommonLocation)
+    }.sortedByDescending { it.date }
+}
+
+fun groupMediaByMonth(media: List<MediaItem>): List<MediaGroup> {
+    val monthFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
+    val calendar = Calendar.getInstance()
+    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+    
+    return media.groupBy { item ->
+        calendar.timeInMillis = item.dateAdded * 1000
+        monthFormat.format(calendar.time)
+    }.map { (month, items) ->
+        calendar.timeInMillis = items.first().dateAdded * 1000
+        val itemYear = calendar.get(Calendar.YEAR)
+        
+        val displayDate = if (itemYear == currentYear) {
+            // Current year: "January"
+            SimpleDateFormat("MMMM", Locale.getDefault()).format(calendar.time)
+        } else {
+            // Different year: "December 2025"
+            SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calendar.time)
+        }
+        
+        // Find most common location for this month
+        val mostCommonLocation = items
+            .mapNotNull { it.location }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+        
+        MediaGroup(month, displayDate, items, mostCommonLocation)
     }.sortedByDescending { it.date }
 }
 
