@@ -11,6 +11,7 @@ import com.prantiux.pixelgallery.data.AppDatabase
 import com.prantiux.pixelgallery.data.FavoriteEntity
 import com.prantiux.pixelgallery.data.MediaRepository
 import com.prantiux.pixelgallery.data.RecentSearchesDataStore
+import com.prantiux.pixelgallery.data.SettingsDataStore
 import com.prantiux.pixelgallery.ml.ImageLabelWorker
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
@@ -27,10 +28,15 @@ enum class SortMode {
     DATE_DESC, DATE_ASC, NAME_ASC, NAME_DESC, SIZE_DESC, SIZE_ASC
 }
 
+enum class GridType {
+    DAY, MONTH
+}
+
 class MediaViewModel : ViewModel() {
     private lateinit var repository: MediaRepository
     private lateinit var albumRepository: AlbumRepository
     private lateinit var recentSearchesDataStore: RecentSearchesDataStore
+    private lateinit var settingsDataStore: SettingsDataStore
     private lateinit var database: AppDatabase
 
     private val _images = MutableStateFlow<List<MediaItem>>(emptyList())
@@ -99,6 +105,10 @@ class MediaViewModel : ViewModel() {
     
     private val _isLabelingInProgress = MutableStateFlow(false)
     val isLabelingInProgress: StateFlow<Boolean> = _isLabelingInProgress.asStateFlow()
+    
+    // Grid type state
+    private val _gridType = MutableStateFlow(GridType.DAY)
+    val gridType: StateFlow<GridType> = _gridType.asStateFlow()
     
     // Store URIs being processed
     private var pendingRestoreUris: List<android.net.Uri> = emptyList()
@@ -173,6 +183,7 @@ class MediaViewModel : ViewModel() {
         repository = MediaRepository(context)
         albumRepository = AlbumRepository(context)
         recentSearchesDataStore = RecentSearchesDataStore(context)
+        settingsDataStore = SettingsDataStore(context)
         database = AppDatabase.getDatabase(context)
         
         // Load favorite IDs from database
@@ -193,6 +204,17 @@ class MediaViewModel : ViewModel() {
             try {
                 recentSearchesDataStore.recentSearchesFlow.collect { searches ->
                     _recentSearches.value = searches
+                }
+            } catch (e: Exception) {
+                // Ignore cancellation exceptions
+            }
+        }
+        
+        // Load grid type from DataStore
+        viewModelScope.launch {
+            try {
+                settingsDataStore.gridTypeFlow.collect { type ->
+                    _gridType.value = type
                 }
             } catch (e: Exception) {
                 // Ignore cancellation exceptions
@@ -717,5 +739,20 @@ class MediaViewModel : ViewModel() {
         val progress = _labelingProgress.value ?: return 0f
         if (progress.second == 0) return 0f
         return progress.first.toFloat() / progress.second.toFloat()
+    }
+    
+    // Grid type functions
+    fun setGridType(type: GridType) {
+        _gridType.value = type
+        // Save to DataStore
+        viewModelScope.launch {
+            if (::settingsDataStore.isInitialized) {
+                try {
+                    settingsDataStore.saveGridType(type)
+                } catch (e: Exception) {
+                    // Ignore errors
+                }
+            }
+        }
     }
 }
