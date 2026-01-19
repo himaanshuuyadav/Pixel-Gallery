@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.model.Album
-import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.SubPageScaffoldGrid
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import kotlinx.coroutines.launch
 
@@ -57,27 +57,34 @@ fun AllAlbumsScreen(
     
     val navBarHeight = calculateFloatingNavBarHeight()
 
-    Column(modifier = modifier.fillMaxSize()) {
-        // Consistent header with back button
-        ConsistentHeader(
-            title = "All Albums",
-            onNavigateBack = onNavigateBack
-        )
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.primary
-                )
-            } else if (allAlbums.isEmpty()) {
+    SubPageScaffoldGrid(
+        title = "All Albums",
+        subtitle = if (allAlbums.isEmpty()) null else "${allAlbums.size} ${if (allAlbums.size == 1) "album" else "albums"}",
+        onNavigateBack = onNavigateBack,
+        columns = 2,
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = navBarHeight + 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (isLoading) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                        ),
+                        .fillMaxWidth()
+                        .padding(64.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        } else if (allAlbums.isEmpty()) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(64.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -86,34 +93,13 @@ fun AllAlbumsScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                        )
-                ) {
-                    LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 16.dp,
-                        bottom = navBarHeight + 16.dp
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(allAlbums.size) { index ->
-                        AllAlbumsGridItem(
-                            album = allAlbums[index],
-                            onClick = { onNavigateToAlbum(allAlbums[index].id) }
-                        )
-                    }
-                }
-                }
+            }
+        } else {
+            items(allAlbums.size) { index ->
+                AllAlbumsGridItem(
+                    album = allAlbums[index],
+                    onClick = { onNavigateToAlbum(allAlbums[index].id) }
+                )
             }
         }
     }
