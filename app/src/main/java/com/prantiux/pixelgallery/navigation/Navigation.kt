@@ -65,6 +65,7 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object AllAlbums : Screen("all_albums", "All Albums")
     object RecycleBin : Screen("recycle_bin", "Recycle Bin")
     object Favorites : Screen("favorites", "Favourites")
+    object GridTypeSetting : Screen("grid_type_setting", "Layout")
 }
 
 // Expressive transition animations for navigation (Material 3 standard)
@@ -424,6 +425,21 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 popExitTransition = { popExitTransition() }
             ) {
                 SettingsScreen(
+                    viewModel = viewModel,
+                    onNavigateToGridType = { navController.navigate(Screen.GridTypeSetting.route) },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+            
+            composable(
+                route = Screen.GridTypeSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.LayoutSettingScreen(
+                    viewModel = viewModel,
                     onBackClick = { navController.popBackStack() }
                 )
             }
