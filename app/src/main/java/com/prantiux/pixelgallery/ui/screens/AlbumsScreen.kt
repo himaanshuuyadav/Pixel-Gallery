@@ -618,6 +618,8 @@ fun AlbumPreviewCard(
                     ) {
                         itemsToShow.drop(3).take(3).forEachIndexed { relIndex, mediaItem ->
                             val index = relIndex + 3
+                            val isSixthImage = index == 5
+                            val remainingCount = album.itemCount - 5
                             var thumbnailBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
                             
                             Box(
@@ -643,32 +645,57 @@ fun AlbumPreviewCard(
                                             )
                                         }
                                         .clickable {
-                                            thumbnailBounds?.let { bounds ->
-                                                viewModel.showMediaOverlay(
-                                                    mediaType = "album",
-                                                    albumId = album.id,
-                                                    selectedIndex = index,
-                                                    thumbnailBounds = com.prantiux.pixelgallery.viewmodel.MediaViewModel.ThumbnailBounds(
-                                                        startLeft = bounds.left,
-                                                        startTop = bounds.top,
-                                                        startWidth = bounds.width,
-                                                        startHeight = bounds.height
+                                            // If 6th image and more items exist, open album view
+                                            if (isSixthImage && remainingCount > 0) {
+                                                onViewAllClick()
+                                            } else {
+                                                thumbnailBounds?.let { bounds ->
+                                                    viewModel.showMediaOverlay(
+                                                        mediaType = "album",
+                                                        albumId = album.id,
+                                                        selectedIndex = index,
+                                                        thumbnailBounds = com.prantiux.pixelgallery.viewmodel.MediaViewModel.ThumbnailBounds(
+                                                            startLeft = bounds.left,
+                                                            startTop = bounds.top,
+                                                            startWidth = bounds.width,
+                                                            startHeight = bounds.height
+                                                        )
                                                     )
-                                                )
-                                            } ?: run {
-                                                viewModel.showMediaOverlay(
-                                                    mediaType = "album",
-                                                    albumId = album.id,
-                                                    selectedIndex = index,
-                                                    thumbnailBounds = null
-                                                )
+                                                } ?: run {
+                                                    viewModel.showMediaOverlay(
+                                                        mediaType = "album",
+                                                        albumId = album.id,
+                                                        selectedIndex = index,
+                                                        thumbnailBounds = null
+                                                    )
+                                                }
                                             }
                                         },
                                     contentScale = ContentScale.Crop
                                 )
                                 
-                                // Video indicator
-                                if (mediaItem.isVideo) {
+                                // Dark overlay with "+X more" text on 6th image
+                                if (isSixthImage && remainingCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                                com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "+$remainingCount",
+                                            style = MaterialTheme.typography.headlineSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                                
+                                // Video indicator (only show if not 6th image with overlay)
+                                if (mediaItem.isVideo && !(isSixthImage && remainingCount > 0)) {
                                     FontIcon(
                                         unicode = FontIcons.PlayArrow,
                                         contentDescription = "Video",
