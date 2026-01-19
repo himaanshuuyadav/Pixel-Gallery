@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -101,7 +102,7 @@ fun RecycleBinScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RecycleBinContent(
     trashedItems: List<MediaItem>,
@@ -139,13 +140,46 @@ fun RecycleBinContent(
             )
         }
     }
+    
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
+        state = rememberTopAppBarState()
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Keep header unchanged - always show ConsistentHeader
-            ConsistentHeader(
-                title = "Recycle Bin",
-                onNavigateBack = onNavigateBack
+            // Material 3 Expressive collapsing header
+            MediumTopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "Recycle Bin",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (trashedItems.isNotEmpty()) {
+                            Text(
+                                text = "${trashedItems.size} ${if (trashedItems.size == 1) "item" else "items"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        FontIcon(
+                            unicode = FontIcons.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface
+                )
             )
             
             Box(
@@ -191,7 +225,9 @@ fun RecycleBinContent(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
                         state = gridState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(scrollBehavior.nestedScrollConnection),
                         contentPadding = PaddingValues(
                             bottom = navBarHeight + 2.dp,
                             start = 2.dp,
@@ -315,7 +351,7 @@ fun RecycleBinContent(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DAY_LEFT_JUMPING,
-            topPadding = 88.dp + 32.dp,
+            topPadding = 88.dp + 16.dp + 32.dp, // Align with first day-left header
             dayLeftGroups = dayLeftGroupsForScrollbar,
             coroutineScope = coroutineScope,
             isDarkTheme = isDarkTheme,
