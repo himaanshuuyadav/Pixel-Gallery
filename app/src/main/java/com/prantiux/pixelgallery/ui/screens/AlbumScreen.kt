@@ -30,9 +30,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -77,11 +79,44 @@ fun AlbumDetailScreen(
     val albumName = albumMedia.firstOrNull()?.bucketName ?: "Album"
     
     val navBarHeight = calculateFloatingNavBarHeight()
+    
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
+        state = rememberTopAppBarState()
+    )
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ConsistentHeader(
-            title = albumName,
-            onNavigateBack = onNavigateBack
+        MediumTopAppBar(
+            title = {
+                Column {
+                    Text(
+                        text = albumName,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (albumMedia.isNotEmpty()) {
+                        Text(
+                            text = "${albumMedia.size} ${if (albumMedia.size == 1) "item" else "items"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            },
+            navigationIcon = {
+                IconButton(onClick = onNavigateBack) {
+                    FontIcon(
+                        unicode = FontIcons.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            scrollBehavior = scrollBehavior,
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = MaterialTheme.colorScheme.surface
+            )
         )
         
         Box(modifier = Modifier.fillMaxSize()) {
@@ -115,6 +150,7 @@ fun AlbumDetailScreen(
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
                     state = gridState,
+                    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(
                         start = 2.dp,
                         end = 2.dp,
@@ -153,7 +189,7 @@ fun AlbumDetailScreen(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.SMOOTH_SCROLLING,
-            topPadding = 88.dp + 16.dp,
+            topPadding = 88.dp + 2.dp, // Align with first image row (header + grid top padding)
             totalItems = albumMedia.size,
             coroutineScope = coroutineScope,
             isDarkTheme = isDarkTheme
