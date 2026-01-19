@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.prantiux.pixelgallery.model.MediaItem
-import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -26,27 +26,19 @@ fun FavoritesScreen(
 ) {
     val favoriteItems by viewModel.favoriteItems.collectAsState()
     
-    Scaffold(
-        topBar = {
-            ConsistentHeader(
-                title = "Favourites",
-                onNavigateBack = onNavigateBack
-            )
-        }
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            if (favoriteItems.isEmpty()) {
+    SubPageScaffold(
+        title = "Favourites",
+        subtitle = if (favoriteItems.isEmpty()) null else "${favoriteItems.size} ${if (favoriteItems.size == 1) "item" else "items"}",
+        onNavigateBack = onNavigateBack
+    ) {
+        if (favoriteItems.isEmpty()) {
+            item {
                 // Empty state
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        .fillMaxWidth()
+                        .padding(vertical = 64.dp, horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     FontIcon(
                         unicode = FontIcons.Star,
@@ -68,40 +60,51 @@ fun FavoritesScreen(
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
-            } else {
-                // Grid of favorite items
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    contentPadding = PaddingValues(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(favoriteItems, key = { it.id }) { item ->
-                        MediaThumbnail(
-                            item = item,
-                            isSelected = false,
-                            isSelectionMode = false,
-                            shape = RoundedCornerShape(4.dp),
-                            onClick = { bounds ->
-                                val index = favoriteItems.indexOf(item)
-                                viewModel.showMediaOverlay(
-                                    mediaType = "favorites",
-                                    albumId = "",
-                                    selectedIndex = index,
-                                    thumbnailBounds = bounds?.let {
-                                        MediaViewModel.ThumbnailBounds(
-                                            startLeft = it.left,
-                                            startTop = it.top,
-                                            startWidth = it.width,
-                                            startHeight = it.height
-                                        )
-                                    }
-                                )
-                            },
-                            onLongClick = {},
-                            showFavorite = true
-                        )
+            }
+        } else {
+            item {
+                // Grid of favorite items inside LazyColumn
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    favoriteItems.chunked(3).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            rowItems.forEach { item ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    MediaThumbnail(
+                                        item = item,
+                                        isSelected = false,
+                                        isSelectionMode = false,
+                                        shape = RoundedCornerShape(4.dp),
+                                        onClick = { bounds ->
+                                            val index = favoriteItems.indexOf(item)
+                                            viewModel.showMediaOverlay(
+                                                mediaType = "favorites",
+                                                albumId = "",
+                                                selectedIndex = index,
+                                                thumbnailBounds = bounds?.let {
+                                                    MediaViewModel.ThumbnailBounds(
+                                                        startLeft = it.left,
+                                                        startTop = it.top,
+                                                        startWidth = it.width,
+                                                        startHeight = it.height
+                                                    )
+                                                }
+                                            )
+                                        },
+                                        onLongClick = {},
+                                        showFavorite = true
+                                    )
+                                }
+                            }
+                            // Fill remaining space if row is not complete
+                            repeat(3 - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
                     }
                 }
             }
