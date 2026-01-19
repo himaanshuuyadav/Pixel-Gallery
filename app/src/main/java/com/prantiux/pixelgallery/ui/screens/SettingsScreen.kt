@@ -23,28 +23,16 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
+    onNavigateToGridType: () -> Unit = {},
     onBackClick: () -> Unit = {}
 ) {
-    // Settings states
-    var gridSize by remember { mutableStateOf("Medium") }
-    var showVideoDuration by remember { mutableStateOf(true) }
-    var stickyDateHeaders by remember { mutableStateOf(true) }
-    var theme by remember { mutableStateOf("System") }
-    var dynamicColor by remember { mutableStateOf(true) }
-    var amoledBlack by remember { mutableStateOf(false) }
-    var swipeDownToClose by remember { mutableStateOf(true) }
-    var doubleTapZoom by remember { mutableStateOf(true) }
-    var edgeToEdge by remember { mutableStateOf(true) }
-    var autoPlayVideos by remember { mutableStateOf(false) }
-    var muteByDefault by remember { mutableStateOf(false) }
-    var rememberPosition by remember { mutableStateOf(true) }
-    var defaultSort by remember { mutableStateOf("Date") }
-    var groupByMonth by remember { mutableStateOf(true) }
-    var hideEmptyAlbums by remember { mutableStateOf(true) }
-    var appLock by remember { mutableStateOf(false) }
-    var hiddenAlbums by remember { mutableStateOf(false) }
-    var enableTrash by remember { mutableStateOf(true) }
-    var autoDeleteTrash by remember { mutableStateOf(true) }
+    // Get current grid type
+    val currentGridType by viewModel.gridType.collectAsState()
+    val gridTypeText = when (currentGridType) {
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY -> "Day"
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> "Month"
+    }
     
     val navBarHeight = calculateFloatingNavBarHeight()
     
@@ -63,38 +51,6 @@ fun SettingsScreen(
             contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // View & Layout Section
-            item {
-                CategoryHeader("View & Layout")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingItem(
-                        title = "Grid size",
-                        subtitle = gridSize,
-                        iconUnicode = FontIcons.GridView,
-                        position = SettingPosition.TOP,
-                        onClick = { /* TODO: Show grid size dialog */ }
-                    )
-                    GroupedSettingToggle(
-                        title = "Show video duration badge",
-                        subtitle = "Display duration on video thumbnails",
-                        iconUnicode = FontIcons.Timer,
-                        checked = showVideoDuration,
-                        onCheckedChange = { showVideoDuration = it },
-                        position = SettingPosition.MIDDLE
-                    )
-                    GroupedSettingToggle(
-                        title = "Sticky date headers",
-                        subtitle = if (stickyDateHeaders) "On" else "Off",
-                        iconUnicode = FontIcons.DateRange,
-                        checked = stickyDateHeaders,
-                        onCheckedChange = { stickyDateHeaders = it },
-                        position = SettingPosition.BOTTOM
-                    )
-                }
-            }
-            
             // Appearance Section
             item {
                 CategoryHeader("Appearance")
@@ -102,227 +58,100 @@ fun SettingsScreen(
             item {
                 SettingsGroup {
                     GroupedSettingItem(
+                        title = "Layout",
+                        subtitle = gridTypeText,
+                        iconUnicode = FontIcons.GridView,
+                        position = SettingPosition.TOP,
+                        onClick = onNavigateToGridType
+                    )
+                    GroupedSettingItem(
                         title = "Theme",
-                        subtitle = theme,
+                        subtitle = "System default",
                         iconUnicode = FontIcons.Palette,
-                        position = SettingPosition.TOP,
-                        onClick = { /* TODO: Show theme dialog */ }
-                    )
-                    GroupedSettingToggle(
-                        title = "Dynamic color (Material You)",
-                        subtitle = if (dynamicColor) "On" else "Off",
-                        iconUnicode = FontIcons.ColorLens,
-                        checked = dynamicColor,
-                        onCheckedChange = { dynamicColor = it },
-                        position = SettingPosition.MIDDLE
-                    )
-                    GroupedSettingToggle(
-                        title = "AMOLED black mode",
-                        subtitle = if (amoledBlack) "On" else "Off",
-                        iconUnicode = FontIcons.Brightness2,
-                        checked = amoledBlack,
-                        onCheckedChange = { amoledBlack = it },
-                        position = SettingPosition.BOTTOM
-                    )
-                }
-            }
-            
-            // Navigation & Gestures Section
-            item {
-                CategoryHeader("Navigation & Gestures")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingToggle(
-                        title = "Swipe down to close media viewer",
-                        subtitle = if (swipeDownToClose) "On" else "Off",
-                        iconUnicode = FontIcons.SwipeDown,
-                        checked = swipeDownToClose,
-                        onCheckedChange = { swipeDownToClose = it },
-                        position = SettingPosition.TOP
-                    )
-                    GroupedSettingToggle(
-                        title = "Double-tap to zoom",
-                        subtitle = if (doubleTapZoom) "On" else "Off",
-                        iconUnicode = FontIcons.ZoomIn,
-                        checked = doubleTapZoom,
-                        onCheckedChange = { doubleTapZoom = it },
-                        position = SettingPosition.MIDDLE
-                    )
-                    GroupedSettingToggle(
-                        title = "Edge-to-edge mode",
-                        subtitle = if (edgeToEdge) "On" else "Off",
-                        iconUnicode = FontIcons.Fullscreen,
-                        checked = edgeToEdge,
-                        onCheckedChange = { edgeToEdge = it },
-                        position = SettingPosition.BOTTOM
-                    )
-                }
-            }
-            
-            // Video Player Section
-            item {
-                CategoryHeader("Video Player")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingToggle(
-                        title = "Auto-play videos",
-                        subtitle = if (autoPlayVideos) "On" else "Off",
-                        iconUnicode = FontIcons.PlayArrow,
-                        checked = autoPlayVideos,
-                        onCheckedChange = { autoPlayVideos = it },
-                        position = SettingPosition.TOP
-                    )
-                    GroupedSettingToggle(
-                        title = "Mute videos by default",
-                        subtitle = if (muteByDefault) "On" else "Off",
-                        iconUnicode = FontIcons.VolumeOff,
-                        checked = muteByDefault,
-                        onCheckedChange = { muteByDefault = it },
-                        position = SettingPosition.MIDDLE
-                    )
-                    GroupedSettingToggle(
-                        title = "Remember playback position",
-                        subtitle = if (rememberPosition) "On" else "Off",
-                        iconUnicode = FontIcons.History,
-                        checked = rememberPosition,
-                        onCheckedChange = { rememberPosition = it },
-                        position = SettingPosition.BOTTOM
-                    )
-                }
-            }
-            
-            // Sorting & Albums Section
-            item {
-                CategoryHeader("Sorting & Albums")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingItem(
-                        title = "Default sort order",
-                        subtitle = defaultSort,
-                        iconUnicode = FontIcons.Sort,
-                        position = SettingPosition.TOP,
-                        onClick = { /* TODO: Show sort dialog */ }
-                    )
-                    GroupedSettingToggle(
-                        title = "Group media by month",
-                        subtitle = if (groupByMonth) "On" else "Off",
-                        iconUnicode = FontIcons.CalendarMonth,
-                        checked = groupByMonth,
-                        onCheckedChange = { groupByMonth = it },
-                        position = SettingPosition.MIDDLE
-                    )
-                    GroupedSettingToggle(
-                        title = "Hide empty albums",
-                        subtitle = if (hideEmptyAlbums) "On" else "Off",
-                        iconUnicode = FontIcons.FolderOff,
-                        checked = hideEmptyAlbums,
-                        onCheckedChange = { hideEmptyAlbums = it },
-                        position = SettingPosition.BOTTOM
-                    )
-                }
-            }
-            
-            // Privacy Section
-            item {
-                CategoryHeader("Privacy")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingToggle(
-                        title = "App lock",
-                        subtitle = "Biometric / PIN",
-                        iconUnicode = FontIcons.Lock,
-                        checked = appLock,
-                        onCheckedChange = { appLock = it },
-                        position = SettingPosition.TOP
+                        position = SettingPosition.MIDDLE,
+                        onClick = { /* TODO */ }
                     )
                     GroupedSettingItem(
-                        title = "Hidden albums",
-                        subtitle = "Manage hidden folders",
-                        iconUnicode = FontIcons.VisibilityOff,
+                        title = "Previews",
+                        subtitle = "Thumbnail and media settings",
+                        iconUnicode = FontIcons.Image,
                         position = SettingPosition.BOTTOM,
                         onClick = { /* TODO */ }
                     )
                 }
             }
             
-            // Trash Section
+            // Interaction Section
             item {
-                CategoryHeader("Trash")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingToggle(
-                        title = "Enable trash bin",
-                        subtitle = if (enableTrash) "On" else "Off",
-                        iconUnicode = FontIcons.Delete,
-                        checked = enableTrash,
-                        onCheckedChange = { enableTrash = it },
-                        position = SettingPosition.TOP
-                    )
-                    GroupedSettingToggle(
-                        title = "Auto-delete trash after 30 days",
-                        subtitle = if (autoDeleteTrash) "On" else "Off",
-                        iconUnicode = FontIcons.DeleteSweep,
-                        checked = autoDeleteTrash,
-                        onCheckedChange = { autoDeleteTrash = it },
-                        position = SettingPosition.BOTTOM,
-                        enabled = enableTrash
-                    )
-                }
-            }
-            
-            // Storage Section
-            item {
-                CategoryHeader("Storage")
+                CategoryHeader("Interaction")
             }
             item {
                 SettingsGroup {
                     GroupedSettingItem(
-                        title = "Storage usage summary",
-                        subtitle = "View storage breakdown",
+                        title = "Gestures",
+                        subtitle = "Swipe and tap controls",
+                        iconUnicode = FontIcons.SwipeDown,
+                        position = SettingPosition.TOP,
+                        onClick = { /* TODO */ }
+                    )
+                    GroupedSettingItem(
+                        title = "Playback",
+                        subtitle = "Video and audio settings",
+                        iconUnicode = FontIcons.PlayArrow,
+                        position = SettingPosition.MIDDLE,
+                        onClick = { /* TODO */ }
+                    )
+                    GroupedSettingItem(
+                        title = "Viewing",
+                        subtitle = "Display and zoom preferences",
+                        iconUnicode = FontIcons.ZoomIn,
+                        position = SettingPosition.BOTTOM,
+                        onClick = { /* TODO */ }
+                    )
+                }
+            }
+            
+            // Storage and Privacy Section
+            item {
+                CategoryHeader("Storage and Privacy")
+            }
+            item {
+                SettingsGroup {
+                    GroupedSettingItem(
+                        title = "Storage",
+                        subtitle = "Manage space and cache",
                         iconUnicode = FontIcons.Storage,
                         position = SettingPosition.TOP,
                         onClick = { /* TODO */ }
                     )
                     GroupedSettingItem(
-                        title = "Clear cache",
-                        subtitle = "Remove temporary files",
-                        iconUnicode = FontIcons.CleaningServices,
+                        title = "Hidden",
+                        subtitle = "Hidden albums and items",
+                        iconUnicode = FontIcons.VisibilityOff,
+                        position = SettingPosition.MIDDLE,
+                        onClick = { /* TODO */ }
+                    )
+                    GroupedSettingItem(
+                        title = "Performance",
+                        subtitle = "Optimize app performance",
+                        iconUnicode = FontIcons.Settings,
                         position = SettingPosition.BOTTOM,
                         onClick = { /* TODO */ }
                     )
                 }
             }
             
-            // About Section
+            // Support Section
             item {
-                CategoryHeader("About")
+                CategoryHeader("Support")
             }
             item {
                 SettingsGroup {
                     GroupedSettingItem(
-                        title = "App version",
-                        subtitle = "1.0.0",
+                        title = "About and help",
+                        subtitle = "App info and support",
                         iconUnicode = FontIcons.Info,
-                        position = SettingPosition.TOP,
-                        onClick = { /* TODO */ }
-                    )
-                    GroupedSettingItem(
-                        title = "Send feedback",
-                        subtitle = "Share your thoughts",
-                        iconUnicode = FontIcons.Feedback,
-                        position = SettingPosition.MIDDLE,
-                        onClick = { /* TODO */ }
-                    )
-                    GroupedSettingItem(
-                        title = "Privacy policy",
-                        subtitle = "View our privacy policy",
-                        iconUnicode = FontIcons.PrivacyTip,
-                        position = SettingPosition.BOTTOM,
+                        position = SettingPosition.SINGLE,
                         onClick = { /* TODO */ }
                     )
                 }
