@@ -303,30 +303,33 @@ fun UnifiedScrollbar(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Arrow icons - only visible when dragging
+                    // Arrow icons - only visible when dragging, fully centered
                     if (isDraggingScrollbar) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .alpha(animatedPillAlpha)
+                                .alpha(animatedPillAlpha),
+                            contentAlignment = Alignment.Center
                         ) {
-                            // Up arrow
-                            com.prantiux.pixelgallery.ui.icons.FontIcon(
-                                unicode = "\ue5c7",
-                                contentDescription = "Scroll up",
-                                size = 20.sp,
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            // Down arrow
-                            com.prantiux.pixelgallery.ui.icons.FontIcon(
-                                unicode = "\ue5c5",
-                                contentDescription = "Scroll down",
-                                size = 20.sp,
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                // Up arrow - no padding
+                                com.prantiux.pixelgallery.ui.icons.FontIcon(
+                                    unicode = "\ue5c7",
+                                    contentDescription = "Scroll up",
+                                    size = 28.sp,
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                                // Down arrow - placed immediately after with no space
+                                com.prantiux.pixelgallery.ui.icons.FontIcon(
+                                    unicode = "\ue5c5",
+                                    contentDescription = "Scroll down",
+                                    size = 28.sp,
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
                         }
                     }
                 }
