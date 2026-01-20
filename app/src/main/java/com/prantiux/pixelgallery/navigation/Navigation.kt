@@ -66,6 +66,8 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object RecycleBin : Screen("recycle_bin", "Recycle Bin")
     object Favorites : Screen("favorites", "Favourites")
     object GridTypeSetting : Screen("grid_type_setting", "Layout")
+    object GalleryViewSetting : Screen("gallery_view_setting", "Gallery view")
+    object ThemeSetting : Screen("theme_setting", "Theme")
 }
 
 // Expressive transition animations for navigation (Material 3 standard)
@@ -293,6 +295,9 @@ private fun PixelNavBarItem(
 
 @Composable
 fun AppNavigation(viewModel: MediaViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val albumRepository = remember { com.prantiux.pixelgallery.data.AlbumRepository(context) }
+    val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(context) }
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -424,9 +429,11 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 popEnterTransition = { popEnterTransition() },
                 popExitTransition = { popExitTransition() }
             ) {
-                SettingsScreen(
+                com.prantiux.pixelgallery.ui.screens.settings.SettingsScreen(
                     viewModel = viewModel,
                     onNavigateToGridType = { navController.navigate(Screen.GridTypeSetting.route) },
+                    onNavigateToGalleryView = { navController.navigate(Screen.GalleryViewSetting.route) },
+                    onNavigateToTheme = { navController.navigate(Screen.ThemeSetting.route) },
                     onBackClick = { navController.popBackStack() }
                 )
             }
@@ -438,8 +445,35 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 popEnterTransition = { popEnterTransition() },
                 popExitTransition = { popExitTransition() }
             ) {
-                com.prantiux.pixelgallery.ui.screens.LayoutSettingScreen(
+                com.prantiux.pixelgallery.ui.screens.settings.LayoutSettingScreen(
                     viewModel = viewModel,
+                    settingsDataStore = settingsDataStore,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.GalleryViewSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.settings.GalleryViewSettingScreen(
+                    albumRepository = albumRepository,
+                    settingsDataStore = settingsDataStore,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.ThemeSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
                     onBackClick = { navController.popBackStack() }
                 )
             }
