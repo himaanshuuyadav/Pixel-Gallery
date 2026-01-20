@@ -110,6 +110,14 @@ class MediaViewModel : ViewModel() {
     private val _gridType = MutableStateFlow(GridType.DAY)
     val gridType: StateFlow<GridType> = _gridType.asStateFlow()
     
+    // Selected albums for gallery view
+    private val _selectedAlbums = MutableStateFlow<Set<String>>(emptySet())
+    val selectedAlbums: StateFlow<Set<String>> = _selectedAlbums.asStateFlow()
+    
+    // Pinch gesture enabled state
+    private val _pinchGestureEnabled = MutableStateFlow(false)
+    val pinchGestureEnabled: StateFlow<Boolean> = _pinchGestureEnabled.asStateFlow()
+    
     // Store URIs being processed
     private var pendingRestoreUris: List<android.net.Uri> = emptyList()
     private var pendingDeleteUris: List<android.net.Uri> = emptyList()
@@ -220,6 +228,32 @@ class MediaViewModel : ViewModel() {
                 // Ignore cancellation exceptions
             }
         }
+        
+        // Load selected albums from DataStore
+        viewModelScope.launch {
+            try {
+                settingsDataStore.selectedAlbumsFlow.collect { albums ->
+                    _selectedAlbums.value = albums
+                    // Re-apply sorting to filter images whenever selection changes
+                    if (::repository.isInitialized && allImages.isNotEmpty()) {
+                        applySorting()
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore cancellation exceptions
+            }
+        }
+        
+        // Load pinch gesture setting from DataStore
+        viewModelScope.launch {
+            try {
+                settingsDataStore.pinchGestureEnabledFlow.collect { enabled ->
+                    _pinchGestureEnabled.value = enabled
+                }
+            } catch (e: Exception) {
+                // Ignore cancellation exceptions
+            }
+        }
     }
 
     fun refresh(context: Context) {
@@ -262,30 +296,58 @@ class MediaViewModel : ViewModel() {
 
     private fun applySorting() {
         val favoriteIdSet = _favoriteIds.value
+        val selectedAlbumIds = _selectedAlbums.value
+        
+        // Filter images by selected albums if any are selected
+        val filteredImages = if (selectedAlbumIds.isEmpty()) {
+            allImages
+        } else {
+            allImages.filter { selectedAlbumIds.contains(it.bucketId) }
+        }
+        
+        // Filter videos by selected albums if any are selected
+        val filteredVideos = if (selectedAlbumIds.isEmpty()) {
+            allVideos
+        } else {
+            allVideos.filter { selectedAlbumIds.contains(it.bucketId) }
+        }
         
         _images.value = when (_sortMode.value) {
-            SortMode.DATE_DESC -> allImages.sortedByDescending { it.dateAdded }
-            SortMode.DATE_ASC -> allImages.sortedBy { it.dateAdded }
-            SortMode.NAME_ASC -> allImages.sortedBy { it.displayName.lowercase() }
-            SortMode.NAME_DESC -> allImages.sortedByDescending { it.displayName.lowercase() }
-            SortMode.SIZE_DESC -> allImages.sortedByDescending { it.size }
-            SortMode.SIZE_ASC -> allImages.sortedBy { it.size }
+            SortMode.DATE_DESC -> filteredImages.sortedByDescending { it.dateAdded }
+            SortMode.DATE_ASC -> filteredImages.sortedBy { it.dateAdded }
+            SortMode.NAME_ASC -> filteredImages.sortedBy { it.displayName.lowercase() }
+            SortMode.NAME_DESC -> filteredImages.sortedByDescending { it.displayName.lowercase() }
+            SortMode.SIZE_DESC -> filteredImages.sortedByDescending { it.size }
+            SortMode.SIZE_ASC -> filteredImages.sortedBy { it.size }
         }.map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
 
         _videos.value = when (_sortMode.value) {
-            SortMode.DATE_DESC -> allVideos.sortedByDescending { it.dateAdded }
-            SortMode.DATE_ASC -> allVideos.sortedBy { it.dateAdded }
-            SortMode.NAME_ASC -> allVideos.sortedBy { it.displayName.lowercase() }
-            SortMode.NAME_DESC -> allVideos.sortedByDescending { it.displayName.lowercase() }
-            SortMode.SIZE_DESC -> allVideos.sortedByDescending { it.size }
-            SortMode.SIZE_ASC -> allVideos.sortedBy { it.size }
+            SortMode.DATE_DESC -> filteredVideos.sortedByDescending { it.dateAdded }
+            SortMode.DATE_ASC -> filteredVideos.sortedBy { it.dateAdded }
+            SortMode.NAME_ASC -> filteredVideos.sortedBy { it.displayName.lowercase() }
+            SortMode.NAME_DESC -> filteredVideos.sortedByDescending { it.displayName.lowercase() }
+            SortMode.SIZE_DESC -> filteredVideos.sortedByDescending { it.size }
+            SortMode.SIZE_ASC -> filteredVideos.sortedBy { it.size }
         }.map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
         
-        // Update favorite items list
-        val allMedia = (allImages + allVideos).map { 
-            it.copy(isFavorite = favoriteIdSet.contains(it.id)) 
+        // Update favorite items list with only items from selected albums
+        updateFavoritesList(selectedAlbumIds)
+    }
+    
+    private fun updateFavoritesList(selectedAlbumIds: Set<String>) {
+        val favoriteIdSet = _favoriteIds.value
+        
+        // Filter favorites by selected albums
+        val filteredMedia = if (selectedAlbumIds.isEmpty()) {
+            allImages + allVideos
+        } else {
+            (allImages + allVideos).filter { selectedAlbumIds.contains(it.bucketId) }
         }
-        _favoriteItems.value = allMedia.filter { it.isFavorite }.sortedByDescending { it.dateAdded }
+        
+        _favoriteItems.value = filteredMedia
+            .map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
+            .filter { it.isFavorite }
+            .sortedByDescending { it.dateAdded }
     }
 
     fun delete(item: MediaItem, onComplete: (Boolean) -> Unit) {
