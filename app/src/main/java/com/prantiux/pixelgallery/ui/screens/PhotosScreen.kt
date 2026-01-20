@@ -8,6 +8,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -113,8 +115,78 @@ fun PhotosContent(
     val scrollbarVisible by viewModel.scrollbarVisible.collectAsState()
     val scrollbarMonth by viewModel.scrollbarMonth.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
+    val pinchGestureEnabled by viewModel.pinchGestureEnabled.collectAsState()
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
+    
+    // Pinch gesture state
+    var cumulativeScale by remember { mutableStateOf(1f) }
+    var gestureInProgress by remember { mutableStateOf(false) }
+    var totalPanDistance by remember { mutableStateOf(0f) }
+    
+    // Log initial gesture state
+    LaunchedEffect(pinchGestureEnabled, isSelectionMode) {
+        Log.d("PhotosGesture", "=== Gesture State ===")
+        Log.d("PhotosGesture", "Pinch gesture enabled: $pinchGestureEnabled")
+        Log.d("PhotosGesture", "Selection mode: $isSelectionMode")
+        Log.d("PhotosGesture", "Grid type: $gridType")
+        Log.d("PhotosGesture", "Gesture will work: ${pinchGestureEnabled && !isSelectionMode}")
+    }
+    
+    // Transformable state for pinch gesture detection
+    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        if (pinchGestureEnabled && !isSelectionMode) {
+            // Track pan distance to distinguish pinch from scroll
+            val panMagnitude = kotlin.math.sqrt(panChange.x * panChange.x + panChange.y * panChange.y)
+            totalPanDistance += panMagnitude
+            
+            cumulativeScale *= zoomChange
+            gestureInProgress = true
+            
+            Log.d("PhotosGesture", "Gesture: zoom=$zoomChange, pan=$panMagnitude, totalPan=$totalPanDistance, scale=$cumulativeScale")
+        }
+    }
+    
+    // Handle grid type change based on pinch gesture
+    LaunchedEffect(gestureInProgress, cumulativeScale, totalPanDistance) {
+        if (gestureInProgress && pinchGestureEnabled) {
+            // Only trigger if pan distance is minimal (< 100px) - meaning it's a pinch, not a scroll
+            val isPinchGesture = totalPanDistance < 100f
+            
+            Log.d("PhotosGesture", "Checking - scale: $cumulativeScale, pan: $totalPanDistance, isPinch: $isPinchGesture")
+            
+            if (isPinchGesture) {
+                // Zoom out (scale < 0.8) on Day view -> Switch to Month view
+                if (cumulativeScale < 0.8f && gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY) {
+                    Log.d("PhotosGesture", "✓ Switching to MONTH view (zoomed out)")
+                    viewModel.setGridType(com.prantiux.pixelgallery.viewmodel.GridType.MONTH)
+                    cumulativeScale = 1f
+                    gestureInProgress = false
+                    totalPanDistance = 0f
+                }
+                // Zoom in (scale > 1.2) on Month view -> Switch to Day view
+                else if (cumulativeScale > 1.2f && gridType == com.prantiux.pixelgallery.viewmodel.GridType.MONTH) {
+                    Log.d("PhotosGesture", "✓ Switching to DAY view (zoomed in)")
+                    viewModel.setGridType(com.prantiux.pixelgallery.viewmodel.GridType.DAY)
+                    cumulativeScale = 1f
+                    gestureInProgress = false
+                    totalPanDistance = 0f
+                }
+            }
+        }
+    }
+    
+    // Reset scale when touch is released
+    LaunchedEffect(transformableState.isTransformInProgress) {
+        if (!transformableState.isTransformInProgress && gestureInProgress) {
+            Log.d("PhotosGesture", "Touch released - scale: $cumulativeScale, pan: $totalPanDistance")
+            cumulativeScale = 1f
+            gestureInProgress = false
+            totalPanDistance = 0f
+        }
+    }
+    
+
     
     // Scrollbar state for overlay
     var scrollbarOverlayText by remember { mutableStateOf("") }
@@ -214,7 +286,12 @@ fun PhotosContent(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(columnCount),
                         state = gridState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .transformable(
+                                state = transformableState,
+                                enabled = pinchGestureEnabled && !isSelectionMode
+                            ),
                         contentPadding = PaddingValues(
                             bottom = navBarHeight + 2.dp,
                             start = 2.dp,
