@@ -45,6 +45,13 @@ class MediaViewModel : ViewModel() {
     private val _videos = MutableStateFlow<List<MediaItem>>(emptyList())
     val videos: StateFlow<List<MediaItem>> = _videos.asStateFlow()
     
+    // Unfiltered media for album detail views (not affected by gallery view settings)
+    private val _allImagesUnfiltered = MutableStateFlow<List<MediaItem>>(emptyList())
+    val allImagesUnfiltered: StateFlow<List<MediaItem>> = _allImagesUnfiltered.asStateFlow()
+    
+    private val _allVideosUnfiltered = MutableStateFlow<List<MediaItem>>(emptyList())
+    val allVideosUnfiltered: StateFlow<List<MediaItem>> = _allVideosUnfiltered.asStateFlow()
+    
     private val _favoriteIds = MutableStateFlow<Set<Long>>(emptySet())
     val favoriteIds: StateFlow<Set<Long>> = _favoriteIds.asStateFlow()
     
@@ -271,6 +278,10 @@ class MediaViewModel : ViewModel() {
                 allVideos = repository.loadVideos()
                 val loadedAlbums = repository.loadAlbums()
                 
+                // Update unfiltered StateFlows for album detail views
+                _allImagesUnfiltered.value = allImages
+                _allVideosUnfiltered.value = allVideos
+                
                 // Load categorized albums
                 val categorized = albumRepository.loadCategorizedAlbums()
 
@@ -298,16 +309,18 @@ class MediaViewModel : ViewModel() {
         val favoriteIdSet = _favoriteIds.value
         val selectedAlbumIds = _selectedAlbums.value
         
-        // Filter images by selected albums if any are selected
+        // Filter images by selected albums - if selection was explicitly made and is empty, show nothing
         val filteredImages = if (selectedAlbumIds.isEmpty()) {
-            allImages
+            // Show nothing when explicitly unselected all albums
+            emptyList()
         } else {
             allImages.filter { selectedAlbumIds.contains(it.bucketId) }
         }
         
-        // Filter videos by selected albums if any are selected
+        // Filter videos by selected albums - if selection was explicitly made and is empty, show nothing
         val filteredVideos = if (selectedAlbumIds.isEmpty()) {
-            allVideos
+            // Show nothing when explicitly unselected all albums
+            emptyList()
         } else {
             allVideos.filter { selectedAlbumIds.contains(it.bucketId) }
         }
