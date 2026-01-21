@@ -163,7 +163,7 @@ fun PixelStyleFloatingNavBar(
             },
             color = MaterialTheme.colorScheme.surfaceContainer, // Make pill fully opaque
             tonalElevation = 0.dp,
-            shadowElevation = 4.dp
+            shadowElevation = 8.dp // Increased shadow for better depth
         ) {
             Row(
                 modifier = Modifier
@@ -565,6 +565,53 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 val selectedItems by viewModel.selectedItems.collectAsState()
                 val context = androidx.compose.ui.platform.LocalContext.current
                 var showMoreMenu by remember { mutableStateOf(false) }
+                
+                // Theme-aware gradient color
+                val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+                val gradientColor = if (isDarkTheme) {
+                    androidx.compose.ui.graphics.Color.Black
+                } else {
+                    androidx.compose.ui.graphics.Color.White
+                }
+
+                // Gradient background behind navigation bar
+                // Only show when app navigation bar is visible (not in media overlay)
+                // Solid color from system nav to bottom 50% height, then smooth gradient to transparent
+                // Extended to go slightly above the app navigation bar
+                if (!isOverlayVisible) {
+                    val navBarHeight = 72.dp
+                    val extendedHeight = navBarInset + navBarHeight + bottomPadding + 14.dp // Extension above
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    
+                    // 50% solid from bottom, 50% smooth gradient to transparent
+                    val solidHeight = extendedHeight * 0.5f
+                    val gradientStartY = with(density) { (extendedHeight - solidHeight).toPx() }
+                    val totalHeightPx = with(density) { extendedHeight.toPx() }
+                    
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(extendedHeight)
+                            .graphicsLayer {
+                                alpha = navBarAnimProgress // Fade with navbar
+                            }
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(
+                                        androidx.compose.ui.graphics.Color.Transparent,
+                                        gradientColor.copy(alpha = 0.3f),
+                                        gradientColor.copy(alpha = 0.6f),
+                                        gradientColor.copy(alpha = 0.85f),
+                                        gradientColor,
+                                        gradientColor
+                                    ),
+                                    startY = 0f,
+                                    endY = totalHeightPx
+                                )
+                            )
+                    )
+                }
 
                 // Use regular navbar layout but with different icons in selection mode
                 PixelStyleFloatingNavBar(
