@@ -45,6 +45,8 @@ import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -54,10 +56,11 @@ fun AlbumDetailScreen(
     onNavigateBack: () -> Unit,
     onNavigateToViewer: (Int) -> Unit
 ) {
-    val images by viewModel.images.collectAsState()
-    val videos by viewModel.videos.collectAsState()
+    val images by viewModel.allImagesUnfiltered.collectAsState()
+    val videos by viewModel.allVideosUnfiltered.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
+    val gridType by viewModel.gridType.collectAsState()
     val view = LocalView.current
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -66,15 +69,46 @@ fun AlbumDetailScreen(
     // Remember grid state for scrollbar
     val gridState = rememberLazyGridState()
     
+    // Scrollbar state for overlay
+    var scrollbarOverlayText by remember { mutableStateOf("") }
+    var showScrollbarOverlay by remember { mutableStateOf(false) }
+    
     // Add BackHandler to exit selection mode on back press
     BackHandler(enabled = isSelectionMode) {
         viewModel.exitSelectionMode()
     }
     
     // Combine images and videos for this album
-    val albumMedia = (images + videos)
-        .filter { it.bucketId == albumId }
-        .sortedByDescending { it.dateAdded }
+    val albumMedia = remember(images, videos, albumId) {
+        (images + videos)
+            .filter { it.bucketId == albumId }
+            .sortedByDescending { it.dateAdded }
+    }
+    
+    // Determine column count based on grid type
+    val columnCount = when (gridType) {
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY -> 3
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> 5
+    }
+    
+    // Group by date or month based on grid type
+    val groupedMedia: List<MediaGroup> = remember(albumMedia, gridType) {
+        when (gridType) {
+            com.prantiux.pixelgallery.viewmodel.GridType.DAY -> groupMediaByDate(albumMedia)
+            com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> groupMediaByMonth(albumMedia)
+        }
+    }
+    
+    // Prepare date group info for scrollbar
+    val dateGroupsForScrollbar = remember(groupedMedia) {
+        groupedMedia.map { group ->
+            com.prantiux.pixelgallery.ui.components.DateGroupInfo(
+                date = group.date,
+                displayDate = group.displayDate,
+                itemCount = group.items.size
+            )
+        }
+    }
     
     val albumName = albumMedia.firstOrNull()?.bucketName ?: "Album"
     
@@ -144,55 +178,123 @@ fun AlbumDetailScreen(
                             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                         )
                 ) {
-                    // Calculate columns based on screen width (Adaptive uses 120.dp minSize)
-                    val columns = 3 // Default to 3 columns for consistent rounded corners
-                
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
+                    columns = GridCells.Fixed(columnCount),
                     state = gridState,
                     modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(
                         start = 2.dp,
                         end = 2.dp,
-                        top = 2.dp,
+                        top = 16.dp,
                         bottom = navBarHeight + 2.dp
                     ),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    itemsIndexed(albumMedia) { index, item ->
-                        val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                            index = index,
-                            totalItems = albumMedia.size,
-                            columns = columns
-                        )
+                    groupedMedia.forEach { group ->
+                        // Date Header - spans all columns with checkbox when in selection mode
+                        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columnCount) }) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Date text
+                                Text(
+                                    text = group.displayDate,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                // Always reserve space for checkbox to prevent layout shift
+                                Box(
+                                    modifier = Modifier.size(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelectionMode) {
+                                        // Show checkbox in selection mode
+                                        val allSelected = group.items.all { selectedItems.contains(it) }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = if (allSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    shape = CircleShape
+                                                )
+                                                .background(
+                                                    if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f) else androidx.compose.ui.graphics.Color.Transparent,
+                                                    CircleShape
+                                                )
+                                                .clickable {
+                                                    if (allSelected) {
+                                                        viewModel.deselectAllInGroup(group.items)
+                                                    } else {
+                                                        viewModel.selectAllInGroup(group.items)
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (allSelected) {
+                                                FontIcon(
+                                                    unicode = FontIcons.Done,
+                                                    contentDescription = "Selected",
+                                                    size = 16.sp,
+                                                    tint = MaterialTheme.colorScheme.onPrimary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         
-                        SelectableMediaItem(
-                            item = item,
-                            isSelectionMode = isSelectionMode,
-                            selectedItems = selectedItems,
-                            viewModel = viewModel,
-                            view = view,
-                            shape = gridShape,
-                            mediaType = "album",
-                            albumId = albumId,
-                            index = index,
-                            showFavorite = true
-                        )
+                        // Media items for this date
+                        items(group.items.size) { index ->
+                            val item = group.items[index]
+                            val globalIndex = albumMedia.indexOf(item)
+                            val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                index = index,
+                                totalItems = group.items.size,
+                                columns = columnCount
+                            )
+                            
+                            SelectableMediaItem(
+                                item = item,
+                                isSelectionMode = isSelectionMode,
+                                selectedItems = selectedItems,
+                                viewModel = viewModel,
+                                view = view,
+                                shape = gridShape,
+                                mediaType = "album",
+                                albumId = albumId,
+                                index = globalIndex,
+                                showFavorite = true
+                            )
+                        }
                     }
                 }
             }
         }
         
-        // Unified Scrollbar Component with smooth scrolling (no jumping)
+        // Unified Scrollbar Component with date-based snapping
         com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
-            mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.SMOOTH_SCROLLING,
-            topPadding = 88.dp + 2.dp, // Align with first image row (header + grid top padding)
-            totalItems = albumMedia.size,
+            mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
+            topPadding = 88.dp + 16.dp + 32.dp, // Align with first date header
+            dateGroups = dateGroupsForScrollbar,
             coroutineScope = coroutineScope,
-            isDarkTheme = isDarkTheme
+            isDarkTheme = isDarkTheme,
+            onScrollbarVisibilityChanged = { /* No ViewModel state needed */ },
+            onOverlayTextChanged = { text ->
+                scrollbarOverlayText = text
+                showScrollbarOverlay = text.isNotEmpty()
+            }
         )
         
         // Selection Top Bar - overlay above navigation bar
