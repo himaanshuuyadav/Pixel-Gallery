@@ -193,16 +193,22 @@ fun PhotosContent(
     var showScrollbarOverlay by remember { mutableStateOf(false) }
     
     // Track if initial load is complete - only show loader on FIRST load after permission grant
-    var hasLoadedOnce by remember { mutableStateOf(false) }
+    // Initialize based on whether we already have data
+    var hasLoadedOnce by remember { mutableStateOf(images.isNotEmpty() || videos.isNotEmpty()) }
     
-    LaunchedEffect(images, videos) {
+    LaunchedEffect(isLoading, images, videos) {
+        Log.d("PhotosScreenLoad", "State change - isLoading: $isLoading, images: ${images.size}, videos: ${videos.size}, hasLoadedOnce: $hasLoadedOnce")
+        
         if (images.isNotEmpty() || videos.isNotEmpty()) {
             hasLoadedOnce = true
+            Log.d("PhotosScreenLoad", "hasLoadedOnce set to true")
         }
     }
     
-    // Only show loading on very first load when list is empty
-    val showLoading = isLoading && !hasLoadedOnce && images.isEmpty() && videos.isEmpty()
+    // Show loading when: loading AND (never loaded before OR lists are empty)
+    val showLoading = isLoading && (!hasLoadedOnce || (images.isEmpty() && videos.isEmpty()))
+    
+    Log.d("PhotosScreenLoad", "Final decision - showLoading: $showLoading (isLoading: $isLoading, hasLoadedOnce: $hasLoadedOnce)")
     
     // Combine images and videos
     val allMedia = remember(images, videos) {
@@ -271,18 +277,21 @@ fun PhotosContent(
                 // Never show on subsequent navigations to prevent UI jank
                 // Show loading FIRST, only show "no media" after loading completes
                 if (showLoading) {
+                    Log.d("PhotosScreenLoad", "Showing loading indicator")
                     com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
                         modifier = Modifier.align(Alignment.Center),
                         size = 48.dp
                     )
-                } else if (!isLoading && allMedia.isEmpty()) {
-                    // Only show "no media" after loading is complete
+                } else if (allMedia.isEmpty()) {
+                    // Only show "no media" after loading is complete (when not loading)
+                    Log.d("PhotosScreenLoad", "Showing 'No media found' (loading complete, no items)")
                     Text(
                         "No media found",
                         modifier = Modifier.align(Alignment.Center),
                         style = MaterialTheme.typography.bodyLarge
                     )
-                } else if (!isLoading) {
+                } else {
+                    Log.d("PhotosScreenLoad", "Showing media grid (${allMedia.size} items)")
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(columnCount),
                         state = gridState,
