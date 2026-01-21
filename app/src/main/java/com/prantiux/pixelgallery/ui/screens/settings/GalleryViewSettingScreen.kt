@@ -43,6 +43,30 @@ fun GalleryViewSettingScreen(
         }
     }
     
+    // Categorize albums into system and user-created
+    val systemAlbums = remember(albums) {
+        albums.filter { album ->
+            val name = album.name.lowercase()
+            // Only true system album names (not app-specific folders)
+            name == "camera" || 
+            name == "screenshots" || 
+            name == "screen recordings" ||
+            name == "screen recording" ||
+            name == "screenrecorder" ||
+            name == "movies" ||
+            name == "downloads" ||
+            name == "download" ||
+            name == "pictures" ||
+            name == "dcim"
+        }
+    }
+    
+    val userAlbums = remember(albums) {
+        albums.filter { album ->
+            !systemAlbums.contains(album)
+        }
+    }
+    
     // Load saved selections
     LaunchedEffect(Unit) {
         scope.launch {
@@ -66,17 +90,12 @@ fun GalleryViewSettingScreen(
         subtitle = "Choose folder to show in main gallery",
         onNavigateBack = onBackClick
     ) {
-        // Add consistent spacing like LayoutSettingScreen
-        item {
-            Spacer(modifier = Modifier.height(28.dp))
-        }
-        
         if (isLoading) {
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 32.dp),
+                        .fillParentMaxHeight(0.7f),
                     contentAlignment = Alignment.Center
                 ) {
                     com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
@@ -85,31 +104,88 @@ fun GalleryViewSettingScreen(
                 }
             }
         } else {
-            items(albums.size) { index ->
-            val album = albums[index]
-            val position = when {
-                albums.size == 1 -> SettingPosition.SINGLE
-                index == 0 -> SettingPosition.TOP
-                index == albums.size - 1 -> SettingPosition.BOTTOM
-                else -> SettingPosition.MIDDLE
+            // Add consistent spacing like LayoutSettingScreen
+            item {
+                Spacer(modifier = Modifier.height(28.dp))
             }
             
-            AlbumCheckboxCard(
-                album = album,
-                isChecked = selectedAlbums.contains(album.id),
-                position = position,
-                onCheckedChange = { checked ->
-                    selectedAlbums = if (checked) {
-                        selectedAlbums + album.id
-                    } else {
-                        selectedAlbums - album.id
-                    }
-                    // Save immediately on change
-                    scope.launch {
-                        settingsDataStore.saveSelectedAlbums(selectedAlbums)
-                    }
+            // System Albums Section
+            if (systemAlbums.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "System Albums",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
                 }
-            )
+                
+                items(systemAlbums.size) { index ->
+                    val album = systemAlbums[index]
+                    val position = when {
+                        systemAlbums.size == 1 -> SettingPosition.SINGLE
+                        index == 0 -> SettingPosition.TOP
+                        index == systemAlbums.size - 1 -> SettingPosition.BOTTOM
+                        else -> SettingPosition.MIDDLE
+                    }
+                    
+                    AlbumCheckboxCard(
+                        album = album,
+                        isChecked = selectedAlbums.contains(album.id),
+                        position = position,
+                        onCheckedChange = { checked ->
+                            selectedAlbums = if (checked) {
+                                selectedAlbums + album.id
+                            } else {
+                                selectedAlbums - album.id
+                            }
+                            // Save immediately on change
+                            scope.launch {
+                                settingsDataStore.saveSelectedAlbums(selectedAlbums)
+                            }
+                        }
+                    )
+                }
+            }
+            
+            // User Albums Section
+            if (userAlbums.isNotEmpty()) {
+                item {
+                    val topPadding = if (systemAlbums.isNotEmpty()) 24.dp else 0.dp
+                    Text(
+                        text = "User Albums",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = topPadding, bottom = 8.dp)
+                    )
+                }
+                
+                items(userAlbums.size) { index ->
+                    val album = userAlbums[index]
+                    val position = when {
+                        userAlbums.size == 1 -> SettingPosition.SINGLE
+                        index == 0 -> SettingPosition.TOP
+                        index == userAlbums.size - 1 -> SettingPosition.BOTTOM
+                        else -> SettingPosition.MIDDLE
+                    }
+                    
+                    AlbumCheckboxCard(
+                        album = album,
+                        isChecked = selectedAlbums.contains(album.id),
+                        position = position,
+                        onCheckedChange = { checked ->
+                            selectedAlbums = if (checked) {
+                                selectedAlbums + album.id
+                            } else {
+                                selectedAlbums - album.id
+                            }
+                            // Save immediately on change
+                            scope.launch {
+                                settingsDataStore.saveSelectedAlbums(selectedAlbums)
+                            }
+                        }
+                    )
+                }
             }
             
             // Warning text with icon - only show after loading
