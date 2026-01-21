@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,11 +84,8 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
     
     LaunchedEffect(isSearching) {
         if (isSearching) {
-            // Delay showing loader to prevent flicker on instant searches
-            kotlinx.coroutines.delay(100)
-            if (isSearching) {
-                showLoadingIndicator = true
-            }
+            // Show loader immediately for better feedback
+            showLoadingIndicator = true
         } else {
             // Hide immediately when results arrive
             showLoadingIndicator = false
@@ -521,7 +519,7 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                         )
                     }
                 }
-                searchQuery.isNotBlank() && searchResults.matchedAlbums.isEmpty() && searchResults.matchedMedia.isEmpty() -> {
+                searchQuery.isNotBlank() && !showLoadingIndicator && searchResults.matchedAlbums.isEmpty() && searchResults.matchedMedia.isEmpty() -> {
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -550,13 +548,22 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                 }
                 else -> {
                     // Show search results with priority: Albums first, then media
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
-                    ) {
+                    val gridState = rememberLazyGridState()
+                    val coroutineScope = rememberCoroutineScope()
+                    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+                    
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            state = gridState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 16.dp, bottom = navBarHeight + 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
                         // Matched albums section
                         if (searchResults.matchedAlbums.isNotEmpty()) {
-                            item {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Text(
                                     text = "Albums (${searchResults.matchedAlbums.size})",
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
@@ -565,7 +572,8 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                                 )
                             }
                             
-                            items(searchResults.matchedAlbums) { albumMatch ->
+                            items(searchResults.matchedAlbums.size, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) { index ->
+                                val albumMatch = searchResults.matchedAlbums[index]
                                 AlbumResultItem(
                                     name = albumMatch.albumName,
                                     count = albumMatch.items.size,
@@ -587,7 +595,7 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                         
                         // Matched media section
                         if (searchResults.matchedMedia.isNotEmpty()) {
-                            item {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Text(
                                     text = "Photos & Videos (${searchResults.matchedMedia.size})",
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
@@ -596,72 +604,56 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                                 )
                             }
                             
-                            // Grid of media items - render as items in LazyColumn (rows of 3)
+                            // Grid of media items
                             val matchedMedia = searchResults.matchedMedia
-                            val chunkedMedia = matchedMedia.chunked(3)
                             
-                            items(chunkedMedia.size) { rowIndex ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 2.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    val row = chunkedMedia[rowIndex]
-                                    row.forEachIndexed { colIndex, item ->
-                                        val index = rowIndex * 3 + colIndex
-                                        key(item.id) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .aspectRatio(1f)
-                                            ) {
-                                                MediaThumbnail(
-                                                    item = item,
-                                                    isSelected = false,
-                                                    isSelectionMode = false,
-                                                    shape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                                                        index = index,
-                                                        totalItems = matchedMedia.size,
-                                                        columns = 3
-                                                    ),
-                                                    onClick = { bounds ->
-                                                        // Save search to recent searches
-                                                        viewModel.addRecentSearch(searchQuery)
-                                                        
-                                                        viewModel.showMediaOverlay(
-                                                            mediaType = "search",
-                                                            albumId = "search_results",
-                                                            selectedIndex = index,
-                                                            thumbnailBounds = bounds?.let {
-                                                                MediaViewModel.ThumbnailBounds(
-                                                                    startLeft = it.left,
-                                                                    startTop = it.top,
-                                                                    startWidth = it.width,
-                                                                    startHeight = it.height
-                                                                )
-                                                            },
-                                                            searchQuery = searchQuery
-                                                        )
-                                                    },
-                                                    onLongClick = {},
-                                                    showFavorite = true
+                            items(matchedMedia.size) { index ->
+                                val item = matchedMedia[index]
+                                MediaThumbnail(
+                                    item = item,
+                                    isSelected = false,
+                                    isSelectionMode = false,
+                                    shape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                        index = index,
+                                        totalItems = matchedMedia.size,
+                                        columns = 3
+                                    ),
+                                    onClick = { bounds ->
+                                        // Save search to recent searches
+                                        viewModel.addRecentSearch(searchQuery)
+                                        
+                                        viewModel.showMediaOverlay(
+                                            mediaType = "search",
+                                            albumId = "search_results",
+                                            selectedIndex = index,
+                                            thumbnailBounds = bounds?.let {
+                                                MediaViewModel.ThumbnailBounds(
+                                                    startLeft = it.left,
+                                                    startTop = it.top,
+                                                    startWidth = it.width,
+                                                    startHeight = it.height
                                                 )
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Fill remaining space if row is not complete
-                                    repeat(3 - row.size) {
-                                        Spacer(modifier = Modifier.weight(1f))
-                                    }
-                                }
-                                
-                                if (rowIndex < chunkedMedia.lastIndex) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                }
+                                            },
+                                            searchQuery = searchQuery
+                                        )
+                                    },
+                                    onLongClick = {},
+                                    showFavorite = true
+                                )
                             }
                         }
+                    }
+                        
+                        // Unified scrollbar with smooth scrolling mode
+                        com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
+                            modifier = Modifier.align(Alignment.TopEnd),
+                            gridState = gridState,
+                            mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.SMOOTH_SCROLLING,
+                            topPadding = 88.dp + 2.dp,
+                            totalItems = searchResults.matchedAlbums.size + searchResults.matchedMedia.size + 3,
+                            coroutineScope = coroutineScope,
+                            isDarkTheme = isDarkTheme
+                        )
                     }
                 }
             }
