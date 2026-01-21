@@ -1106,11 +1106,12 @@ fun MediaOverlay(
                     translationY = -closeProgress * 100f
                 }
         ) {
-            Surface(
+            // Background extends behind status bar
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding(),  // Respect status bar inset
-                color = Color.Black
+                    .background(Color.Black)
+                    .statusBarsPadding()  // Content respects status bar inset
             ) {
                 Row(
                     modifier = Modifier
@@ -1288,12 +1289,12 @@ fun MediaOverlay(
                     translationY = closeProgress * 100f
                 }
         ) {
-            Surface(
+            // Background extends behind navigation bar
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding(),  // Respect navigation bar inset
-                color = Color.Black,
-                shape = androidx.compose.ui.graphics.RectangleShape  // Edge-to-edge, no rounded corners
+                    .background(Color.Black)
+                    .navigationBarsPadding()  // Content respects navigation bar inset
             ) {
                 Row(
                     modifier = Modifier
