@@ -56,13 +56,16 @@ data class TrashedGroup(
 @Composable
 fun RecycleBinScreen(
     viewModel: MediaViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val context = LocalContext.current
     val trashedItems by viewModel.trashedItems.collectAsState()
     val isLoading by viewModel.isLoadingTrash.collectAsState()
     val isSelectionMode by viewModel.isTrashSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedTrashItems.collectAsState()
+    val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
+    val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
 
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         listOf(
@@ -93,7 +96,9 @@ fun RecycleBinScreen(
             isSelectionMode = isSelectionMode,
             selectedItems = selectedItems,
             onNavigateBack = onNavigateBack,
-            viewModel = viewModel
+            viewModel = viewModel,
+            badgeType = badgeType,
+            cornerType = cornerType
         )
     } else {
         PermissionRequestScreen(
@@ -110,7 +115,9 @@ fun RecycleBinContent(
     isSelectionMode: Boolean,
     selectedItems: Set<MediaItem>,
     onNavigateBack: () -> Unit,
-    viewModel: MediaViewModel
+    viewModel: MediaViewModel,
+    badgeType: String,
+    cornerType: String
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -237,6 +244,12 @@ fun RecycleBinContent(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        // Capture variables for use in forEach lambda
+                        val capturedBadgeType = badgeType
+                        val capturedCornerType = cornerType
+                        val capturedSelectedItems = selectedItems
+                        val capturedIsSelectionMode = isSelectionMode
+                        
                         groupedItems.forEach { group ->
                             // Section header with checkbox for selecting all in category
                             item(span = { GridItemSpan(3) }) {
@@ -260,8 +273,8 @@ fun RecycleBinContent(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         // Show checkbox only in selection mode
-                                        if (isSelectionMode) {
-                                            val allSelected = group.items.all { selectedItems.contains(it) }
+                                        if (capturedIsSelectionMode) {
+                                            val allSelected = group.items.all { capturedSelectedItems.contains(it) }
                                             android.util.Log.d("RecycleBinScreen", "Selection mode - checkbox for ${group.daysLeftRange}: allSelected=$allSelected")
                                             Box(
                                                 modifier = Modifier
@@ -302,18 +315,20 @@ fun RecycleBinContent(
                             // Media items
                             items(group.items.size) { index ->
                                 val item = group.items[index]
-                                val isSelected = selectedItems.contains(item)
+                                val isSelected = capturedSelectedItems.contains(item)
                                 val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                     index = index,
                                     totalItems = group.items.size,
-                                    columns = 3
+                                    columns = 3,
+                                    cornerType = capturedCornerType
                                 )
                                 
                                 MediaThumbnail(
                                     item = item,
                                     isSelected = isSelected,
-                                    isSelectionMode = isSelectionMode,
+                                    isSelectionMode = capturedIsSelectionMode,
                                     shape = gridShape,
+                                    badgeType = capturedBadgeType,
                                     onClick = { bounds ->
                                         if (isSelectionMode) {
                                             viewModel.toggleTrashSelection(item)
