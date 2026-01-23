@@ -27,6 +27,8 @@ fun SettingsScreen(
     onNavigateToGridType: () -> Unit = {},
     onNavigateToGalleryView: () -> Unit = {},
     onNavigateToTheme: () -> Unit = {},
+    onNavigateToPreviews: () -> Unit = {},
+    onNavigateToDebug: () -> Unit = {},
     onBackClick: () -> Unit = {}
 ) {
     // Get current grid type
@@ -85,7 +87,7 @@ fun SettingsScreen(
                         subtitle = "Thumbnail and media settings",
                         iconUnicode = FontIcons.Image,
                         position = SettingPosition.BOTTOM,
-                        onClick = { /* TODO */ }
+                        onClick = onNavigateToPreviews
                     )
                 }
             }
@@ -160,8 +162,15 @@ fun SettingsScreen(
                         title = "About and help",
                         subtitle = "App info and support",
                         iconUnicode = FontIcons.Info,
-                        position = SettingPosition.SINGLE,
+                        position = SettingPosition.TOP,
                         onClick = { /* TODO */ }
+                    )
+                    GroupedSettingItem(
+                        title = "Debug",
+                        subtitle = "Developer tools",
+                        iconUnicode = FontIcons.Settings,
+                        position = SettingPosition.BOTTOM,
+                        onClick = onNavigateToDebug
                     )
                 }
             }
@@ -224,7 +233,7 @@ internal fun GroupedSettingItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             FontIcon(
