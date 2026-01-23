@@ -110,12 +110,15 @@ fun PhotosContent(
     viewModel: MediaViewModel
 ) {
     val context = LocalContext.current
+    val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(context) }
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val scrollbarVisible by viewModel.scrollbarVisible.collectAsState()
     val scrollbarMonth by viewModel.scrollbarMonth.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
     val pinchGestureEnabled by viewModel.pinchGestureEnabled.collectAsState()
+    val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
+    val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
     
@@ -381,7 +384,8 @@ fun PhotosContent(
                             val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                 index = index,
                                 totalItems = group.items.size,
-                                columns = columnCount
+                                columns = columnCount,
+                                cornerType = cornerType
                             )
                             
                             MediaThumbnail(
@@ -389,6 +393,7 @@ fun PhotosContent(
                                 isSelected = isSelected,
                                 isSelectionMode = isSelectionMode,
                                 shape = gridShape,
+                                badgeType = badgeType,
                                 onClick = { bounds ->
                                     if (isSelectionMode) {
                                         viewModel.toggleSelection(item)
