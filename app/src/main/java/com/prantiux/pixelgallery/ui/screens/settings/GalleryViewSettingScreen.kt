@@ -67,19 +67,22 @@ fun GalleryViewSettingScreen(
         }
     }
     
-    // Load saved selections
-    LaunchedEffect(Unit) {
-        scope.launch {
-            settingsDataStore.selectedAlbumsFlow.collect { saved ->
-                if (!isInitialized) {
-                    if (saved.isEmpty() && albums.isNotEmpty()) {
-                        // First time - select all albums by default
-                        selectedAlbums = albums.map { it.id }.toSet()
-                        settingsDataStore.saveSelectedAlbums(selectedAlbums)
-                    } else {
-                        selectedAlbums = saved
+    // Load saved selections and initialize defaults
+    LaunchedEffect(albums) {
+        // Wait until albums are loaded
+        if (albums.isNotEmpty() && !isInitialized) {
+            scope.launch {
+                settingsDataStore.selectedAlbumsFlow.collect { saved ->
+                    if (!isInitialized) {
+                        if (saved.isEmpty()) {
+                            // First time - select all albums by default
+                            selectedAlbums = albums.map { it.id }.toSet()
+                            settingsDataStore.saveSelectedAlbums(selectedAlbums)
+                        } else {
+                            selectedAlbums = saved
+                        }
+                        isInitialized = true
                     }
-                    isInitialized = true
                 }
             }
         }
