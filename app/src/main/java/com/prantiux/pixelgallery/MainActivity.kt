@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.*
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
@@ -197,8 +198,97 @@ class MainActivity : ComponentActivity() {
         }
         
         setContent {
-            PixelGalleryTheme {
-                AppNavigation(viewModel = viewModel)
+            val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(this) }
+            var appTheme by remember { mutableStateOf("System Default") }
+            var dynamicColor by remember { mutableStateOf(true) }
+            var amoledMode by remember { mutableStateOf(false) }
+            var defaultTab by remember { mutableStateOf("Gallery") }
+            var lastUsedTab by remember { mutableStateOf("Gallery") }
+            
+            // Load theme settings
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch {
+                    settingsDataStore.appThemeFlow.collect { theme ->
+                        appTheme = theme
+                    }
+                }
+            }
+            
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch {
+                    settingsDataStore.dynamicColorFlow.collect { enabled ->
+                        dynamicColor = enabled
+                    }
+                }
+            }
+            
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch {
+                    settingsDataStore.amoledModeFlow.collect { enabled ->
+                        amoledMode = enabled
+                    }
+                }
+            }
+            
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch {
+                    settingsDataStore.defaultTabFlow.collect { tab ->
+                        defaultTab = tab
+                    }
+                }
+            }
+            
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch {
+                    settingsDataStore.lastUsedTabFlow.collect { tab ->
+                        lastUsedTab = tab
+                    }
+                }
+            }
+            
+            // Determine dark theme based on settings
+            val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val darkTheme = when (appTheme) {
+                "Light" -> false
+                "Dark" -> true
+                else -> isSystemDark
+            }
+            
+            // Update navigation bar color based on theme
+            // Use LaunchedEffect to respond to darkTheme changes more reliably
+            LaunchedEffect(darkTheme) {
+                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                val navBarColor = if (darkTheme) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                
+                @Suppress("DEPRECATION")
+                window.navigationBarColor = navBarColor
+                insetsController.isAppearanceLightNavigationBars = !darkTheme
+                
+                // Disable contrast enforcement to ensure solid color
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    window.isNavigationBarContrastEnforced = false
+                }
+                
+                android.util.Log.d(TAG, "NavBar update: color=${if (darkTheme) "BLACK" else "WHITE"}, darkTheme=$darkTheme, appTheme=$appTheme")
+            }
+            
+            PixelGalleryTheme(
+                darkTheme = darkTheme,
+                dynamicColor = dynamicColor,
+                amoledMode = amoledMode
+            ) {
+                AppNavigation(
+                    viewModel = viewModel,
+                    settingsDataStore = settingsDataStore,
+                    defaultTab = defaultTab,
+                    lastUsedTab = lastUsedTab,
+                    onTabChanged = { tab ->
+                        lastUsedTab = tab
+                        lifecycleScope.launch {
+                            settingsDataStore.saveLastUsedTab(tab)
+                        }
+                    }
+                )
             }
         }
     }
