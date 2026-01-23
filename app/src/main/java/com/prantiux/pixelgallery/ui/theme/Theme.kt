@@ -13,6 +13,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 val LocalPixelGalleryDarkTheme = staticCompositionLocalOf { false }
@@ -90,12 +91,13 @@ private val LightColorScheme = lightColorScheme(
 fun PixelGalleryTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
+    amoledMode: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
     
     // Prioritize dynamic colors from Android 12+ system
-    val colorScheme = when {
+    val baseColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             try {
                 if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -106,6 +108,22 @@ fun PixelGalleryTheme(
         }
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
+    }
+    
+    // Apply AMOLED mode (pure black) if enabled in dark theme
+    val colorScheme = if (darkTheme && amoledMode) {
+        baseColorScheme.copy(
+            background = Color.Black,
+            surface = Color.Black,
+            surfaceVariant = Color(0xFF1A1A1A),
+            surfaceContainer = Color(0xFF0D0D0D),
+            surfaceContainerLow = Color(0xFF050505),
+            surfaceContainerLowest = Color.Black,
+            surfaceContainerHigh = Color(0xFF1F1F1F),
+            surfaceContainerHighest = Color(0xFF2A2A2A)
+        )
+    } else {
+        baseColorScheme
     }
     
     CompositionLocalProvider(LocalPixelGalleryDarkTheme provides darkTheme) {
