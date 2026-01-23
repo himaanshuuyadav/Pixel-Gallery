@@ -54,13 +54,15 @@ fun AlbumDetailScreen(
     viewModel: MediaViewModel,
     albumId: String,
     onNavigateBack: () -> Unit,
-    onNavigateToViewer: (Int) -> Unit
+    onNavigateToViewer: (Int) -> Unit,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val images by viewModel.allImagesUnfiltered.collectAsState()
     val videos by viewModel.allVideosUnfiltered.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
+    val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val view = LocalView.current
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -260,7 +262,8 @@ fun AlbumDetailScreen(
                             val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                 index = index,
                                 totalItems = group.items.size,
-                                columns = columnCount
+                                columns = columnCount,
+                                cornerType = cornerType
                             )
                             
                             SelectableMediaItem(
