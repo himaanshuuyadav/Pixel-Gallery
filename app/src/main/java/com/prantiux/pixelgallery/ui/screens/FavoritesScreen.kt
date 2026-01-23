@@ -22,9 +22,11 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 @Composable
 fun FavoritesScreen(
     viewModel: MediaViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val favoriteItems by viewModel.favoriteItems.collectAsState()
+    val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     
     SubPageScaffoldGrid(
         title = "Favourites",
@@ -76,6 +78,7 @@ fun FavoritesScreen(
                     isSelected = false,
                     isSelectionMode = false,
                     shape = RoundedCornerShape(4.dp),
+                    badgeType = badgeType,
                     onClick = { bounds ->
                         val index = favoriteItems.indexOf(item)
                         viewModel.showMediaOverlay(
