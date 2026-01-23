@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
  * @param columns Number of columns in the grid (default: 3)
  * @param defaultRadius Default radius for most corners (default: 4.dp)
  * @param accentRadius Accent radius for corner items (default: 8.dp)
+ * @param cornerType Corner type setting ("Rounded" or "Sharp")
  * @return RoundedCornerShape with appropriate corner radii
  */
 fun getGridItemCornerShape(
@@ -20,8 +21,14 @@ fun getGridItemCornerShape(
     totalItems: Int,
     columns: Int = 3,
     defaultRadius: Dp = 4.dp,
-    accentRadius: Dp = 8.dp
+    accentRadius: Dp = 8.dp,
+    cornerType: String = "Rounded"
 ): RoundedCornerShape {
+    // If Sharp corners selected, return sharp corners for all items
+    if (cornerType == "Sharp") {
+        return RoundedCornerShape(0.dp)
+    }
+    
     val row = index / columns
     val col = index % columns
     val totalRows = (totalItems + columns - 1) / columns
