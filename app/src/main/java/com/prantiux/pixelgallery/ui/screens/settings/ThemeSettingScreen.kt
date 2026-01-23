@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,18 +21,46 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeSettingScreen(
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
     onBackClick: () -> Unit = {}
 ) {
-    var selectedTheme by remember { mutableStateOf("System Default (Dark)") }
+    var selectedTheme by remember { mutableStateOf("System Default") }
     var dynamicColorEnabled by remember { mutableStateOf(true) }
     var amoledModeEnabled by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val isSystemInDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    
+    // Load theme settings
+    LaunchedEffect(Unit) {
+        scope.launch {
+            settingsDataStore.appThemeFlow.collect { theme ->
+                selectedTheme = theme
+            }
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        scope.launch {
+            settingsDataStore.dynamicColorFlow.collect { enabled ->
+                dynamicColorEnabled = enabled
+            }
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        scope.launch {
+            settingsDataStore.amoledModeFlow.collect { enabled ->
+                amoledModeEnabled = enabled
+            }
+        }
+    }
     
     // Determine icon based on selected theme
     val themeIcon = when {
         selectedTheme.contains("System", ignoreCase = true) -> "\ue20c"
-        selectedTheme.contains("Light", ignoreCase = true) -> "\ue518"
-        selectedTheme.contains("Dark", ignoreCase = true) -> "\ue51c"
+        selectedTheme.contains("Light", ignoreCase = true) -> FontIcons.LightMode
+        selectedTheme.contains("Dark", ignoreCase = true) -> FontIcons.DarkMode
         else -> FontIcons.Palette
     }
     
@@ -61,7 +90,12 @@ fun ThemeSettingScreen(
                 subtitle = "Material You theming",
                 iconUnicode = FontIcons.ColorLens,
                 checked = dynamicColorEnabled,
-                onCheckedChange = { dynamicColorEnabled = it },
+                onCheckedChange = { 
+                    dynamicColorEnabled = it
+                    scope.launch {
+                        settingsDataStore.saveDynamicColor(it)
+                    }
+                },
                 position = SettingPosition.MIDDLE
             )
         }
@@ -72,8 +106,14 @@ fun ThemeSettingScreen(
                 subtitle = "Pure black background",
                 iconUnicode = FontIcons.Brightness2,
                 checked = amoledModeEnabled,
-                onCheckedChange = { amoledModeEnabled = it },
-                position = SettingPosition.BOTTOM
+                onCheckedChange = { 
+                    amoledModeEnabled = it
+                    scope.launch {
+                        settingsDataStore.saveAmoledMode(it)
+                    }
+                },
+                position = SettingPosition.BOTTOM,
+                enabled = selectedTheme == "Dark" || (selectedTheme == "System Default" && isSystemInDarkTheme)
             )
         }
     }
@@ -84,6 +124,16 @@ fun ThemeSettingScreen(
             currentTheme = selectedTheme,
             onThemeSelected = { 
                 selectedTheme = it
+                scope.launch {
+                    settingsDataStore.saveAppTheme(it)
+                }
+                // Disable AMOLED mode if not in dark theme
+                if (it != "Dark" && amoledModeEnabled) {
+                    amoledModeEnabled = false
+                    scope.launch {
+                        settingsDataStore.saveAmoledMode(false)
+                    }
+                }
                 showThemeDialog = false
             },
             onDismiss = { showThemeDialog = false }
@@ -103,27 +153,26 @@ private fun ThemeSelectionDialog(
             color = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 16.dp)
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Icon at top
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    FontIcon(
-                        unicode = FontIcons.Palette,
-                        contentDescription = null,
-                        size = 32.sp,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                // Icon at top - dynamic based on selection
+                val dialogIcon = when {
+                    currentTheme.contains("System", ignoreCase = true) -> "\ue20c"
+                    currentTheme.contains("Light", ignoreCase = true) -> FontIcons.LightMode
+                    currentTheme.contains("Dark", ignoreCase = true) -> FontIcons.DarkMode
+                    else -> FontIcons.Palette
                 }
+                
+                FontIcon(
+                    unicode = dialogIcon,
+                    contentDescription = null,
+                    size = 40.sp,
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -135,9 +184,9 @@ private fun ThemeSelectionDialog(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 
-                // Grouped theme options with card-style layout
+                // Theme options
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -145,9 +194,9 @@ private fun ThemeSelectionDialog(
                     Column {
                         ThemeOption(
                             iconUnicode = "\ue20c", // System theme icon
-                            label = "System Default (Dark)",
-                            isSelected = currentTheme == "System Default (Dark)",
-                            onClick = { onThemeSelected("System Default (Dark)") },
+                            label = "System Default",
+                            isSelected = currentTheme == "System Default",
+                            onClick = { onThemeSelected("System Default") },
                             position = SettingPosition.TOP
                         )
                         
@@ -157,7 +206,7 @@ private fun ThemeSelectionDialog(
                         )
                         
                         ThemeOption(
-                            iconUnicode = "\ue518", // Light mode icon
+                            iconUnicode = FontIcons.LightMode, // Light mode icon
                             label = "Light",
                             isSelected = currentTheme == "Light",
                             onClick = { onThemeSelected("Light") },
@@ -170,7 +219,7 @@ private fun ThemeSelectionDialog(
                         )
                         
                         ThemeOption(
-                            iconUnicode = "\ue51c", // Dark mode icon
+                            iconUnicode = FontIcons.DarkMode, // Dark mode icon
                             label = "Dark",
                             isSelected = currentTheme == "Dark",
                             onClick = { onThemeSelected("Dark") },
