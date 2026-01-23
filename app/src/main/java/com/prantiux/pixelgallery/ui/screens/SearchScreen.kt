@@ -41,13 +41,19 @@ data class AlbumInfo(val name: String, val count: Int, val thumbnailUri: android
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.NavController) {
+fun SearchScreen(
+    viewModel: MediaViewModel, 
+    navController: androidx.navigation.NavController,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
+) {
     val context = LocalContext.current
     val images by viewModel.images.collectAsState()
     val videos by viewModel.videos.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
+    val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
+    val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     
     // Real recent searches from DataStore
     val recentSearches by viewModel.recentSearches.collectAsState()
@@ -616,8 +622,10 @@ fun SearchScreen(viewModel: MediaViewModel, navController: androidx.navigation.N
                                     shape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                         index = index,
                                         totalItems = matchedMedia.size,
-                                        columns = 3
+                                        columns = 3,
+                                        cornerType = cornerType
                                     ),
+                                    badgeType = badgeType,
                                     onClick = { bounds ->
                                         // Save search to recent searches
                                         viewModel.addRecentSearch(searchQuery)
