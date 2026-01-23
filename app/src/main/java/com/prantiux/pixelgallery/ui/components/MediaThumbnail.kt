@@ -59,7 +59,8 @@ fun MediaThumbnail(
     onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
-    showFavorite: Boolean = true
+    showFavorite: Boolean = true,
+    badgeType: String = "Duration with icon"
 ) {
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     
@@ -148,6 +149,7 @@ fun MediaThumbnail(
         if (item.isVideo) {
             VideoDurationPill(
                 duration = item.duration,
+                badgeType = badgeType,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
@@ -184,7 +186,8 @@ fun MediaThumbnail(
 @Composable
 fun VideoDurationPill(
     duration: Long,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    badgeType: String = "Duration with icon"
 ) {
     Row(
         modifier = modifier
@@ -196,20 +199,42 @@ fun VideoDurationPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        FontIcon(
-            unicode = FontIcons.PlayArrow,
-            contentDescription = "Video",
-            size = 14.sp,
-            tint = Color.White
-        )
-        Text(
-            text = formatDuration(duration),
-            color = Color.White,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
-            )
-        )
+        when (badgeType) {
+            "Duration with icon" -> {
+                FontIcon(
+                    unicode = FontIcons.PlayArrow,
+                    contentDescription = "Video",
+                    size = 14.sp,
+                    tint = Color.White
+                )
+                Text(
+                    text = formatDuration(duration),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+            "Icon only" -> {
+                FontIcon(
+                    unicode = FontIcons.PlayArrow,
+                    contentDescription = "Video",
+                    size = 14.sp,
+                    tint = Color.White
+                )
+            }
+            "Duration only" -> {
+                Text(
+                    text = formatDuration(duration),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+        }
     }
 }
 
