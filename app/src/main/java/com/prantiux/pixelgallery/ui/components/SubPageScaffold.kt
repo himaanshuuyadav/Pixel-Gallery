@@ -98,7 +98,7 @@ fun SubPageScaffold(
                     Column {
                         Text(
                             text = title,
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold
                         )
                         if (subtitle != null) {
