@@ -26,6 +26,7 @@ object FontIcons {
     const val Search = "\ue8b6"
     const val Refresh = "\ue5d5"
     const val KeyboardArrowRight = "\ue315"
+    const val KeyboardArrowDown = "\ue313"
     
     // Media Controls
     const val PlayArrow = "\ue037"
@@ -61,6 +62,9 @@ object FontIcons {
     const val Palette = "\ue40a"
     const val ColorLens = "\ue3ae"
     const val Brightness2 = "\ue1a9"
+    const val Brightness4 = "\ue1aa"
+    const val LightMode = "\ue518"
+    const val DarkMode = "\ue51c"
     
     // Settings & Info
     const val Settings = "\ue8b8"
@@ -93,6 +97,8 @@ object FontIcons {
     const val Move = "\uf1ff"  // drive_file_move icon
     const val Folder = "\ue2c7"  // folder icon
     const val LocationOn = "\ue0c8"  // location_on icon (filled pin)
+    const val PushPin = "\uf10d"  // push_pin icon
+    const val Tab = "\ue8d8"  // tab icon
     
     // Empty States
     const val SearchOff = "\uea76"
