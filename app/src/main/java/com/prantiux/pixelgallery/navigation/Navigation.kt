@@ -68,6 +68,8 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object GridTypeSetting : Screen("grid_type_setting", "Layout")
     object GalleryViewSetting : Screen("gallery_view_setting", "Gallery view")
     object ThemeSetting : Screen("theme_setting", "Theme")
+    object PreviewsSetting : Screen("previews_setting", "Previews")
+    object DebugSetting : Screen("debug_setting", "Debug")
 }
 
 // Expressive transition animations for navigation (Material 3 standard)
@@ -294,16 +296,47 @@ private fun PixelNavBarItem(
 }
 
 @Composable
-fun AppNavigation(viewModel: MediaViewModel) {
+fun AppNavigation(
+    viewModel: MediaViewModel,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
+    defaultTab: String,
+    lastUsedTab: String,
+    onTabChanged: (String) -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val albumRepository = remember { com.prantiux.pixelgallery.data.AlbumRepository(context) }
-    val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(context) }
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val images by viewModel.images.collectAsState()
     val videos by viewModel.videos.collectAsState()
+    
+    // Determine start destination based on default tab setting
+    val startDestination = remember(defaultTab, lastUsedTab) {
+        val tab = if (defaultTab == "Last used") {
+            // Don't open Settings tab on launch, default to Gallery
+            if (lastUsedTab == "Settings") "Gallery" else lastUsedTab
+        } else {
+            defaultTab
+        }
+        
+        when (tab) {
+            "Albums" -> Screen.Albums.route
+            "Search" -> Screen.Search.route
+            else -> Screen.Photos.route
+        }
+    }
+    
+    // Track current tab changes
+    androidx.compose.runtime.LaunchedEffect(currentRoute) {
+        when (currentRoute) {
+            Screen.Photos.route -> onTabChanged("Gallery")
+            Screen.Albums.route -> onTabChanged("Albums")
+            Screen.Search.route -> onTabChanged("Search")
+            Screen.Settings.route -> onTabChanged("Settings")
+        }
+    }
 
     val bottomNavItems = listOf(
         NavItem(Screen.Photos.route, "Gallery", FontIcons.Home),
@@ -334,7 +367,7 @@ fun AppNavigation(viewModel: MediaViewModel) {
             
             NavHost(
                 navController = navController,
-                startDestination = Screen.Photos.route,
+                startDestination = startDestination,
                 modifier = Modifier.fillMaxSize()
             ) {
             composable(
@@ -395,7 +428,8 @@ fun AppNavigation(viewModel: MediaViewModel) {
             ) {
                 RecycleBinScreen(
                     viewModel = viewModel,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    settingsDataStore = settingsDataStore
                 )
             }
             
@@ -408,7 +442,8 @@ fun AppNavigation(viewModel: MediaViewModel) {
             ) {
                 FavoritesScreen(
                     viewModel = viewModel,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    settingsDataStore = settingsDataStore
                 )
             }
 
@@ -419,7 +454,11 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 popEnterTransition = { popEnterTransition() },
                 popExitTransition = { popExitTransition() }
             ) {
-                SearchScreen(viewModel = viewModel, navController = navController)
+                SearchScreen(
+                    viewModel = viewModel, 
+                    navController = navController,
+                    settingsDataStore = settingsDataStore
+                )
             }
 
             composable(
@@ -434,6 +473,8 @@ fun AppNavigation(viewModel: MediaViewModel) {
                     onNavigateToGridType = { navController.navigate(Screen.GridTypeSetting.route) },
                     onNavigateToGalleryView = { navController.navigate(Screen.GalleryViewSetting.route) },
                     onNavigateToTheme = { navController.navigate(Screen.ThemeSetting.route) },
+                    onNavigateToPreviews = { navController.navigate(Screen.PreviewsSetting.route) },
+                    onNavigateToDebug = { navController.navigate(Screen.DebugSetting.route) },
                     onBackClick = { navController.popBackStack() }
                 )
             }
@@ -474,6 +515,32 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 popExitTransition = { popExitTransition() }
             ) {
                 com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
+                    settingsDataStore = settingsDataStore,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.PreviewsSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.settings.PreviewsSettingScreen(
+                    settingsDataStore = settingsDataStore,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.DebugSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.settings.DebugSettingScreen(
                     onBackClick = { navController.popBackStack() }
                 )
             }
@@ -491,7 +558,8 @@ fun AppNavigation(viewModel: MediaViewModel) {
                     viewModel = viewModel,
                     albumId = albumId,
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToViewer = { }
+                    onNavigateToViewer = { },
+                    settingsDataStore = settingsDataStore
                 )
             }
         }
@@ -502,6 +570,13 @@ fun AppNavigation(viewModel: MediaViewModel) {
                 (images + videos).sortedByDescending { it.dateAdded }
             }
             
+            // Get unfiltered media for album overlay (to show albums even if unchecked in gallery view)
+            val allImagesUnfiltered by viewModel.allImagesUnfiltered.collectAsState()
+            val allVideosUnfiltered by viewModel.allVideosUnfiltered.collectAsState()
+            val allMediaUnfiltered = remember(allImagesUnfiltered, allVideosUnfiltered) {
+                (allImagesUnfiltered + allVideosUnfiltered).sortedByDescending { it.dateAdded }
+            }
+            
             // Get search results for overlay
             val searchResults by viewModel.searchResults.collectAsState()
             
@@ -509,9 +584,9 @@ fun AppNavigation(viewModel: MediaViewModel) {
             val favoriteItems by viewModel.favoriteItems.collectAsState()
             
             // Filter media based on overlay state (album or all media)
-            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, searchResults, favoriteItems) {
+            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, allMediaUnfiltered, searchResults, favoriteItems) {
                 when (overlayState.mediaType) {
-                    "album" -> allMedia.filter { it.bucketId == overlayState.albumId }
+                    "album" -> allMediaUnfiltered.filter { it.bucketId == overlayState.albumId }
                         .sortedByDescending { it.dateAdded }
                     "search" -> {
                         // Use actual search results from SearchEngine, not simple filter
