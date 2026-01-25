@@ -123,12 +123,16 @@ fun NavigationBarBackground() {
     
     // Log for debugging
     androidx.compose.runtime.LaunchedEffect(navBarHeight, backgroundColor) {
-        Log.d("NavigationBarBackground", "Drawing nav bar background: height=${navBarHeight}px, color=#${Integer.toHexString(backgroundColor.toArgb())}")
+        Log.d("NavigationBarBackground", "=== NAV BAR BACKGROUND ===")
+        Log.d("NavigationBarBackground", "Height: ${navBarHeight}px")
+        Log.d("NavigationBarBackground", "MaterialTheme.colorScheme.surface: #${Integer.toHexString(backgroundColor.toArgb())}")
+        Log.d("NavigationBarBackground", "Color RGB: R=${backgroundColor.red}, G=${backgroundColor.green}, B=${backgroundColor.blue}")
         if (navBarHeight == 0) {
-            Log.w("NavigationBarBackground", "Navigation bar height is 0 - background will not be visible")
+            Log.w("NavigationBarBackground", "⚠ Navigation bar height is 0 - background will not be visible")
         } else {
             Log.i("NavigationBarBackground", "✓ Background drawable created: ${navBarHeight}px tall")
         }
+        Log.d("NavigationBarBackground", "========================")
     }
     
     Spacer(
