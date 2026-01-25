@@ -33,6 +33,8 @@ fun PreviewsSettingScreen(
     var thumbnailQuality by remember { mutableStateOf("Standard") }
     var cornerType by remember { mutableStateOf("Rounded") }
     var badgeType by remember { mutableStateOf("Duration with icon") }
+    var showBadge by remember { mutableStateOf(true) }
+    var showCompletedDuration by remember { mutableStateOf(false) }
     var showQualityDialog by remember { mutableStateOf(false) }
     var showCornerTypeDialog by remember { mutableStateOf(false) }
     var badgeTypeExpanded by remember { mutableStateOf(false) }
@@ -59,6 +61,22 @@ fun PreviewsSettingScreen(
         scope.launch {
             settingsDataStore.badgeTypeFlow.collect { badge ->
                 badgeType = badge
+            }
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        scope.launch {
+            settingsDataStore.showBadgeFlow.collect { show ->
+                showBadge = show
+            }
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        scope.launch {
+            settingsDataStore.showCompletedDurationFlow.collect { show ->
+                showCompletedDuration = show
             }
         }
     }
@@ -110,16 +128,33 @@ fun PreviewsSettingScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
         
-        // Video duration badge category header
+        // Video thumbnails category header
         item {
-            CategoryHeader("Video duration badge")
+            CategoryHeader("Video thumbnails")
+        }
+        
+        // Badge toggle
+        item {
+            GroupedSettingToggle(
+                title = "Badge",
+                subtitle = "Show badge on video thumbnails",
+                iconUnicode = FontIcons.VideoLibrary,
+                checked = showBadge,
+                onCheckedChange = { 
+                    showBadge = it
+                    scope.launch {
+                        settingsDataStore.saveShowBadge(it)
+                    }
+                },
+                position = SettingPosition.TOP
+            )
         }
         
         // Badge type setting with dropdown
         item {
             Surface(
-                onClick = { badgeTypeExpanded = !badgeTypeExpanded },
-                shape = if (badgeTypeExpanded) RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(24.dp),
+                onClick = { if (showBadge) badgeTypeExpanded = !badgeTypeExpanded },
+                shape = if (badgeTypeExpanded) RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -130,29 +165,33 @@ fun PreviewsSettingScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FontIcon(
-                        unicode = FontIcons.VideoLibrary,
+                        unicode = FontIcons.Edit,
                         contentDescription = null,
                         size = 24.sp,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = if (showBadge) MaterialTheme.colorScheme.primary 
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Badge type",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = if (showBadge) MaterialTheme.colorScheme.onSurface
+                                   else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                         )
                         Text(
                             text = badgeType,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (showBadge) MaterialTheme.colorScheme.onSurfaceVariant
+                                   else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
                         )
                     }
                     FontIcon(
                         unicode = FontIcons.KeyboardArrowDown,
                         contentDescription = null,
                         size = 24.sp,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (showBadge) MaterialTheme.colorScheme.onSurfaceVariant
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
                         modifier = Modifier.graphicsLayer { rotationZ = badgeTypeRotation }
                     )
                 }
@@ -162,7 +201,7 @@ fun PreviewsSettingScreen(
         // Expandable badge type options with animation
         item {
             AnimatedVisibility(
-                visible = badgeTypeExpanded,
+                visible = badgeTypeExpanded && showBadge,
                 enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
                 exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
             ) {
@@ -205,6 +244,27 @@ fun PreviewsSettingScreen(
                     )
                 }
             }
+        }
+        
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        
+        // Duration toggle - ungrouped
+        item {
+            GroupedSettingToggle(
+                title = "Duration",
+                subtitle = "Show completed video duration",
+                iconUnicode = FontIcons.Timer,
+                checked = showCompletedDuration,
+                onCheckedChange = { 
+                    showCompletedDuration = it
+                    scope.launch {
+                        settingsDataStore.saveShowCompletedDuration(it)
+                    }
+                },
+                position = SettingPosition.SINGLE
+            )
         }
     }
     
