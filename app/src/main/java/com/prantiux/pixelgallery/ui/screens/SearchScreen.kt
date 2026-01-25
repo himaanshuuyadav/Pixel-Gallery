@@ -53,6 +53,7 @@ fun SearchScreen(
     val searchResults by viewModel.searchResults.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
+    val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     
     // Real recent searches from DataStore
@@ -626,6 +627,7 @@ fun SearchScreen(
                                         cornerType = cornerType
                                     ),
                                     badgeType = badgeType,
+                                    badgeEnabled = badgeEnabled,
                                     onClick = { bounds ->
                                         // Save search to recent searches
                                         viewModel.addRecentSearch(searchQuery)
