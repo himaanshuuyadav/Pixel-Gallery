@@ -65,6 +65,7 @@ fun RecycleBinScreen(
     val isSelectionMode by viewModel.isTrashSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedTrashItems.collectAsState()
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
+    val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
 
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -98,6 +99,7 @@ fun RecycleBinScreen(
             onNavigateBack = onNavigateBack,
             viewModel = viewModel,
             badgeType = badgeType,
+            badgeEnabled = badgeEnabled,
             cornerType = cornerType
         )
     } else {
@@ -117,6 +119,7 @@ fun RecycleBinContent(
     onNavigateBack: () -> Unit,
     viewModel: MediaViewModel,
     badgeType: String,
+    badgeEnabled: Boolean,
     cornerType: String
 ) {
     val context = LocalContext.current
@@ -246,6 +249,7 @@ fun RecycleBinContent(
                     ) {
                         // Capture variables for use in forEach lambda
                         val capturedBadgeType = badgeType
+                        val capturedBadgeEnabled = badgeEnabled
                         val capturedCornerType = cornerType
                         val capturedSelectedItems = selectedItems
                         val capturedIsSelectionMode = isSelectionMode
@@ -329,6 +333,7 @@ fun RecycleBinContent(
                                     isSelectionMode = capturedIsSelectionMode,
                                     shape = gridShape,
                                     badgeType = capturedBadgeType,
+                                    badgeEnabled = capturedBadgeEnabled,
                                     onClick = { bounds ->
                                         if (isSelectionMode) {
                                             viewModel.toggleTrashSelection(item)
