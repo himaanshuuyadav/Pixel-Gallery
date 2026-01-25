@@ -254,22 +254,41 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemDark
             }
             
+            // Log theme state for debugging
+            LaunchedEffect(appTheme, isSystemDark, darkTheme) {
+                android.util.Log.d(TAG, "=== THEME STATE ===")
+                android.util.Log.d(TAG, "appTheme setting: $appTheme")
+                android.util.Log.d(TAG, "isSystemInDarkTheme: $isSystemDark")
+                android.util.Log.d(TAG, "Computed darkTheme: $darkTheme")
+                android.util.Log.d(TAG, "==================")
+            }
+            
             // Update navigation bar color based on theme
-            // Use LaunchedEffect to respond to darkTheme changes more reliably
-            LaunchedEffect(darkTheme) {
+            // Use SideEffect to ensure it runs on every recomposition
+            SideEffect {
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                 val navBarColor = if (darkTheme) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                
+                android.util.Log.d(TAG, "=== NAVIGATION BAR UPDATE ===")
+                android.util.Log.d(TAG, "darkTheme: $darkTheme")
+                android.util.Log.d(TAG, "appTheme: $appTheme")
+                android.util.Log.d(TAG, "isSystemDark: $isSystemDark")
+                android.util.Log.d(TAG, "Target color: ${if (darkTheme) "BLACK (#000000)" else "WHITE (#FFFFFF)"}")
+                android.util.Log.d(TAG, "Current window.navigationBarColor BEFORE: #${Integer.toHexString(window.navigationBarColor)}")
                 
                 @Suppress("DEPRECATION")
                 window.navigationBarColor = navBarColor
                 insetsController.isAppearanceLightNavigationBars = !darkTheme
                 
+                android.util.Log.d(TAG, "Current window.navigationBarColor AFTER: #${Integer.toHexString(window.navigationBarColor)}")
+                android.util.Log.d(TAG, "isAppearanceLightNavigationBars: ${!darkTheme}")
+                
                 // Disable contrast enforcement to ensure solid color
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     window.isNavigationBarContrastEnforced = false
+                    android.util.Log.d(TAG, "isNavigationBarContrastEnforced: false")
                 }
-                
-                android.util.Log.d(TAG, "NavBar update: color=${if (darkTheme) "BLACK" else "WHITE"}, darkTheme=$darkTheme, appTheme=$appTheme")
+                android.util.Log.d(TAG, "===========================")
             }
             
             PixelGalleryTheme(
