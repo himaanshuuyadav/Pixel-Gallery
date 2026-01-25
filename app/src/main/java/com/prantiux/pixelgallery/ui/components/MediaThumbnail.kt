@@ -60,7 +60,8 @@ fun MediaThumbnail(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
-    badgeType: String = "Duration with icon"
+    badgeType: String = "Duration with icon",
+    badgeEnabled: Boolean = true
 ) {
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     
@@ -146,7 +147,7 @@ fun MediaThumbnail(
         )
         
         // Video duration pill (canonical implementation)
-        if (item.isVideo) {
+        if (item.isVideo && badgeEnabled) {
             VideoDurationPill(
                 duration = item.duration,
                 badgeType = badgeType,
