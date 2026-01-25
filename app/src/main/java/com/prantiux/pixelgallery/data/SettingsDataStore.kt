@@ -30,6 +30,8 @@ class SettingsDataStore(private val context: Context) {
         private val APP_THEME_KEY = stringPreferencesKey("app_theme")
         private val DYNAMIC_COLOR_KEY = booleanPreferencesKey("dynamic_color")
         private val AMOLED_MODE_KEY = booleanPreferencesKey("amoled_mode")
+        private val SHOW_BADGE_KEY = booleanPreferencesKey("show_badge")
+        private val SHOW_COMPLETED_DURATION_KEY = booleanPreferencesKey("show_completed_duration")
     }
     
     /**
@@ -255,6 +257,40 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveAmoledMode(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[AMOLED_MODE_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get show badge state as Flow
+     */
+    val showBadgeFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[SHOW_BADGE_KEY] ?: true
+        }
+    
+    /**
+     * Save show badge preference
+     */
+    suspend fun saveShowBadge(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[SHOW_BADGE_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get show completed duration state as Flow
+     */
+    val showCompletedDurationFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[SHOW_COMPLETED_DURATION_KEY] ?: false
+        }
+    
+    /**
+     * Save show completed duration preference
+     */
+    suspend fun saveShowCompletedDuration(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[SHOW_COMPLETED_DURATION_KEY] = enabled
         }
     }
 }
