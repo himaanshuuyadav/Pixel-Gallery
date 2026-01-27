@@ -120,6 +120,7 @@ fun PhotosContent(
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
+    val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
     
@@ -396,6 +397,7 @@ fun PhotosContent(
                                 shape = gridShape,
                                 badgeType = badgeType,
                                 badgeEnabled = badgeEnabled,
+                                thumbnailQuality = thumbnailQuality,
                                 onClick = { bounds ->
                                     if (isSelectionMode) {
                                         viewModel.toggleSelection(item)
