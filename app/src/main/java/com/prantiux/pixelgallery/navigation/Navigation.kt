@@ -47,6 +47,7 @@ import com.prantiux.pixelgallery.ui.overlay.MediaOverlay
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
 
 data class NavItem(
     val route: String,
@@ -69,6 +70,8 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object GalleryViewSetting : Screen("gallery_view_setting", "Gallery view")
     object ThemeSetting : Screen("theme_setting", "Theme")
     object PreviewsSetting : Screen("previews_setting", "Previews")
+    object GesturesSetting : Screen("gestures_setting", "Gestures")
+    object PlaybackSetting : Screen("playback_setting", "Playback")
     object DebugSetting : Screen("debug_setting", "Debug")
 }
 
@@ -309,6 +312,7 @@ fun AppNavigation(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val albumRepository = remember { com.prantiux.pixelgallery.data.AlbumRepository(context) }
+    val videoPositionDataStore = remember { com.prantiux.pixelgallery.data.VideoPositionDataStore(context) }
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -433,7 +437,8 @@ fun AppNavigation(
                 RecycleBinScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    settingsDataStore = settingsDataStore
+                    settingsDataStore = settingsDataStore,
+                    videoPositionDataStore = videoPositionDataStore
                 )
             }
             
@@ -478,6 +483,8 @@ fun AppNavigation(
                     onNavigateToGalleryView = { navController.navigate(Screen.GalleryViewSetting.route) },
                     onNavigateToTheme = { navController.navigate(Screen.ThemeSetting.route) },
                     onNavigateToPreviews = { navController.navigate(Screen.PreviewsSetting.route) },
+                    onNavigateToGestures = { navController.navigate(Screen.GesturesSetting.route) },
+                    onNavigateToPlayback = { navController.navigate(Screen.PlaybackSetting.route) },
                     onNavigateToDebug = { navController.navigate(Screen.DebugSetting.route) },
                     onBackClick = { navController.popBackStack() }
                 )
@@ -538,6 +545,32 @@ fun AppNavigation(
             }
 
             composable(
+                route = Screen.GesturesSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.settings.GesturesSettingScreen(
+                    settingsDataStore = settingsDataStore,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.PlaybackSetting.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) {
+                com.prantiux.pixelgallery.ui.screens.settings.PlaybackSettingScreen(
+                    settingsDataStore = settingsDataStore,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(
                 route = Screen.DebugSetting.route,
                 enterTransition = { enterTransition() },
                 exitTransition = { exitTransition() },
@@ -545,7 +578,8 @@ fun AppNavigation(
                 popExitTransition = { popExitTransition() }
             ) {
                 com.prantiux.pixelgallery.ui.screens.settings.DebugSettingScreen(
-                    onBackClick = { navController.popBackStack() }
+                    onBackClick = { navController.popBackStack() },
+                    viewModel = viewModel
                 )
             }
 
@@ -611,6 +645,8 @@ fun AppNavigation(
                             viewModel = viewModel,
                             overlayState = overlayState,
                             mediaItems = overlayMediaItems,
+                            settingsDataStore = settingsDataStore,
+                            videoPositionDataStore = videoPositionDataStore,
                             onDismiss = { viewModel.hideMediaOverlay() }
                         )
                     },
@@ -629,6 +665,16 @@ fun AppNavigation(
             // Animate navbar hide/show when overlay is visible or scrollbar is being dragged
             val isOverlayVisible = overlayState.isVisible
             val isScrollbarDragging by viewModel.isScrollbarDragging.collectAsState()
+            
+            // Copy to Album Dialog
+            val showCopyDialog by viewModel.showCopyToAlbumDialog.collectAsState()
+            if (showCopyDialog) {
+                CopyToAlbumDialog(
+                    viewModel = viewModel,
+                    albumRepository = albumRepository,
+                    onDismiss = { viewModel.hideCopyToAlbumDialog() }
+                )
+            }
             
             val navBarAnimProgress by animateFloatAsState(
                 targetValue = if (isOverlayVisible || isScrollbarDragging) 0f else 1f,
@@ -718,7 +764,10 @@ fun AppNavigation(
                         if (isSelectionMode && currentRoute == Screen.Photos.route) {
                             // Handle selection mode actions
                             when (item.route) {
-                                "copy" -> { /* TODO: Copy functionality */ }
+                                "copy" -> { 
+                                    // Show copy to album dialog
+                                    viewModel.showCopyToAlbumDialog(selectedItems.toList())
+                                }
                                 "share" -> { viewModel.shareSelectedItems(context) }
                                 "delete" -> { 
                                     // Directly trigger delete - will show system dialog on Android 11+
