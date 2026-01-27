@@ -74,16 +74,25 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
 fun VideoPlayerScreen(
     videoUri: Uri,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val context = LocalContext.current
+    
+    // Collect playback settings
+    val autoPlayVideos by settingsDataStore.autoPlayVideosFlow.collectAsState(initial = true)
+    val loopVideos by settingsDataStore.loopVideosFlow.collectAsState(initial = false)
+    val keepScreenOn by settingsDataStore.keepScreenOnFlow.collectAsState(initial = true)
+    val muteByDefault by settingsDataStore.muteByDefaultFlow.collectAsState(initial = false)
     
     // ExoPlayer instance
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUri))
             prepare()
-            playWhenReady = true
+            playWhenReady = autoPlayVideos
+            repeatMode = if (loopVideos) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            volume = if (muteByDefault) 0f else 1f
         }
     }
     
@@ -121,6 +130,16 @@ fun VideoPlayerScreen(
         }
     }
     
+    // Update loop mode when setting changes
+    LaunchedEffect(loopVideos) {
+        exoPlayer.repeatMode = if (loopVideos) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+    
+    // Update mute when setting changes
+    LaunchedEffect(muteByDefault) {
+        exoPlayer.volume = if (muteByDefault) 0f else 1f
+    }
+    
     // Player listener
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
@@ -133,6 +152,18 @@ fun VideoPlayerScreen(
         onDispose {
             exoPlayer.removeListener(listener)
             exoPlayer.release()
+        }
+    }
+    
+    // Keep screen on during playback
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(keepScreenOn, isPlaying) {
+        val window = (view.context as? android.app.Activity)?.window
+        if (window != null && keepScreenOn && isPlaying) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
     
