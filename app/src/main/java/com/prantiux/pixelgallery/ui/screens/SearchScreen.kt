@@ -6,6 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -54,36 +58,11 @@ fun SearchScreen(
     val isSearching by viewModel.isSearching.collectAsState()
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
+    val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     
     // Real recent searches from DataStore
     val recentSearches by viewModel.recentSearches.collectAsState()
-    
-    // ML Labeling progress state
-    val isLabelingInProgress by viewModel.isLabelingInProgress.collectAsState()
-    val labelingProgress by viewModel.labelingProgress.collectAsState()
-    val isCharging = remember { 
-        mutableStateOf(com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context))
-    }
-    
-    // Track next batch status
-    var nextBatchStatus by remember { mutableStateOf("Checking...") }
-    
-    // Update charging state and calculate next batch timing
-    LaunchedEffect(Unit) {
-        while (true) {
-            isCharging.value = com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context)
-            
-            // Simple next batch calculation based on current state
-            nextBatchStatus = when {
-                isLabelingInProgress -> "Running now"
-                labelingProgress?.let { (p, t) -> p < t } == true -> "Retry in ~10s"
-                else -> "Complete"
-            }
-            
-            kotlinx.coroutines.delay(5000) // Check every 5 seconds
-        }
-    }
     
     // Material 3 Expressive: Adaptive loading with delay threshold
     // Show loader only if search takes longer than 100ms (prevents flicker on fast searches)
@@ -103,7 +82,7 @@ fun SearchScreen(
         viewModel.refresh(context)
     }
     
-    // Handle back gesture when search query is active
+    // Handle back gesture when search query is active - clear search
     BackHandler(enabled = searchQuery.isNotEmpty()) {
         viewModel.clearSearch()
     }
@@ -130,6 +109,8 @@ fun SearchScreen(
         
         val navBarHeight = calculateFloatingNavBarHeight()
         
+        val keyboardController = LocalSoftwareKeyboardController.current
+        
         TextField(
             value = searchQuery,
             onValueChange = { viewModel.searchMedia(it) },
@@ -143,6 +124,15 @@ fun SearchScreen(
                 }
             },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    if (searchQuery.isNotBlank()) {
+                        viewModel.addRecentSearch(searchQuery.trim())
+                        keyboardController?.hide()
+                    }
+                }
+            ),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -166,291 +156,64 @@ fun SearchScreen(
             when {
                 searchQuery.isBlank() -> {
                     // Empty state with suggestions
+                    val lazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+                    
+                    // Track scrolling to save search
+                    LaunchedEffect(lazyListState.isScrollInProgress) {
+                        if (lazyListState.isScrollInProgress && searchQuery.isNotBlank()) {
+                            viewModel.addRecentSearch(searchQuery.trim())
+                        }
+                    }
+                    
                     LazyColumn(
+                        state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
                     ) {
-                        // ML LABELING DEBUG PANEL - Completely Redesigned
-                        item {
-                            val progress = labelingProgress?.let { (processed, total) ->
-                                if (total > 0) processed.toFloat() / total.toFloat() else 0f
-                            } ?: 0f
-                            
-                            val isComplete = labelingProgress?.let { (processed, total) ->
-                                processed == total && total > 0
-                            } ?: false
-                            
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                color = if (isComplete) 
-                                    MaterialTheme.colorScheme.primaryContainer 
-                                else MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(16.dp),
-                                shadowElevation = 4.dp
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(20.dp)
+                        // Recent Searches with pill UI
+                        if (recentSearches.isNotEmpty()) {
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Header with icon and title
-                                    Row(
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = if (isComplete) "✅" else "🤖",
-                                                style = MaterialTheme.typography.headlineSmall
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Text(
-                                                text = "ML Image Labeling",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                        }
-                                        // Status Badge
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = when {
-                                                isComplete -> MaterialTheme.colorScheme.primary
-                                                isLabelingInProgress -> MaterialTheme.colorScheme.tertiary
-                                                else -> MaterialTheme.colorScheme.surfaceContainer
-                                            }
-                                        ) {
-                                            Text(
-                                                text = when {
-                                                    isComplete -> "DONE"
-                                                    isLabelingInProgress -> "RUNNING"
-                                                    else -> "IDLE"
-                                                },
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = when {
-                                                    isComplete -> MaterialTheme.colorScheme.onPrimary
-                                                    isLabelingInProgress -> MaterialTheme.colorScheme.onTertiary
-                                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                                }
-                                            )
-                                        }
-                                    }
-                                    
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    
-                                    // Large Progress Display
-                                    Row(
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.Bottom,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column {
-                                            Text(
-                                                text = "Images Labeled",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = labelingProgress?.let { (processed, total) ->
-                                                    "$processed / $total"
-                                                } ?: "0 / 0",
-                                                style = MaterialTheme.typography.headlineMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                        // Large Percentage
-                                        Text(
-                                            text = "${(progress * 100).toInt()}%",
-                                            style = MaterialTheme.typography.displaySmall,
-                                            fontWeight = FontWeight.Black,
-                                            color = if (isComplete) 
-                                                MaterialTheme.colorScheme.primary 
-                                            else MaterialTheme.colorScheme.tertiary
-                                        )
-                                    }
-                                    
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    
-                                    // Progress Bar with better visibility
-                                    LinearProgressIndicator(
-                                        progress = { progress },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(8.dp)
-                                            .clip(RoundedCornerShape(4.dp)),
-                                        color = if (isComplete) 
-                                            MaterialTheme.colorScheme.primary 
-                                        else MaterialTheme.colorScheme.tertiary,
-                                        trackColor = MaterialTheme.colorScheme.surfaceContainer
+                                    Text(
+                                        text = "Recent searches",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary
                                     )
-                                    
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    
-                                    HorizontalDivider()
-                                    
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    
-                                    // Detailed Status Grid
-                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        // Charging Status
-                                        Row(
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = "⚡",
-                                                    style = MaterialTheme.typography.titleMedium
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "Device Charging",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                            Text(
-                                                text = if (isCharging.value) "Yes" else "No",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isCharging.value) 
-                                                    MaterialTheme.colorScheme.tertiary
-                                                else MaterialTheme.colorScheme.error
-                                            )
-                                        }
-                                        
-                                        // ML Engine Status
-                                        Row(
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = "🧠",
-                                                    style = MaterialTheme.typography.titleMedium
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "ML Engine",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                            Text(
-                                                text = if (isLabelingInProgress) "Active" else "Standby",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isLabelingInProgress) 
-                                                    MaterialTheme.colorScheme.tertiary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        
-                                        // Completion Status
-                                        Row(
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = if (isComplete) "✅" else "📊",
-                                                    style = MaterialTheme.typography.titleMedium
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "Status",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                            Text(
-                                                text = when {
-                                                    isComplete -> "Labeling Complete!"
-                                                    isLabelingInProgress -> "Processing..."
-                                                    labelingProgress?.first ?: 0 > 0 -> "In Progress"
-                                                    else -> "Not Started"
-                                                },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = when {
-                                                    isComplete -> MaterialTheme.colorScheme.primary
-                                                    isLabelingInProgress -> MaterialTheme.colorScheme.tertiary
-                                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                                }
-                                            )
-                                        }
-                                        
-                                        // Next Batch Schedule (only show if not complete)
-                                        if (!isComplete) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Text(
-                                                        text = "⏰",
-                                                        style = MaterialTheme.typography.titleMedium
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(
-                                                        text = "Next Batch",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                }
-                                                Text(
-                                                    text = nextBatchStatus,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = if (isLabelingInProgress) 
-                                                        MaterialTheme.colorScheme.tertiary
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Info message
-                                    if (!isComplete) {
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
-                                        ) {
-                                            Text(
-                                                text = "💡 ML runs in background without affecting app performance",
-                                                modifier = Modifier.padding(12.dp),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
+                                    TextButton(
+                                        onClick = { viewModel.clearRecentSearches() }
+                                    ) {
+                                        Text(
+                                            text = "Clear all",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
                                     }
                                 }
                             }
-                        }
-                        
-                        // Recent Searches
-                        if (recentSearches.isNotEmpty()) {
                             item {
-                                SectionLabel("Recent searches")
-                            }
-                            items(recentSearches.take(5)) { search ->
-                                SearchSuggestionItem(
-                                    text = search,
-                                    iconUnicode = FontIcons.History,
-                                    onClick = { 
-                                        viewModel.searchMedia(search)
-                                        viewModel.addRecentSearch(search)
-                                    },
-                                    onDelete = {
-                                        viewModel.removeRecentSearch(search)
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
+                                    items(recentSearches.take(10).size) { index ->
+                                        val search = recentSearches.take(10)[index]
+                                        RecentSearchPill(
+                                            text = search,
+                                            onClick = {
+                                                viewModel.searchMedia(search)
+                                                viewModel.addRecentSearch(search)
+                                            },
+                                            onDelete = {
+                                                viewModel.removeRecentSearch(search)
+                                            }
+                                        )
                                     }
-                                )
+                                }
                             }
                             item { Spacer(modifier = Modifier.height(16.dp)) }
                         }
@@ -579,25 +342,33 @@ fun SearchScreen(
                                 )
                             }
                             
-                            items(searchResults.matchedAlbums.size, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) { index ->
-                                val albumMatch = searchResults.matchedAlbums[index]
-                                AlbumResultItem(
-                                    name = albumMatch.albumName,
-                                    count = albumMatch.items.size,
-                                    thumbnailUri = albumMatch.items.firstOrNull()?.uri ?: android.net.Uri.EMPTY,
-                                    onClick = {
-                                        // Navigate to album screen using bucketId from first item
-                                        val bucketId = albumMatch.items.firstOrNull()?.bucketId
-                                        if (bucketId != null) {
-                                            // Save search to recent searches first
-                                            viewModel.addRecentSearch(searchQuery)
-                                            navController.navigate(com.prantiux.pixelgallery.navigation.Screen.AlbumDetail.createRoute(bucketId))
-                                        }
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
+                                    items(searchResults.matchedAlbums.size) { index ->
+                                        val albumMatch = searchResults.matchedAlbums[index]
+                                        AlbumPillItem(
+                                            name = albumMatch.albumName,
+                                            thumbnailUri = albumMatch.items.firstOrNull()?.uri ?: android.net.Uri.EMPTY,
+                                            onClick = {
+                                                // Navigate to album screen using bucketId from first item
+                                                val bucketId = albumMatch.items.firstOrNull()?.bucketId
+                                                if (bucketId != null) {
+                                                    // Save search to recent searches first
+                                                    viewModel.addRecentSearch(searchQuery)
+                                                    navController.navigate(com.prantiux.pixelgallery.navigation.Screen.AlbumDetail.createRoute(bucketId))
+                                                }
+                                            }
+                                        )
                                     }
-                                )
+                                }
                             }
                             
-                            item { Spacer(modifier = Modifier.height(16.dp)) }
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) { 
+                                Spacer(modifier = Modifier.height(16.dp)) 
+                            }
                         }
                         
                         // Matched media section
@@ -628,6 +399,7 @@ fun SearchScreen(
                                     ),
                                     badgeType = badgeType,
                                     badgeEnabled = badgeEnabled,
+                                    thumbnailQuality = thumbnailQuality,
                                     onClick = { bounds ->
                                         // Save search to recent searches
                                         viewModel.addRecentSearch(searchQuery)
@@ -679,6 +451,47 @@ private fun SectionLabel(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
     )
+}
+
+@Composable
+fun RecentSearchPill(text: String, onClick: () -> Unit, onDelete: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        modifier = Modifier.height(40.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Surface(
+                onClick = onDelete,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                modifier = Modifier.size(28.dp)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FontIcon(
+                        unicode = FontIcons.Close,
+                        contentDescription = "Remove",
+                        size = 16.sp,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -825,6 +638,41 @@ fun AlbumQuickAccessItem(name: String, count: Int, thumbnailUri: android.net.Uri
                 )
             }
         }
+    }
+}
+
+@Composable
+fun AlbumPillItem(name: String, thumbnailUri: android.net.Uri, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(120.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+    ) {
+        // Square album cover image
+        AsyncImage(
+            model = thumbnailUri,
+            contentDescription = "$name album cover",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        
+        // Overlaid pill label at bottom center
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp, start = 8.dp, end = 8.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(50)
+                )
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        )
     }
 }
 
