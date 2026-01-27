@@ -45,6 +45,7 @@ import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -331,7 +332,10 @@ fun AlbumDetailScreen(
                 selectedRoute = "",
                 onItemSelected = { item ->
                     when (item.route) {
-                        "copy" -> { /* TODO: Copy to album functionality */ }
+                        "copy" -> { 
+                            // Show copy to album dialog
+                            viewModel.showCopyToAlbumDialog(selectedItems.toList())
+                        }
                         "share" -> { viewModel.shareSelectedItems(context) }
                         "delete" -> {
                             viewModel.deleteSelectedItems(context) { success ->
@@ -343,6 +347,16 @@ fun AlbumDetailScreen(
                 }
             )
         }
+    }
+    
+    // Copy to Album Dialog
+    val showCopyDialog by viewModel.showCopyToAlbumDialog.collectAsState()
+    if (showCopyDialog) {
+        CopyToAlbumDialog(
+            viewModel = viewModel,
+            albumRepository = com.prantiux.pixelgallery.data.AlbumRepository(context),
+            onDismiss = { viewModel.hideCopyToAlbumDialog() }
+        )
     }
     }
 }
