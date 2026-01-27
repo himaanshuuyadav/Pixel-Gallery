@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Size
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -61,7 +63,8 @@ fun MediaThumbnail(
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
     badgeType: String = "Duration with icon",
-    badgeEnabled: Boolean = true
+    badgeEnabled: Boolean = true,
+    thumbnailQuality: String = "Standard"
 ) {
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     
@@ -118,8 +121,35 @@ fun MediaThumbnail(
                 } else Modifier
             )
     ) {
+        // Calculate target thumbnail size based on quality setting
+        val targetSize = when (thumbnailQuality) {
+            "High" -> coil.size.Size.ORIGINAL  // Full resolution, highest quality
+            "Standard" -> coil.size.Size(512, 512)  // 512x512 balanced quality
+            "Automatic" -> {
+                // Auto mode: choose based on device capabilities
+                val activityManager = androidx.compose.ui.platform.LocalContext.current
+                    .getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                val memoryClass = activityManager.memoryClass
+                val density = androidx.compose.ui.platform.LocalDensity.current.density
+                
+                // High-end: 512MB+ RAM and high density (xxhdpi+)
+                // Mid-range: Use standard 512x512
+                // Low-end: Use smaller 384x384
+                when {
+                    memoryClass >= 512 && density >= 3.0f -> coil.size.Size(768, 768)
+                    memoryClass >= 256 -> coil.size.Size(512, 512)
+                    else -> coil.size.Size(384, 384)
+                }
+            }
+            else -> coil.size.Size(512, 512)  // Default to Standard
+        }
+        
         AsyncImage(
-            model = item.uri,
+            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                .data(item.uri)
+                .size(targetSize)
+                .crossfade(true)
+                .build(),
             contentDescription = item.displayName,
             modifier = Modifier
                 .fillMaxSize()
