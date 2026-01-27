@@ -276,12 +276,18 @@ class MainActivity : ComponentActivity() {
                 android.util.Log.d(TAG, "Target color: ${if (darkTheme) "BLACK (#000000)" else "WHITE (#FFFFFF)"}")
                 android.util.Log.d(TAG, "Current window.navigationBarColor BEFORE: #${Integer.toHexString(window.navigationBarColor)}")
                 
+                // On Android 15+, window.navigationBarColor may be ignored in edge-to-edge
+                // The actual color comes from NavigationBarBackground composable
+                // But we still need to set appearance for system icons
                 @Suppress("DEPRECATION")
                 window.navigationBarColor = navBarColor
+                
+                // CRITICAL: Set the appearance (light/dark icons) for proper contrast
                 insetsController.isAppearanceLightNavigationBars = !darkTheme
                 
                 android.util.Log.d(TAG, "Current window.navigationBarColor AFTER: #${Integer.toHexString(window.navigationBarColor)}")
                 android.util.Log.d(TAG, "isAppearanceLightNavigationBars: ${!darkTheme}")
+                android.util.Log.d(TAG, "NOTE: On Android 15+, actual nav bar color comes from NavigationBarBackground composable")
                 
                 // Disable contrast enforcement to ensure solid color
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
