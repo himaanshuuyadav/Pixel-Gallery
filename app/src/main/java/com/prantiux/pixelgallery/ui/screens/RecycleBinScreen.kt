@@ -57,7 +57,8 @@ data class TrashedGroup(
 fun RecycleBinScreen(
     viewModel: MediaViewModel,
     onNavigateBack: () -> Unit,
-    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
+    videoPositionDataStore: com.prantiux.pixelgallery.data.VideoPositionDataStore
 ) {
     val context = LocalContext.current
     val trashedItems by viewModel.trashedItems.collectAsState()
@@ -66,6 +67,7 @@ fun RecycleBinScreen(
     val selectedItems by viewModel.selectedTrashItems.collectAsState()
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
+    val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
 
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -100,7 +102,10 @@ fun RecycleBinScreen(
             viewModel = viewModel,
             badgeType = badgeType,
             badgeEnabled = badgeEnabled,
-            cornerType = cornerType
+            thumbnailQuality = thumbnailQuality,
+            cornerType = cornerType,
+            settingsDataStore = settingsDataStore,
+            videoPositionDataStore = videoPositionDataStore
         )
     } else {
         PermissionRequestScreen(
@@ -120,7 +125,10 @@ fun RecycleBinContent(
     viewModel: MediaViewModel,
     badgeType: String,
     badgeEnabled: Boolean,
-    cornerType: String
+    thumbnailQuality: String,
+    cornerType: String,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
+    videoPositionDataStore: com.prantiux.pixelgallery.data.VideoPositionDataStore
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -250,6 +258,7 @@ fun RecycleBinContent(
                         // Capture variables for use in forEach lambda
                         val capturedBadgeType = badgeType
                         val capturedBadgeEnabled = badgeEnabled
+                        val capturedThumbnailQuality = thumbnailQuality
                         val capturedCornerType = cornerType
                         val capturedSelectedItems = selectedItems
                         val capturedIsSelectionMode = isSelectionMode
@@ -334,6 +343,7 @@ fun RecycleBinContent(
                                     shape = gridShape,
                                     badgeType = capturedBadgeType,
                                     badgeEnabled = capturedBadgeEnabled,
+                                    thumbnailQuality = capturedThumbnailQuality,
                                     onClick = { bounds ->
                                         if (isSelectionMode) {
                                             viewModel.toggleTrashSelection(item)
@@ -427,6 +437,8 @@ fun RecycleBinContent(
                 viewModel = viewModel,
                 overlayState = overlayState,
                 mediaItems = trashedItems,
+                settingsDataStore = settingsDataStore,
+                videoPositionDataStore = videoPositionDataStore,
                 onDismiss = { viewModel.hideMediaOverlay() }
             )
         }
