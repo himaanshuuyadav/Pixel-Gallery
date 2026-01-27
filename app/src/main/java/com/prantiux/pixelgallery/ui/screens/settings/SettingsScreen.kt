@@ -28,6 +28,8 @@ fun SettingsScreen(
     onNavigateToGalleryView: () -> Unit = {},
     onNavigateToTheme: () -> Unit = {},
     onNavigateToPreviews: () -> Unit = {},
+    onNavigateToGestures: () -> Unit = {},
+    onNavigateToPlayback: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onBackClick: () -> Unit = {}
 ) {
@@ -103,14 +105,14 @@ fun SettingsScreen(
                         subtitle = "Swipe and tap controls",
                         iconUnicode = FontIcons.SwipeDown,
                         position = SettingPosition.TOP,
-                        onClick = { /* TODO */ }
+                        onClick = onNavigateToGestures
                     )
                     GroupedSettingItem(
                         title = "Playback",
                         subtitle = "Video and audio settings",
                         iconUnicode = FontIcons.PlayArrow,
                         position = SettingPosition.MIDDLE,
-                        onClick = { /* TODO */ }
+                        onClick = onNavigateToPlayback
                     )
                     GroupedSettingItem(
                         title = "Viewing",
