@@ -28,6 +28,7 @@ fun FavoritesScreen(
     val favoriteItems by viewModel.favoriteItems.collectAsState()
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
+    val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     
     SubPageScaffoldGrid(
         title = "Favourites",
@@ -81,6 +82,7 @@ fun FavoritesScreen(
                     shape = RoundedCornerShape(4.dp),
                     badgeType = badgeType,
                     badgeEnabled = badgeEnabled,
+                    thumbnailQuality = thumbnailQuality,
                     onClick = { bounds ->
                         val index = favoriteItems.indexOf(item)
                         viewModel.showMediaOverlay(
