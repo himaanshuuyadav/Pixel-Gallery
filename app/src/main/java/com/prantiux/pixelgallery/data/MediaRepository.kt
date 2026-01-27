@@ -520,4 +520,78 @@ class MediaRepository(private val context: Context) {
         }
         allSuccess
     }
+    
+    /**
+     * Copy media items to a target album directory
+     * Uses MediaStore to create new entries in the target album's directory
+     */
+    suspend fun copyMediaToAlbum(
+        mediaItems: List<MediaItem>,
+        targetAlbum: Album
+    ): Boolean = withContext(Dispatchers.IO) {
+        var allSuccess = true
+        
+        mediaItems.forEach { item ->
+            try {
+                // Get the target directory path from the album's first item
+                val targetRelativePath = if (Build.VERSION.SDK_INT >= 29) {
+                    // For Android 10+, use relative path from album name
+                    // Most albums are in Pictures or DCIM
+                    when {
+                        targetAlbum.name.contains("Camera", ignoreCase = true) -> "DCIM/Camera"
+                        targetAlbum.name.contains("Screenshots", ignoreCase = true) -> "Pictures/Screenshots"
+                        else -> "Pictures/${targetAlbum.name}"
+                    }
+                } else {
+                    null // Not used on older Android
+                }
+                
+                // Determine the correct content URI
+                val contentUri = if (item.isVideo) {
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                } else {
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                }
+                
+                // Create new MediaStore entry in target location
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, item.displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType)
+                    
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, targetRelativePath)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                }
+                
+                val newUri = context.contentResolver.insert(contentUri, values)
+                
+                if (newUri != null) {
+                    // Copy the actual file content
+                    context.contentResolver.openInputStream(item.uri)?.use { inputStream ->
+                        context.contentResolver.openOutputStream(newUri)?.use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                    
+                    // Mark as completed
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        values.clear()
+                        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        context.contentResolver.update(newUri, values, null, null)
+                    }
+                    
+                    android.util.Log.d("MediaRepository", "Copied ${item.displayName} to ${targetAlbum.name}")
+                } else {
+                    allSuccess = false
+                    android.util.Log.e("MediaRepository", "Failed to create MediaStore entry for: ${item.displayName}")
+                }
+                
+            } catch (e: Exception) {
+                allSuccess = false
+                android.util.Log.e("MediaRepository", "Error copying ${item.displayName}", e)
+            }
+        }
+        allSuccess
+    }
 }
