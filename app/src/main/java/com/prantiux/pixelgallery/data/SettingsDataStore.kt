@@ -32,6 +32,17 @@ class SettingsDataStore(private val context: Context) {
         private val AMOLED_MODE_KEY = booleanPreferencesKey("amoled_mode")
         private val SHOW_BADGE_KEY = booleanPreferencesKey("show_badge")
         private val SHOW_COMPLETED_DURATION_KEY = booleanPreferencesKey("show_completed_duration")
+        private val SWIPE_DOWN_TO_CLOSE_KEY = booleanPreferencesKey("swipe_down_to_close")
+        private val SWIPE_UP_TO_DETAILS_KEY = booleanPreferencesKey("swipe_up_to_details")
+        private val DOUBLE_TAP_TO_ZOOM_KEY = booleanPreferencesKey("double_tap_to_zoom")
+        private val DOUBLE_TAP_ZOOM_LEVEL_KEY = stringPreferencesKey("double_tap_zoom_level")
+        // Playback settings
+        private val AUTO_PLAY_VIDEOS_KEY = booleanPreferencesKey("auto_play_videos")
+        private val RESUME_PLAYBACK_KEY = booleanPreferencesKey("resume_playback")
+        private val LOOP_VIDEOS_KEY = booleanPreferencesKey("loop_videos")
+        private val KEEP_SCREEN_ON_KEY = booleanPreferencesKey("keep_screen_on")
+        private val MUTE_BY_DEFAULT_KEY = booleanPreferencesKey("mute_by_default")
+        private val SHOW_CONTROLS_ON_TAP_KEY = booleanPreferencesKey("show_controls_on_tap")
     }
     
     /**
@@ -291,6 +302,178 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveShowCompletedDuration(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[SHOW_COMPLETED_DURATION_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get swipe down to close state as Flow
+     */
+    val swipeDownToCloseFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[SWIPE_DOWN_TO_CLOSE_KEY] ?: true
+        }
+    
+    /**
+     * Save swipe down to close preference
+     */
+    suspend fun saveSwipeDownToClose(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[SWIPE_DOWN_TO_CLOSE_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get swipe up to details state as Flow
+     */
+    val swipeUpToDetailsFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[SWIPE_UP_TO_DETAILS_KEY] ?: true
+        }
+    
+    /**
+     * Save swipe up to details preference
+     */
+    suspend fun saveSwipeUpToDetails(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[SWIPE_UP_TO_DETAILS_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get double tap to zoom state as Flow
+     */
+    val doubleTapToZoomFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[DOUBLE_TAP_TO_ZOOM_KEY] ?: true
+        }
+    
+    /**
+     * Save double tap to zoom preference
+     */
+    suspend fun saveDoubleTapToZoom(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[DOUBLE_TAP_TO_ZOOM_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get double tap zoom level as Flow
+     */
+    val doubleTapZoomLevelFlow: Flow<String> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[DOUBLE_TAP_ZOOM_LEVEL_KEY] ?: "Fit"
+        }
+    
+    /**
+     * Save double tap zoom level preference
+     */
+    suspend fun saveDoubleTapZoomLevel(level: String) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[DOUBLE_TAP_ZOOM_LEVEL_KEY] = level
+        }
+    }
+    
+    // Playback settings
+    
+    /**
+     * Get auto-play videos state as Flow
+     */
+    val autoPlayVideosFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[AUTO_PLAY_VIDEOS_KEY] ?: true
+        }
+    
+    /**
+     * Save auto-play videos preference
+     */
+    suspend fun saveAutoPlayVideos(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[AUTO_PLAY_VIDEOS_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get resume playback state as Flow
+     */
+    val resumePlaybackFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[RESUME_PLAYBACK_KEY] ?: true
+        }
+    
+    /**
+     * Save resume playback preference
+     */
+    suspend fun saveResumePlayback(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[RESUME_PLAYBACK_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get loop videos state as Flow
+     */
+    val loopVideosFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[LOOP_VIDEOS_KEY] ?: false
+        }
+    
+    /**
+     * Save loop videos preference
+     */
+    suspend fun saveLoopVideos(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[LOOP_VIDEOS_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get keep screen on state as Flow
+     */
+    val keepScreenOnFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[KEEP_SCREEN_ON_KEY] ?: true
+        }
+    
+    /**
+     * Save keep screen on preference
+     */
+    suspend fun saveKeepScreenOn(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[KEEP_SCREEN_ON_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get mute by default state as Flow
+     */
+    val muteByDefaultFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[MUTE_BY_DEFAULT_KEY] ?: false
+        }
+    
+    /**
+     * Save mute by default preference
+     */
+    suspend fun saveMuteByDefault(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[MUTE_BY_DEFAULT_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get show controls on tap state as Flow
+     */
+    val showControlsOnTapFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[SHOW_CONTROLS_ON_TAP_KEY] ?: true
+        }
+    
+    /**
+     * Save show controls on tap preference
+     */
+    suspend fun saveShowControlsOnTap(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[SHOW_CONTROLS_ON_TAP_KEY] = enabled
         }
     }
 }
