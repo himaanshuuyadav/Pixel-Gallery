@@ -92,6 +92,8 @@ fun MediaOverlay(
     viewModel: MediaViewModel,
     overlayState: MediaViewModel.MediaOverlayState,
     mediaItems: List<MediaItem>,
+    settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
+    videoPositionDataStore: com.prantiux.pixelgallery.data.VideoPositionDataStore,
     onDismiss: () -> Unit
 ) {
     if (!overlayState.isVisible) return
@@ -101,6 +103,20 @@ fun MediaOverlay(
     val density = LocalDensity.current
     val view = LocalView.current
     val context = LocalContext.current
+    
+    // Collect gesture settings
+    val swipeDownToClose by settingsDataStore.swipeDownToCloseFlow.collectAsState(initial = true)
+    val swipeUpToDetails by settingsDataStore.swipeUpToDetailsFlow.collectAsState(initial = true)
+    val doubleTapToZoom by settingsDataStore.doubleTapToZoomFlow.collectAsState(initial = true)
+    val doubleTapZoomLevel by settingsDataStore.doubleTapZoomLevelFlow.collectAsState(initial = "Fit")
+    
+    // Collect playback settings
+    val autoPlayVideos by settingsDataStore.autoPlayVideosFlow.collectAsState(initial = true)
+    val resumePlayback by settingsDataStore.resumePlaybackFlow.collectAsState(initial = true)
+    val loopVideos by settingsDataStore.loopVideosFlow.collectAsState(initial = false)
+    val keepScreenOn by settingsDataStore.keepScreenOnFlow.collectAsState(initial = true)
+    val muteByDefault by settingsDataStore.muteByDefaultFlow.collectAsState(initial = false)
+    val showControlsOnTap by settingsDataStore.showControlsOnTapFlow.collectAsState(initial = true)
     
     // Set solid black colors for system bars during media overlay using modern API
     SideEffect {
@@ -148,6 +164,18 @@ fun MediaOverlay(
     var exoPlayer: ExoPlayer? by remember { mutableStateOf(null) }
     var isPlaying by remember { mutableStateOf(false) }
     
+    // Keep screen on for video playback
+    DisposableEffect(keepScreenOn, isPlaying, currentIndex, mediaItems) {
+        val window = (view.context as? Activity)?.window
+        val currentItem = mediaItems.getOrNull(currentIndex)
+        if (window != null && keepScreenOn && currentItem?.isVideo == true && isPlaying) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    
     // Delete confirmation dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -183,7 +211,12 @@ fun MediaOverlay(
     
     // ExoPlayer lifecycle management
     DisposableEffect(context) {
-        val player = ExoPlayer.Builder(context).build()
+        val player = ExoPlayer.Builder(context).build().apply {
+            // Set repeat mode based on loop setting
+            repeatMode = if (loopVideos) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            // Set volume based on mute setting
+            volume = if (muteByDefault) 0f else 1f
+        }
         exoPlayer = player
         onDispose {
             player.release()
@@ -191,21 +224,79 @@ fun MediaOverlay(
         }
     }
     
+    // Update loop mode when setting changes
+    LaunchedEffect(loopVideos) {
+        exoPlayer?.repeatMode = if (loopVideos) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+    
+    // Update mute when setting changes
+    LaunchedEffect(muteByDefault) {
+        exoPlayer?.volume = if (muteByDefault) 0f else 1f
+    }
+    
     // Update video playback when current item changes
-    LaunchedEffect(currentIndex, mediaItems) {
+    LaunchedEffect(currentIndex, mediaItems, autoPlayVideos, resumePlayback) {
         exoPlayer?.let { player ->
+            // Save position of previous video before switching
+            val previousIndex = currentIndex - 1
+            if (previousIndex >= 0 && previousIndex < mediaItems.size) {
+                val previousItem = mediaItems.getOrNull(previousIndex)
+                if (previousItem?.isVideo == true && resumePlayback) {
+                    val position = player.currentPosition
+                    val duration = player.duration
+                    // Only save if video has meaningful progress (>2 sec) and isn't near the end
+                    if (position > 2000 && duration > 0 && position < duration - 3000) {
+                        videoPositionDataStore.savePosition(previousItem.uri.toString(), position)
+                    } else if (position >= duration - 3000 && duration > 0) {
+                        // Video completed, clear saved position
+                        videoPositionDataStore.clearPosition(previousItem.uri.toString())
+                    }
+                }
+            }
+            
             val currentItem = mediaItems.getOrNull(currentIndex)
             if (currentItem?.isVideo == true) {
                 val mediaItem = ExoMediaItem.fromUri(currentItem.uri)
                 player.setMediaItem(mediaItem)
                 player.prepare()
-                player.playWhenReady = true
-                isPlaying = true
+                
+                // Restore saved position if resume playback is enabled
+                if (resumePlayback) {
+                    val savedPosition = videoPositionDataStore.getPosition(currentItem.uri.toString())
+                    if (savedPosition > 0) {
+                        player.seekTo(savedPosition)
+                    }
+                }
+                
+                // Use autoPlayVideos setting to determine if video should start playing
+                player.playWhenReady = autoPlayVideos
+                isPlaying = autoPlayVideos
             } else {
                 player.pause()
                 player.clearMediaItems()
                 isPlaying = false
             }
+        }
+    }
+    
+    // Save video position periodically while playing
+    LaunchedEffect(currentIndex, mediaItems, resumePlayback) {
+        while (isActive && resumePlayback) {
+            val currentItem = mediaItems.getOrNull(currentIndex)
+            if (currentItem?.isVideo == true && isPlaying) {
+                exoPlayer?.let { player ->
+                    val position = player.currentPosition
+                    val duration = player.duration
+                    // Save position every 3 seconds if video is playing
+                    if (position > 2000 && duration > 0 && position < duration - 3000) {
+                        videoPositionDataStore.savePosition(currentItem.uri.toString(), position)
+                    } else if (position >= duration - 3000 && duration > 0) {
+                        // Video near end, clear saved position
+                        videoPositionDataStore.clearPosition(currentItem.uri.toString())
+                    }
+                }
+            }
+            kotlinx.coroutines.delay(3000)
         }
     }
     
@@ -394,9 +485,19 @@ fun MediaOverlay(
     
     // Double-tap zoom handler (images only)
     val handleDoubleTap: () -> Unit = {
-        if (currentItem?.isVideo != true && animationProgress >= 1f && !isClosing) {
+        if (currentItem?.isVideo != true && animationProgress >= 1f && !isClosing && doubleTapToZoom) {
             scope.launch {
-                val targetScale = if (scale > 1f) 1f else 2f
+                // Calculate target scale based on zoom level setting
+                val targetScale = if (scale > 1f) {
+                    1f  // Zoom out to fit
+                } else {
+                    when (doubleTapZoomLevel) {
+                        "2x" -> 2f
+                        "3x" -> 3f
+                        "4x" -> 4f
+                        else -> 2f
+                    }
+                }
                 val targetOffsetX = if (targetScale == 1f) 0f else offsetX
                 val targetOffsetY = if (targetScale == 1f) 0f else offsetY
                 
@@ -536,14 +637,14 @@ fun MediaOverlay(
                             if (abs(accumulatedDx) > threshold || abs(accumulatedDy) > threshold) {
                                 currentGestureMode = when {
                                     abs(accumulatedDx) > abs(accumulatedDy) -> GestureMode.HORIZONTAL_SWIPE
-                                    accumulatedDy > 0 -> GestureMode.VERTICAL_DOWN
-                                    accumulatedDy < 0 -> GestureMode.VERTICAL_UP
+                                    accumulatedDy > 0 && (swipeDownToClose || detailsPanelProgress.value > 0f) -> GestureMode.VERTICAL_DOWN
+                                    accumulatedDy < 0 && swipeUpToDetails -> GestureMode.VERTICAL_UP
                                     else -> GestureMode.NONE
                                 }
                                 gestureMode = currentGestureMode
                                 
                                 // 4️⃣ LOG DIRECTION LOCK DECISION
-                                Log.d("GESTURE_DEBUG", "DIRECTION LOCKED → $currentGestureMode")
+                                Log.d("GESTURE_DEBUG", "DIRECTION LOCKED → $currentGestureMode (swipeUp=$swipeUpToDetails, swipeDown=$swipeDownToClose)")
                             }
                         }
 
@@ -576,33 +677,38 @@ fun MediaOverlay(
                             }
                             
                             GestureMode.VERTICAL_UP -> {
-                                scope.launch {
-                                    verticalOffset.snapTo(verticalOffset.value + dy)
-                                    Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
-                                    
-                                    // Calculate progress based on drag distance (threshold = 50% screen height)
-                                    val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
-                                    detailsPanelProgress.snapTo(progress)
-                                    
-                                    // Hide controls immediately when gesture starts
-                                    if (progress > 0.01f) {
-                                        showControls = false
+                                // Only process if swipe up to details is enabled
+                                if (swipeUpToDetails) {
+                                    scope.launch {
+                                        verticalOffset.snapTo(verticalOffset.value + dy)
+                                        Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
+                                        
+                                        // Calculate progress based on drag distance (threshold = 50% screen height)
+                                        val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
+                                        detailsPanelProgress.snapTo(progress)
+                                        
+                                        // Hide controls immediately when gesture starts
+                                        if (progress > 0.01f) {
+                                            showControls = false
+                                        }
                                     }
                                 }
                             }
                             
                             GestureMode.VERTICAL_DOWN -> {
-                                // Track downward swipe for overlay close
-                                scope.launch {
-                                    verticalOffset.snapTo(verticalOffset.value + dy)
-                                    Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
+                                // Only track if enabled (either for closing overlay or closing details panel)
+                                if (swipeDownToClose || detailsPanelProgress.value > 0f) {
+                                    scope.launch {
+                                        verticalOffset.snapTo(verticalOffset.value + dy)
+                                        Log.d("GESTURE_DEBUG", "OFFSET UPDATE - vertical=${verticalOffset.value}")
+                                    }
+                                    
+                                    // Calculate vertical velocity for intent detection
+                                    val currentTime = System.currentTimeMillis()
+                                    val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
+                                    velocityY = (dy / deltaTime) * 1000f  // pixels per second
+                                    lastMoveTime = currentTime
                                 }
-                                
-                                // Calculate vertical velocity for intent detection
-                                val currentTime = System.currentTimeMillis()
-                                val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
-                                velocityY = (dy / deltaTime) * 1000f  // pixels per second
-                                lastMoveTime = currentTime
                             }
                             
                             else -> {
@@ -674,38 +780,46 @@ fun MediaOverlay(
                         }
                         
                         GestureMode.VERTICAL_UP -> {
-                            Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=${detailsPanelProgress.value}, threshold=0.3f")
-                            
-                            scope.launch {
-                                if (detailsPanelProgress.value >= 0.3f) {
-                                    // Complete gesture - lock details panel at 100%
-                                    showDetailsPanel = true
-                                    Log.d("GESTURE_DEBUG", "GESTURE RESULT → LOCK_DETAILS")
-                                    launch {
-                                        detailsPanelProgress.animateTo(
-                                            targetValue = 1f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessMedium
+                            // Only process if swipe up to details is enabled
+                            if (swipeUpToDetails) {
+                                Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - detailsProgress=${detailsPanelProgress.value}, threshold=0.3f")
+                                
+                                scope.launch {
+                                    if (detailsPanelProgress.value >= 0.3f) {
+                                        // Complete gesture - lock details panel at 100%
+                                        showDetailsPanel = true
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → LOCK_DETAILS")
+                                        launch {
+                                            detailsPanelProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
                                             )
-                                        )
-                                    }
-                                } else {
-                                    // Snap back - collapse details
-                                    Log.d("GESTURE_DEBUG", "GESTURE RESULT → COLLAPSE_DETAILS")
-                                    launch {
-                                        detailsPanelProgress.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessMedium
+                                        }
+                                    } else {
+                                        // Snap back - collapse details
+                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → COLLAPSE_DETAILS")
+                                        launch {
+                                            detailsPanelProgress.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
                                             )
-                                        )
+                                        }
+                                        showDetailsPanel = false
+                                        showControls = true
                                     }
-                                    showDetailsPanel = false
-                                    showControls = true
+                                    verticalOffset.snapTo(0f)
                                 }
-                                verticalOffset.snapTo(0f)
+                            } else {
+                                // If disabled, just snap back
+                                scope.launch {
+                                    verticalOffset.snapTo(0f)
+                                }
                             }
                         }
                         
@@ -748,8 +862,8 @@ fun MediaOverlay(
                                     }
                                     verticalOffset.snapTo(0f)
                                 }
-                            } else {
-                                // Details panel is closed, proceed with image close
+                            } else if (swipeDownToClose) {
+                                // Details panel is closed, proceed with image close only if enabled
                                 val threshold = 150f
                                 
                                 Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - offset=${verticalOffset.value}, threshold=$threshold")
@@ -795,6 +909,17 @@ fun MediaOverlay(
                                             )
                                         )
                                     }
+                                }
+                            } else {
+                                // If swipe down to close is disabled, just snap back
+                                scope.launch {
+                                    verticalOffset.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
                                 }
                             }
                         }
@@ -1212,7 +1337,8 @@ fun MediaOverlay(
                                     },
                                     onClick = {
                                         menuExpanded = false
-                                        // TODO: Copy to album
+                                        // Show copy to album dialog with current item
+                                        viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem))
                                     }
                                 )
                                 // 3. 3. Move to album
