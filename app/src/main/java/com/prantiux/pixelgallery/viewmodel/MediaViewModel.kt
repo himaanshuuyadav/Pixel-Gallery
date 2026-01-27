@@ -125,6 +125,13 @@ class MediaViewModel : ViewModel() {
     private val _pinchGestureEnabled = MutableStateFlow(false)
     val pinchGestureEnabled: StateFlow<Boolean> = _pinchGestureEnabled.asStateFlow()
     
+    // Copy to album dialog state
+    private val _showCopyToAlbumDialog = MutableStateFlow(false)
+    val showCopyToAlbumDialog: StateFlow<Boolean> = _showCopyToAlbumDialog.asStateFlow()
+    
+    private val _itemsToCopy = MutableStateFlow<List<MediaItem>>(emptyList())
+    val itemsToCopy: StateFlow<List<MediaItem>> = _itemsToCopy.asStateFlow()
+    
     // Store URIs being processed
     private var pendingRestoreUris: List<android.net.Uri> = emptyList()
     private var pendingDeleteUris: List<android.net.Uri> = emptyList()
@@ -592,6 +599,21 @@ class MediaViewModel : ViewModel() {
     /**
      * Clear all recent searches
      */
+    fun clearRecentSearches() {
+        viewModelScope.launch {
+            if (::recentSearchesDataStore.isInitialized) {
+                try {
+                    recentSearchesDataStore.clearAllRecentSearches()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+    
+    /**
+     * Clear all recent searches
+     */
     fun clearAllRecentSearches() {
         viewModelScope.launch {
             if (::recentSearchesDataStore.isInitialized) {
@@ -788,11 +810,21 @@ class MediaViewModel : ViewModel() {
                 
                 _isLabelingInProgress.value = runningWork != null
                 
-                // Get progress from any work (running or completed)
-                val latestWork = workInfoList.firstOrNull()
-                if (latestWork != null) {
-                    val progress = latestWork.progress.getInt(ImageLabelWorker.KEY_PROGRESS, 0)
-                    val total = latestWork.progress.getInt(ImageLabelWorker.KEY_TOTAL, 0)
+                // Get progress from running work first, then completed work
+                val workToCheck = runningWork ?: workInfoList.firstOrNull { 
+                    it.state == WorkInfo.State.SUCCEEDED 
+                }
+                
+                if (workToCheck != null) {
+                    // Try to get from progress (for running work)
+                    var progress = workToCheck.progress.getInt(ImageLabelWorker.KEY_PROGRESS, 0)
+                    var total = workToCheck.progress.getInt(ImageLabelWorker.KEY_TOTAL, 0)
+                    
+                    // If not in progress, try output data (for completed work)
+                    if (total == 0) {
+                        progress = workToCheck.outputData.getInt(ImageLabelWorker.KEY_PROGRESS, 0)
+                        total = workToCheck.outputData.getInt(ImageLabelWorker.KEY_TOTAL, 0)
+                    }
                     
                     if (total > 0) {
                         _labelingProgress.value = Pair(progress, total)
@@ -814,6 +846,30 @@ class MediaViewModel : ViewModel() {
         val progress = _labelingProgress.value ?: return 0f
         if (progress.second == 0) return 0f
         return progress.first.toFloat() / progress.second.toFloat()
+    }
+    
+    // Copy to album functions
+    fun showCopyToAlbumDialog(items: List<MediaItem>) {
+        _itemsToCopy.value = items
+        _showCopyToAlbumDialog.value = true
+    }
+    
+    fun hideCopyToAlbumDialog() {
+        _showCopyToAlbumDialog.value = false
+        _itemsToCopy.value = emptyList()
+    }
+    
+    suspend fun copyToAlbum(targetAlbum: Album): Boolean {
+        return if (::repository.isInitialized) {
+            val items = _itemsToCopy.value
+            if (items.isNotEmpty()) {
+                repository.copyMediaToAlbum(items, targetAlbum)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
     
     // Grid type functions
