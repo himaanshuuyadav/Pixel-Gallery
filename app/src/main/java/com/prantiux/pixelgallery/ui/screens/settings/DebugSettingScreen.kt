@@ -1,18 +1,20 @@
 package com.prantiux.pixelgallery.ui.screens.settings
 
 import android.content.Context
+import android.location.Address
+import android.location.Geocoder
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,27 +22,75 @@ import androidx.compose.ui.unit.sp
 import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DebugSettingScreen(
-    onBackClick: () -> Unit = {}
+    onBackClick: () -> Unit = {},
+    viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var metadataList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var locationAddress by remember { mutableStateOf<String?>(null) }
+    var isGeocodingInProgress by remember { mutableStateOf(false) }
+    var gpsCoordinates by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    
+    // ML Labeling progress state from viewModel
+    val isLabelingInProgress by viewModel.isLabelingInProgress.collectAsState()
+    val labelingProgress by viewModel.labelingProgress.collectAsState()
+    val isCharging = remember { 
+        mutableStateOf(com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context))
+    }
+    
+    // Track next batch status
+    var nextBatchStatus by remember { mutableStateOf("Checking...") }
+    
+    // Update charging state and calculate next batch timing
+    LaunchedEffect(Unit) {
+        while (true) {
+            isCharging.value = com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context)
+            
+            // Simple next batch calculation based on current state
+            nextBatchStatus = when {
+                isLabelingInProgress -> "Running now"
+                labelingProgress?.let { (p, t) -> p < t } == true -> "Retry in ~10s"
+                else -> "Complete"
+            }
+            
+            kotlinx.coroutines.delay(5000) // Check every 5 seconds
+        }
+    }
     
     // Image picker launcher
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         selectedImageUri = uri
+        locationAddress = null
+        gpsCoordinates = null
         uri?.let {
             val result = extractImageMetadata(context, it)
             metadataList = result.first
             errorMessage = result.second
+            gpsCoordinates = result.third
+            
+            // Get location from coordinates if available
+            result.third?.let { coords ->
+                isGeocodingInProgress = true
+                scope.launch {
+                    val address = getAddressFromCoordinates(context, coords.first, coords.second)
+                    locationAddress = address
+                    isGeocodingInProgress = false
+                }
+            }
         }
     }
     
@@ -50,6 +100,278 @@ fun DebugSettingScreen(
         onNavigateBack = onBackClick
     ) {
         // Add consistent spacing
+        item {
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+        
+        // ML LABELING DEBUG PANEL
+        item {
+            CategoryHeader("ML Image Labeling")
+        }
+        
+        item {
+            val progress = labelingProgress?.let { (processed, total) ->
+                if (total > 0) processed.toFloat() / total.toFloat() else 0f
+            } ?: 0f
+            
+            val isComplete = labelingProgress?.let { (processed, total) ->
+                processed >= total && total > 0
+            } ?: false
+            
+            Surface(
+                color = if (isLabelingInProgress) 
+                    MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                else if (isComplete)
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(24.dp),
+                shadowElevation = 4.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp)
+                ) {
+                    // Header with icon and title
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isComplete) "✅" else "🤖",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "ML Image Labeling",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        // Status Badge
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = when {
+                                isComplete -> MaterialTheme.colorScheme.primary
+                                isLabelingInProgress -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.surfaceContainer
+                            }
+                        ) {
+                            Text(
+                                text = when {
+                                    isComplete -> "DONE"
+                                    isLabelingInProgress -> "RUNNING"
+                                    else -> "IDLE"
+                                },
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    isComplete -> MaterialTheme.colorScheme.onPrimary
+                                    isLabelingInProgress -> MaterialTheme.colorScheme.onTertiary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Large Progress Display
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column {
+                            Text(
+                                text = "Images Labeled",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = labelingProgress?.let { (processed, total) ->
+                                    "$processed / $total"
+                                } ?: "0 / 0",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        // Large Percentage
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Black,
+                            color = if (isComplete) 
+                                MaterialTheme.colorScheme.primary 
+                            else MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Progress Bar with better visibility
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = if (isComplete) 
+                            MaterialTheme.colorScheme.primary 
+                        else MaterialTheme.colorScheme.tertiary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainer
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    HorizontalDivider()
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Detailed Status Grid
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Charging Status
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "⚡",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Device Charging",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = if (isCharging.value) "Yes" else "No",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCharging.value) 
+                                    MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.error
+                            )
+                        }
+                        
+                        // ML Engine Status
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "🧠",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "ML Engine",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = if (isLabelingInProgress) "Active" else "Standby",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isLabelingInProgress) 
+                                    MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        // Completion Status
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (isComplete) "✅" else "📊",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Status",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = when {
+                                    isComplete -> "Labeling Complete!"
+                                    isLabelingInProgress -> "Processing..."
+                                    labelingProgress?.first ?: 0 > 0 -> "In Progress"
+                                    else -> "Not Started"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    isComplete -> MaterialTheme.colorScheme.primary
+                                    isLabelingInProgress -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        
+                        // Next Batch Schedule (only show if not complete)
+                        if (!isComplete) {
+                            Row(
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "⏰",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Next Batch",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Text(
+                                    text = nextBatchStatus,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isLabelingInProgress) 
+                                        MaterialTheme.colorScheme.tertiary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Info message
+                    if (!isComplete) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "💡 ML runs in background without affecting app performance",
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
         item {
             Spacer(modifier = Modifier.height(28.dp))
         }
@@ -118,6 +440,104 @@ fun DebugSettingScreen(
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(16.dp)
                     )
+                }
+            }
+        }
+        
+        // GPS Location display
+        if (gpsCoordinates != null) {
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            item {
+                CategoryHeader("GPS Location")
+            }
+            item {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                    ) {
+                        // Coordinates
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "📍",
+                                    style = MaterialTheme.typography.headlineSmall
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Coordinates",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        text = "${gpsCoordinates!!.first}, ${gpsCoordinates!!.second}",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Address
+                        if (isGeocodingInProgress) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Getting location address...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                )
+                            }
+                        } else if (locationAddress != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = "🗺️",
+                                    style = MaterialTheme.typography.headlineSmall
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Location",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        text = locationAddress ?: "Unknown location",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -191,11 +611,64 @@ private fun MetadataItem(
 }
 
 /**
+ * Get address from GPS coordinates using Geocoder
+ */
+private suspend fun getAddressFromCoordinates(context: Context, latitude: Double, longitude: Double): String? {
+    return withContext(Dispatchers.IO) {
+        try {
+            val geocoder = Geocoder(context, Locale.getDefault())
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // API 33+ async approach
+                var result: String? = null
+                geocoder.getFromLocation(latitude, longitude, 1) { addresses ->
+                    result = formatAddress(addresses.firstOrNull())
+                }
+                // Wait a bit for the callback
+                kotlinx.coroutines.delay(2000)
+                result ?: "Unable to determine location"
+            } else {
+                // Legacy sync approach
+                @Suppress("DEPRECATION")
+                val addresses = geocoder.getFromLocation(latitude, longitude, 1)
+                formatAddress(addresses?.firstOrNull()) ?: "Unable to determine location"
+            }
+        } catch (e: Exception) {
+            "Geocoding error: ${e.message}"
+        }
+    }
+}
+
+/**
+ * Format address from Geocoder result
+ */
+private fun formatAddress(address: Address?): String? {
+    if (address == null) return null
+    
+    val parts = mutableListOf<String>()
+    
+    // Add street address
+    address.thoroughfare?.let { parts.add(it) }
+    
+    // Add locality (city)
+    address.locality?.let { parts.add(it) }
+    
+    // Add admin area (state/province)
+    address.adminArea?.let { parts.add(it) }
+    
+    // Add country
+    address.countryName?.let { parts.add(it) }
+    
+    return if (parts.isNotEmpty()) parts.joinToString(", ") else null
+}
+
+/**
  * Extract all EXIF metadata from an image
  */
-private fun extractImageMetadata(context: Context, uri: Uri): Pair<List<Pair<String, String>>, String?> {
+private fun extractImageMetadata(context: Context, uri: Uri): Triple<List<Pair<String, String>>, String?, Pair<Double, Double>?> {
     val metadataList = mutableListOf<Pair<String, String>>()
     var error: String? = null
+    var coordinates: Pair<Double, Double>? = null
     
     try {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -263,10 +736,11 @@ private fun extractImageMetadata(context: Context, uri: Uri): Pair<List<Pair<Str
             // Try to get GPS coordinates if available
             val latLong = FloatArray(2)
             if (exif.getLatLong(latLong)) {
-                metadataList.add("GPS Coordinates" to "${latLong[0]}, ${latLong[1]}")
+                coordinates = latLong[0].toDouble() to latLong[1].toDouble()
+                // Don't add to metadata list - will be shown separately in GPS Location section
             }
             
-            if (metadataList.isEmpty()) {
+            if (metadataList.isEmpty() && coordinates == null) {
                 error = "No EXIF metadata found in this image"
             }
         }
@@ -276,5 +750,5 @@ private fun extractImageMetadata(context: Context, uri: Uri): Pair<List<Pair<Str
         error = "Error extracting metadata: ${e.message}"
     }
     
-    return metadataList to error
+    return Triple(metadataList, error, coordinates)
 }
