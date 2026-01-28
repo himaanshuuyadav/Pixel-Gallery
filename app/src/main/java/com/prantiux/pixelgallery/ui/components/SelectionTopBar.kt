@@ -46,7 +46,8 @@ fun SelectionTopBar(
     isVisible: Boolean,
     selectedCount: Int,
     onCancelSelection: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    successMessage: String? = null
 ) {
     // Animated visibility with custom enter/exit transitions - slides up from bottom
     AnimatedVisibility(
@@ -73,7 +74,8 @@ fun SelectionTopBar(
     ) {
         SelectionTopBarContent(
             selectedCount = selectedCount,
-            onCancelSelection = onCancelSelection
+            onCancelSelection = onCancelSelection,
+            successMessage = successMessage
         )
     }
 }
@@ -84,7 +86,8 @@ fun SelectionTopBar(
 @Composable
 private fun SelectionTopBarContent(
     selectedCount: Int,
-    onCancelSelection: () -> Unit
+    onCancelSelection: () -> Unit,
+    successMessage: String?
 ) {
     // Animate the count change with a subtle scale effect
     val countAnimatable = remember { Animatable(selectedCount.toFloat()) }
@@ -122,15 +125,19 @@ private fun SelectionTopBarContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left side: Selected count with animated scale
+                // Left side: Selected count or success message
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    // Checkmark icon
+                    // Icon (Checkmark for selection, Check circle for success)
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        color = if (successMessage != null) 
+                            MaterialTheme.colorScheme.primaryContainer 
+                        else 
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                         modifier = Modifier.size(36.dp)
                     ) {
                         Box(
@@ -138,17 +145,23 @@ private fun SelectionTopBarContent(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             FontIcon(
-                                unicode = FontIcons.Done,
+                                unicode = if (successMessage != null) 
+                                    FontIcons.Check 
+                                else 
+                                    FontIcons.Done,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = if (successMessage != null)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.primary,
                                 size = 20.sp
                             )
                         }
                     }
                     
-                    // Count text with animation
+                    // Text with animation
                     Text(
-                        text = "$selectedCount selected",
+                        text = successMessage ?: "$selectedCount selected",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold
                         ),
@@ -156,19 +169,21 @@ private fun SelectionTopBarContent(
                     )
                 }
                 
-                // Right side: Cancel button
-                TextButton(
-                    onClick = onCancelSelection,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text(
-                        text = "Cancel",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.SemiBold
+                // Right side: Cancel button (hidden during success message)
+                if (successMessage == null) {
+                    TextButton(
+                        onClick = onCancelSelection,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
                         )
-                    )
+                    ) {
+                        Text(
+                            text = "Cancel",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                    }
                 }
             }
         }
