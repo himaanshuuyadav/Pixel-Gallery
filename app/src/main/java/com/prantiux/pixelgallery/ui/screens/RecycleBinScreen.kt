@@ -394,10 +394,13 @@ fun RecycleBinContent(
         
         // Selection Top Bar - overlay above navigation bar
         val navBarHeight = calculateFloatingNavBarHeight()
+        val deleteSuccessMessage by viewModel.deleteSuccessMessage.collectAsState()
+        val restoreSuccessMessage by viewModel.restoreSuccessMessage.collectAsState()
         com.prantiux.pixelgallery.ui.components.SelectionTopBar(
-            isVisible = isSelectionMode,
+            isVisible = isSelectionMode || deleteSuccessMessage != null || restoreSuccessMessage != null,
             selectedCount = selectedItems.size,
             onCancelSelection = { viewModel.exitTrashSelectionMode() },
+            successMessage = deleteSuccessMessage ?: restoreSuccessMessage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
