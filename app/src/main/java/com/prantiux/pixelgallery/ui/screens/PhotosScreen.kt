@@ -458,10 +458,14 @@ fun PhotosContent(
         )
         
         // Selection Top Bar - overlay above navigation bar
+        val copySuccessMessage by viewModel.copySuccessMessage.collectAsState()
+        val moveSuccessMessage by viewModel.moveSuccessMessage.collectAsState()
+        val deleteSuccessMessage by viewModel.deleteSuccessMessage.collectAsState()
         com.prantiux.pixelgallery.ui.components.SelectionTopBar(
-            isVisible = isSelectionMode,
+            isVisible = isSelectionMode || copySuccessMessage != null || moveSuccessMessage != null || deleteSuccessMessage != null,
             selectedCount = selectedItems.size,
             onCancelSelection = { viewModel.exitSelectionMode() },
+            successMessage = copySuccessMessage ?: moveSuccessMessage ?: deleteSuccessMessage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
