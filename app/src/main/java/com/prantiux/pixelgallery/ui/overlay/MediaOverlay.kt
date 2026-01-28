@@ -1360,7 +1360,8 @@ fun MediaOverlay(
                                     },
                                     onClick = {
                                         menuExpanded = false
-                                        // TODO: Move to album
+                                        // Show move to album dialog with current item
+                                        viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem))
                                     }
                                 )
                                 // 4. Details
