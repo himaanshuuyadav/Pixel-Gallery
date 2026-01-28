@@ -132,6 +132,25 @@ class MediaViewModel : ViewModel() {
     private val _itemsToCopy = MutableStateFlow<List<MediaItem>>(emptyList())
     val itemsToCopy: StateFlow<List<MediaItem>> = _itemsToCopy.asStateFlow()
     
+    // Move to album dialog state
+    private val _showMoveToAlbumDialog = MutableStateFlow(false)
+    val showMoveToAlbumDialog: StateFlow<Boolean> = _showMoveToAlbumDialog.asStateFlow()
+    
+    private val _itemsToMove = MutableStateFlow<List<MediaItem>>(emptyList())
+    val itemsToMove: StateFlow<List<MediaItem>> = _itemsToMove.asStateFlow()
+    
+    private val _copySuccessMessage = MutableStateFlow<String?>(null)
+    val copySuccessMessage: StateFlow<String?> = _copySuccessMessage.asStateFlow()
+    
+    private val _moveSuccessMessage = MutableStateFlow<String?>(null)
+    val moveSuccessMessage: StateFlow<String?> = _moveSuccessMessage.asStateFlow()
+    
+    private val _deleteSuccessMessage = MutableStateFlow<String?>(null)
+    val deleteSuccessMessage: StateFlow<String?> = _deleteSuccessMessage.asStateFlow()
+    
+    private val _restoreSuccessMessage = MutableStateFlow<String?>(null)
+    val restoreSuccessMessage: StateFlow<String?> = _restoreSuccessMessage.asStateFlow()
+    
     // Store URIs being processed
     private var pendingRestoreUris: List<android.net.Uri> = emptyList()
     private var pendingDeleteUris: List<android.net.Uri> = emptyList()
@@ -478,8 +497,23 @@ class MediaViewModel : ViewModel() {
     // Called when user confirms the trash request
     fun onDeleteConfirmed(context: Context) {
         viewModelScope.launch {
+            val itemCount = _selectedItems.value.size
+            val itemType = if (_selectedItems.value.all { it.isVideo }) {
+                if (itemCount == 1) "video" else "videos"
+            } else if (_selectedItems.value.all { !it.isVideo }) {
+                if (itemCount == 1) "photo" else "photos"
+            } else {
+                if (itemCount == 1) "item" else "items"
+            }
+            
+            _deleteSuccessMessage.value = "$itemCount $itemType moved to trash"
+            
             exitSelectionMode()
             refresh(context)
+            
+            // Auto-dismiss after 2 seconds
+            kotlinx.coroutines.delay(2000)
+            _deleteSuccessMessage.value = null
         }
     }
     
@@ -691,9 +725,19 @@ class MediaViewModel : ViewModel() {
     // Called when user confirms restore in system dialog
     fun onRestoreConfirmed(context: Context) {
         viewModelScope.launch {
+            val itemCount = pendingRestoreUris.size
             val success = repository.performRestore(context, pendingRestoreUris)
             if (success) {
-                android.util.Log.d("MediaViewModel", "Successfully restored ${pendingRestoreUris.size} items")
+                android.util.Log.d("MediaViewModel", "Successfully restored $itemCount items")
+                
+                val itemType = if (itemCount == 1) "item" else "items"
+                _restoreSuccessMessage.value = "$itemCount $itemType restored"
+                
+                // Auto-dismiss after 2 seconds
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(2000)
+                    _restoreSuccessMessage.value = null
+                }
             }
             pendingRestoreUris = emptyList()
             exitTrashSelectionMode()
@@ -710,9 +754,19 @@ class MediaViewModel : ViewModel() {
     // Called when user confirms permanent delete in system dialog
     fun onPermanentDeleteConfirmed(context: Context) {
         viewModelScope.launch {
+            val itemCount = pendingDeleteUris.size
             val success = repository.performPermanentDelete(context, pendingDeleteUris)
             if (success) {
-                android.util.Log.d("MediaViewModel", "Successfully deleted ${pendingDeleteUris.size} items")
+                android.util.Log.d("MediaViewModel", "Successfully deleted $itemCount items")
+                
+                val itemType = if (itemCount == 1) "item" else "items"
+                _deleteSuccessMessage.value = "$itemCount $itemType permanently deleted"
+                
+                // Auto-dismiss after 2 seconds
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(2000)
+                    _deleteSuccessMessage.value = null
+                }
             }
             pendingDeleteUris = emptyList()
             exitTrashSelectionMode()
@@ -859,15 +913,124 @@ class MediaViewModel : ViewModel() {
         _itemsToCopy.value = emptyList()
     }
     
-    suspend fun copyToAlbum(targetAlbum: Album): Boolean {
+    suspend fun copyToAlbum(context: Context, targetAlbum: Album): Boolean {
         return if (::repository.isInitialized) {
             val items = _itemsToCopy.value
             if (items.isNotEmpty()) {
-                repository.copyMediaToAlbum(items, targetAlbum)
+                android.util.Log.d("MediaViewModel", "Copying ${items.size} items to ${targetAlbum.name}")
+                val success = repository.copyMediaToAlbum(items, targetAlbum)
+                
+                android.util.Log.d("MediaViewModel", "Copy operation result: $success")
+                
+                if (success) {
+                    // Show success message
+                    val itemType = if (items.size == 1) {
+                        if (items.first().isVideo) "video" else "image"
+                    } else {
+                        "items"
+                    }
+                    _copySuccessMessage.value = "${items.size} $itemType copied to ${targetAlbum.name}"
+                    
+                    // Exit selection mode immediately
+                    exitSelectionMode()
+                    
+                    // Clear copy state and hide dialog
+                    hideCopyToAlbumDialog()
+                    
+                    // Force refresh with delay for MediaStore indexing
+                    viewModelScope.launch {
+                        android.util.Log.d("MediaViewModel", "Waiting 800ms before refresh...")
+                        kotlinx.coroutines.delay(800)
+                        android.util.Log.d("MediaViewModel", "Refreshing after copy...")
+                        // Refresh media lists to show new items
+                        refresh(context)
+                        android.util.Log.d("MediaViewModel", "Refresh complete")
+                    }
+                    
+                    // Auto-dismiss success message after 2 seconds
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(2000)
+                        _copySuccessMessage.value = null
+                    }
+                } else {
+                    android.util.Log.e("MediaViewModel", "Copy operation failed")
+                    // Still clear state even on failure to prevent stuck dialog
+                    hideCopyToAlbumDialog()
+                }
+                success
             } else {
+                android.util.Log.w("MediaViewModel", "No items to copy")
                 false
             }
         } else {
+            android.util.Log.e("MediaViewModel", "Repository not initialized")
+            false
+        }
+    }
+    
+    // Move to album functions
+    fun showMoveToAlbumDialog(items: List<MediaItem>) {
+        _itemsToMove.value = items
+        _showMoveToAlbumDialog.value = true
+    }
+    
+    fun hideMoveToAlbumDialog() {
+        _showMoveToAlbumDialog.value = false
+        _itemsToMove.value = emptyList()
+    }
+    
+    suspend fun moveToAlbum(context: Context, targetAlbum: Album): Boolean {
+        return if (::repository.isInitialized) {
+            val items = _itemsToMove.value
+            if (items.isNotEmpty()) {
+                android.util.Log.d("MediaViewModel", "Moving ${items.size} items to ${targetAlbum.name}")
+                val success = repository.moveMediaToAlbum(items, targetAlbum)
+                
+                android.util.Log.d("MediaViewModel", "Move operation result: $success")
+                
+                if (success) {
+                    // Show success message
+                    val itemType = if (items.size == 1) {
+                        if (items.first().isVideo) "video" else "image"
+                    } else {
+                        "items"
+                    }
+                    _moveSuccessMessage.value = "${items.size} $itemType moved to ${targetAlbum.name}"
+                    
+                    // Exit selection mode immediately
+                    exitSelectionMode()
+                    
+                    // Clear move state and hide dialog
+                    hideMoveToAlbumDialog()
+                    
+                    // Force immediate refresh with longer delay for MediaStore to fully update
+                    viewModelScope.launch {
+                        // Longer delay to ensure both copy and delete are fully processed
+                        android.util.Log.d("MediaViewModel", "Waiting 800ms before refresh...")
+                        kotlinx.coroutines.delay(800)
+                        android.util.Log.d("MediaViewModel", "Refreshing after move...")
+                        // Force full refresh to show changes in all albums
+                        refresh(context)
+                        android.util.Log.d("MediaViewModel", "Refresh complete")
+                    }
+                    
+                    // Auto-dismiss success message after 2 seconds
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(2000)
+                        _moveSuccessMessage.value = null
+                    }
+                } else {
+                    android.util.Log.e("MediaViewModel", "Move operation failed")
+                    // Still clear state even on failure to prevent stuck dialog
+                    hideMoveToAlbumDialog()
+                }
+                success
+            } else {
+                android.util.Log.w("MediaViewModel", "No items to move")
+                false
+            }
+        } else {
+            android.util.Log.e("MediaViewModel", "Repository not initialized")
             false
         }
     }
