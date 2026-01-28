@@ -531,19 +531,80 @@ class MediaRepository(private val context: Context) {
     ): Boolean = withContext(Dispatchers.IO) {
         var allSuccess = true
         
+        android.util.Log.d("MediaRepository", "=== COPY OPERATION START ===")
+        android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
+        android.util.Log.d("MediaRepository", "Items to copy: ${mediaItems.size}")
+        
+        // Get the actual relative path from the target album's existing media
+        val targetRelativePath = if (Build.VERSION.SDK_INT >= 29) {
+            if (targetAlbum.topMediaItems.isNotEmpty()) {
+                // Extract relative path from an existing item in the album
+                val samplePath = targetAlbum.topMediaItems.first().path
+                android.util.Log.d("MediaRepository", "Sample path from album: $samplePath")
+                
+                // Extract directory path (everything except the filename)
+                val directory = java.io.File(samplePath).parent
+                android.util.Log.d("MediaRepository", "Extracted directory: $directory")
+                
+                // Convert absolute path to relative path
+                val relativePath = when {
+                    directory?.contains("/storage/emulated/0/") == true -> {
+                        directory.substringAfter("/storage/emulated/0/")
+                    }
+                    directory?.contains("/sdcard/") == true -> {
+                        directory.substringAfter("/sdcard/")
+                    }
+                    else -> directory?.substringAfterLast("/") ?: "Pictures/${targetAlbum.name}"
+                }
+                android.util.Log.d("MediaRepository", "Computed relative path: $relativePath")
+                relativePath
+            } else {
+                // Fallback to constructed path
+                val fallbackPath = when {
+                    targetAlbum.name.contains("Camera", ignoreCase = true) -> "DCIM/Camera"
+                    targetAlbum.name.contains("Screenshots", ignoreCase = true) -> "Pictures/Screenshots"
+                    else -> "Pictures/${targetAlbum.name}"
+                }
+                android.util.Log.d("MediaRepository", "Using fallback path: $fallbackPath")
+                fallbackPath
+            }
+        } else {
+            null
+        }
+        
         mediaItems.forEach { item ->
             try {
-                // Get the target directory path from the album's first item
-                val targetRelativePath = if (Build.VERSION.SDK_INT >= 29) {
-                    // For Android 10+, use relative path from album name
-                    // Most albums are in Pictures or DCIM
-                    when {
-                        targetAlbum.name.contains("Camera", ignoreCase = true) -> "DCIM/Camera"
-                        targetAlbum.name.contains("Screenshots", ignoreCase = true) -> "Pictures/Screenshots"
-                        else -> "Pictures/${targetAlbum.name}"
+                android.util.Log.d("MediaRepository", "--- Copying: ${item.displayName} ---")
+                android.util.Log.d("MediaRepository", "Source path: ${item.path}")
+                android.util.Log.d("MediaRepository", "Source bucketName: ${item.bucketName}")
+                
+                // Get original timestamps from source media
+                var originalDateAdded = item.dateAdded
+                var originalDateModified = item.dateAdded
+                var originalDateTaken = item.dateAdded * 1000 // Convert to milliseconds
+                
+                try {
+                    val projection = arrayOf(
+                        MediaStore.MediaColumns.DATE_ADDED,
+                        MediaStore.MediaColumns.DATE_MODIFIED,
+                        MediaStore.MediaColumns.DATE_TAKEN
+                    )
+                    
+                    context.contentResolver.query(item.uri, projection, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            originalDateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED))
+                            originalDateModified = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED))
+                            
+                            val dateTakenIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN)
+                            if (dateTakenIndex >= 0) {
+                                originalDateTaken = cursor.getLong(dateTakenIndex)
+                            }
+                            
+                            android.util.Log.d("MediaRepository", "Original timestamps - Added: $originalDateAdded, Modified: $originalDateModified, Taken: $originalDateTaken")
+                        }
                     }
-                } else {
-                    null // Not used on older Android
+                } catch (e: Exception) {
+                    android.util.Log.w("MediaRepository", "Failed to read original timestamps, using defaults", e)
                 }
                 
                 // Determine the correct content URI
@@ -553,10 +614,13 @@ class MediaRepository(private val context: Context) {
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI
                 }
                 
-                // Create new MediaStore entry in target location
+                // Create new MediaStore entry in target location with original timestamps
                 val values = android.content.ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, item.displayName)
                     put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType)
+                    put(MediaStore.MediaColumns.DATE_ADDED, originalDateAdded)
+                    put(MediaStore.MediaColumns.DATE_MODIFIED, originalDateModified)
+                    put(MediaStore.MediaColumns.DATE_TAKEN, originalDateTaken)
                     
                     if (Build.VERSION.SDK_INT >= 29) {
                         put(MediaStore.MediaColumns.RELATIVE_PATH, targetRelativePath)
@@ -564,34 +628,159 @@ class MediaRepository(private val context: Context) {
                     }
                 }
                 
+                android.util.Log.d("MediaRepository", "Creating MediaStore entry at: $targetRelativePath")
                 val newUri = context.contentResolver.insert(contentUri, values)
                 
                 if (newUri != null) {
+                    android.util.Log.d("MediaRepository", "Created entry with URI: $newUri")
+                    
                     // Copy the actual file content
+                    var bytesCopied = 0L
                     context.contentResolver.openInputStream(item.uri)?.use { inputStream ->
                         context.contentResolver.openOutputStream(newUri)?.use { outputStream ->
-                            inputStream.copyTo(outputStream)
+                            bytesCopied = inputStream.copyTo(outputStream)
                         }
                     }
+                    android.util.Log.d("MediaRepository", "Copied $bytesCopied bytes")
                     
-                    // Mark as completed
+                    // Mark as completed and update timestamps
                     if (Build.VERSION.SDK_INT >= 29) {
                         values.clear()
                         values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        // Try to set original timestamps (may not work for DATE_ADDED on some Android versions)
+                        values.put(MediaStore.MediaColumns.DATE_ADDED, originalDateAdded)
+                        values.put(MediaStore.MediaColumns.DATE_MODIFIED, originalDateModified)
                         context.contentResolver.update(newUri, values, null, null)
+                        android.util.Log.d("MediaRepository", "Marked as completed (IS_PENDING=0) and updated timestamps")
+                        
+                        // Verify timestamps were set correctly
+                        try {
+                            val verifyProjection = arrayOf(
+                                MediaStore.MediaColumns.DATE_ADDED,
+                                MediaStore.MediaColumns.DATE_MODIFIED,
+                                MediaStore.MediaColumns.DATE_TAKEN
+                            )
+                            context.contentResolver.query(newUri, verifyProjection, null, null, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) {
+                                    val actualDateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED))
+                                    val actualDateModified = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED))
+                                    val actualDateTaken = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN))
+                                    
+                                    android.util.Log.d("MediaRepository", "Verification - Actual timestamps: Added=$actualDateAdded (wanted $originalDateAdded), Modified=$actualDateModified (wanted $originalDateModified), Taken=$actualDateTaken (wanted $originalDateTaken)")
+                                    
+                                    if (actualDateAdded != originalDateAdded) {
+                                        android.util.Log.w("MediaRepository", "DATE_ADDED not preserved (system-managed field)")
+                                    }
+                                    if (actualDateModified != originalDateModified) {
+                                        android.util.Log.w("MediaRepository", "DATE_MODIFIED not preserved (system-managed field)")
+                                    }
+                                    if (actualDateTaken != originalDateTaken) {
+                                        android.util.Log.w("MediaRepository", "DATE_TAKEN not preserved")
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("MediaRepository", "Could not verify timestamps", e)
+                        }
                     }
                     
-                    android.util.Log.d("MediaRepository", "Copied ${item.displayName} to ${targetAlbum.name}")
+                    // Trigger media scanner to ensure file is indexed
+                    try {
+                        context.sendBroadcast(
+                            android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE).apply {
+                                data = newUri
+                            }
+                        )
+                        android.util.Log.d("MediaRepository", "Media scanner broadcast sent")
+                    } catch (e: Exception) {
+                        android.util.Log.w("MediaRepository", "Media scan broadcast failed", e)
+                    }
+                    
+                    android.util.Log.d("MediaRepository", "✓ Successfully copied ${item.displayName} to ${targetAlbum.name}")
                 } else {
                     allSuccess = false
-                    android.util.Log.e("MediaRepository", "Failed to create MediaStore entry for: ${item.displayName}")
+                    android.util.Log.e("MediaRepository", "✗ Failed to create MediaStore entry for: ${item.displayName}")
                 }
                 
             } catch (e: Exception) {
                 allSuccess = false
-                android.util.Log.e("MediaRepository", "Error copying ${item.displayName}", e)
+                android.util.Log.e("MediaRepository", "✗ Error copying ${item.displayName}", e)
             }
         }
+        
+        android.util.Log.d("MediaRepository", "=== COPY OPERATION END (Success: $allSuccess) ===")
         allSuccess
+    }
+    
+    /**
+     * Move media items to a target album directory
+     * Copies files to target location then deletes originals
+     */
+    suspend fun moveMediaToAlbum(
+        mediaItems: List<MediaItem>,
+        targetAlbum: Album
+    ): Boolean = withContext(Dispatchers.IO) {
+        android.util.Log.d("MediaRepository", "=== MOVE OPERATION START ===")
+        android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
+        android.util.Log.d("MediaRepository", "Items to move: ${mediaItems.size}")
+        
+        // First, copy all items to target location
+        val copySuccess = copyMediaToAlbum(mediaItems, targetAlbum)
+        
+        if (!copySuccess) {
+            android.util.Log.e("MediaRepository", "=== MOVE FAILED: Copy operation failed ===")
+            return@withContext false
+        }
+        
+        android.util.Log.d("MediaRepository", "Copy successful, now deleting originals...")
+        
+        // Then delete originals
+        var allDeleteSuccess = true
+        val failedDeletes = mutableListOf<String>()
+        
+        mediaItems.forEach { item ->
+            try {
+                android.util.Log.d("MediaRepository", "Attempting to delete: ${item.uri}")
+                
+                // Try direct delete first
+                val deleted = context.contentResolver.delete(item.uri, null, null)
+                
+                if (deleted > 0) {
+                    android.util.Log.d("MediaRepository", "✓ Deleted original: ${item.displayName} (rows affected: $deleted)")
+                } else {
+                    allDeleteSuccess = false
+                    failedDeletes.add(item.displayName)
+                    android.util.Log.e("MediaRepository", "✗ Failed to delete original: ${item.displayName} (no rows affected)")
+                    
+                    // On Android 10+, we might need special permissions
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        android.util.Log.w("MediaRepository", "Delete failed on Android 10+. File might be protected or require MANAGE_MEDIA permission.")
+                    }
+                }
+            } catch (e: SecurityException) {
+                allDeleteSuccess = false
+                failedDeletes.add(item.displayName)
+                android.util.Log.e("MediaRepository", "✗ SecurityException deleting ${item.displayName}: ${e.message}")
+                
+                // Check if it's a RecoverableSecurityException which needs user consent
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    if (e is android.app.RecoverableSecurityException) {
+                        android.util.Log.w("MediaRepository", "RecoverableSecurityException - user consent required")
+                    }
+                }
+            } catch (e: Exception) {
+                allDeleteSuccess = false
+                failedDeletes.add(item.displayName)
+                android.util.Log.e("MediaRepository", "✗ Error deleting original: ${item.displayName}", e)
+            }
+        }
+        
+        if (failedDeletes.isNotEmpty()) {
+            android.util.Log.e("MediaRepository", "Failed to delete ${failedDeletes.size} files: ${failedDeletes.joinToString()}")
+        }
+        
+        val success = copySuccess && allDeleteSuccess
+        android.util.Log.d("MediaRepository", "=== MOVE OPERATION END (Copy: $copySuccess, Delete: $allDeleteSuccess, Overall: $success) ===")
+        success
     }
 }
