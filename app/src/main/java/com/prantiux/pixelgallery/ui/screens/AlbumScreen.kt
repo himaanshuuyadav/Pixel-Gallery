@@ -46,6 +46,7 @@ import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
+import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -302,10 +303,14 @@ fun AlbumDetailScreen(
         )
         
         // Selection Top Bar - overlay above navigation bar
+        val copySuccessMessage by viewModel.copySuccessMessage.collectAsState()
+        val moveSuccessMessage by viewModel.moveSuccessMessage.collectAsState()
+        val deleteSuccessMessage by viewModel.deleteSuccessMessage.collectAsState()
         com.prantiux.pixelgallery.ui.components.SelectionTopBar(
-            isVisible = isSelectionMode,
+            isVisible = isSelectionMode || copySuccessMessage != null || moveSuccessMessage != null || deleteSuccessMessage != null,
             selectedCount = selectedItems.size,
             onCancelSelection = { viewModel.exitSelectionMode() },
+            successMessage = copySuccessMessage ?: moveSuccessMessage ?: deleteSuccessMessage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
@@ -356,6 +361,16 @@ fun AlbumDetailScreen(
             viewModel = viewModel,
             albumRepository = com.prantiux.pixelgallery.data.AlbumRepository(context),
             onDismiss = { viewModel.hideCopyToAlbumDialog() }
+        )
+    }
+    
+    // Move to Album Dialog
+    val showMoveDialog by viewModel.showMoveToAlbumDialog.collectAsState()
+    if (showMoveDialog) {
+        MoveToAlbumDialog(
+            viewModel = viewModel,
+            albumRepository = com.prantiux.pixelgallery.data.AlbumRepository(context),
+            onDismiss = { viewModel.hideMoveToAlbumDialog() }
         )
     }
     }
