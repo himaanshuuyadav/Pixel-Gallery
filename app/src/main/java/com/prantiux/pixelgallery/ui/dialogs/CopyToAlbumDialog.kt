@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,6 +31,7 @@ fun CopyToAlbumDialog(
     albumRepository: AlbumRepository,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var isCopying by remember { mutableStateOf(false) }
@@ -40,7 +42,28 @@ fun CopyToAlbumDialog(
         scope.launch {
             isLoading = true
             val categorized = albumRepository.loadCategorizedAlbums()
-            albums = categorized.mainAlbums + categorized.otherAlbums
+            // Filter out albums in restricted directories (Android/)
+            val allAlbums = categorized.mainAlbums + categorized.otherAlbums
+            val restrictedAlbums = mutableListOf<String>()
+            albums = allAlbums.filter { album ->
+                // Check if album has media items with paths
+                if (album.topMediaItems.isNotEmpty()) {
+                    val samplePath = album.topMediaItems.first().path
+                    // Exclude albums in Android directory (not writable via MediaStore)
+                    val isRestricted = samplePath.contains("/Android/", ignoreCase = true)
+                    if (isRestricted) {
+                        restrictedAlbums.add(album.name)
+                    }
+                    !isRestricted
+                } else {
+                    // If no sample path, allow it (shouldn't happen)
+                    true
+                }
+            }
+            if (restrictedAlbums.isNotEmpty()) {
+                android.util.Log.d("CopyToAlbumDialog", "Filtered out ${restrictedAlbums.size} restricted albums: ${restrictedAlbums.joinToString()}")
+            }
+            android.util.Log.d("CopyToAlbumDialog", "Available albums for copy: ${albums.size}")
             isLoading = false
         }
     }
@@ -132,7 +155,7 @@ fun CopyToAlbumDialog(
                                     onClick = {
                                         scope.launch {
                                             isCopying = true
-                                            val success = viewModel.copyToAlbum(album)
+                                            val success = viewModel.copyToAlbum(context, album)
                                             isCopying = false
                                             if (success) {
                                                 onDismiss()
@@ -161,7 +184,7 @@ fun CopyToAlbumDialog(
                                     onClick = {
                                         scope.launch {
                                             isCopying = true
-                                            val success = viewModel.copyToAlbum(album)
+                                            val success = viewModel.copyToAlbum(context, album)
                                             isCopying = false
                                             if (success) {
                                                 onDismiss()
