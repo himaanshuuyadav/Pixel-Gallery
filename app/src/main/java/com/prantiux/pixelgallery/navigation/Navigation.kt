@@ -48,6 +48,7 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
+import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
 
 data class NavItem(
     val route: String,
@@ -676,6 +677,16 @@ fun AppNavigation(
                 )
             }
             
+            // Move to Album Dialog
+            val showMoveDialog by viewModel.showMoveToAlbumDialog.collectAsState()
+            if (showMoveDialog) {
+                MoveToAlbumDialog(
+                    viewModel = viewModel,
+                    albumRepository = albumRepository,
+                    onDismiss = { viewModel.hideMoveToAlbumDialog() }
+                )
+            }
+            
             val navBarAnimProgress by animateFloatAsState(
                 targetValue = if (isOverlayVisible || isScrollbarDragging) 0f else 1f,
                 animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
@@ -862,8 +873,8 @@ fun AppNavigation(
                                 },
                                 onClick = {
                                     showMoreMenu = false
-                                    // TODO: Implement move to album
-                                    android.widget.Toast.makeText(context, "Move to album coming soon", android.widget.Toast.LENGTH_SHORT).show()
+                                    // Show move to album dialog
+                                    viewModel.showMoveToAlbumDialog(selectedItems.toList())
                                 }
                             )
                         }
