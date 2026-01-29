@@ -75,18 +75,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.compose.animation:animation-core")
-    implementation("androidx.compose.animation:animation-graphics")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     
     // Material3 - REQUIRED MINIMUM ALPHA VERSION (EXPLICIT)
     implementation("androidx.compose.material3:material3:1.5.0-alpha11")
-    implementation("androidx.compose.material3:material3-window-size-class:1.5.0-alpha11")
-    
-    // Graphics Shapes for LoadingIndicator polygons (Material 3 Expressive)
-    implementation("androidx.graphics:graphics-shapes:1.0.1")
 
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.8.5")
@@ -106,9 +100,6 @@ dependencies {
 
     // Accompanist Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.36.0")
-
-    // Google Fonts
-    implementation("androidx.compose.ui:ui-text-google-fonts")
 
     // Palette API for dynamic color extraction
     implementation("androidx.palette:palette-ktx:1.0.0")
