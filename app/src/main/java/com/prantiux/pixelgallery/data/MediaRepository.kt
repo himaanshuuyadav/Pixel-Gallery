@@ -13,6 +13,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
+// Result class for move operations
+data class MoveResult(
+    val success: Boolean,
+    val message: String = ""
+)
+
 class MediaRepository(private val context: Context) {
 
     /**
@@ -257,6 +263,35 @@ class MediaRepository(private val context: Context) {
                 context.contentResolver,
                 items.map { it.uri }
             )
+        } else {
+            null
+        }
+    }
+    
+    // Create delete request from URIs
+    fun createDeleteRequestFromUris(uris: List<Uri>): android.app.PendingIntent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                android.util.Log.d("MediaRepository", "Creating delete request for ${uris.size} items")
+                MediaStore.createDeleteRequest(context.contentResolver, uris)
+            } catch (e: Exception) {
+                android.util.Log.e("MediaRepository", "Failed to create delete request", e)
+                null
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // For Android 10, try to get RecoverableSecurityException
+            try {
+                uris.forEach { uri ->
+                    context.contentResolver.delete(uri, null, null)
+                }
+                null // Successfully deleted
+            } catch (e: android.app.RecoverableSecurityException) {
+                android.util.Log.d("MediaRepository", "RecoverableSecurityException caught, returning action intent")
+                e.userAction.actionIntent
+            } catch (e: Exception) {
+                android.util.Log.e("MediaRepository", "Failed to delete on Android 10", e)
+                null
+            }
         } else {
             null
         }
@@ -714,73 +749,170 @@ class MediaRepository(private val context: Context) {
     
     /**
      * Move media items to a target album directory
-     * Copies files to target location then deletes originals
+     * Uses file system move + MediaStore path update (no deletion/permission needed)
      */
     suspend fun moveMediaToAlbum(
         mediaItems: List<MediaItem>,
         targetAlbum: Album
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): MoveResult = withContext(Dispatchers.IO) {
         android.util.Log.d("MediaRepository", "=== MOVE OPERATION START ===")
         android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
         android.util.Log.d("MediaRepository", "Items to move: ${mediaItems.size}")
         
-        // First, copy all items to target location
-        val copySuccess = copyMediaToAlbum(mediaItems, targetAlbum)
-        
-        if (!copySuccess) {
-            android.util.Log.e("MediaRepository", "=== MOVE FAILED: Copy operation failed ===")
-            return@withContext false
+        // Get target directory path from album
+        val targetRelativePath = if (Build.VERSION.SDK_INT >= 29) {
+            if (targetAlbum.topMediaItems.isNotEmpty()) {
+                val samplePath = targetAlbum.topMediaItems.first().path
+                android.util.Log.d("MediaRepository", "Sample path from album: $samplePath")
+                
+                val directory = java.io.File(samplePath).parent
+                android.util.Log.d("MediaRepository", "Extracted directory: $directory")
+                
+                // Convert absolute path to relative path
+                val relativePath = when {
+                    directory?.contains("/storage/emulated/0/") == true -> {
+                        directory.substringAfter("/storage/emulated/0/")
+                    }
+                    directory?.contains("/sdcard/") == true -> {
+                        directory.substringAfter("/sdcard/")
+                    }
+                    else -> directory?.substringAfterLast("/") ?: "Pictures/${targetAlbum.name}"
+                }
+                android.util.Log.d("MediaRepository", "Computed relative path: $relativePath")
+                relativePath
+            } else {
+                val fallbackPath = when {
+                    targetAlbum.name.contains("Camera", ignoreCase = true) -> "DCIM/Camera"
+                    targetAlbum.name.contains("Screenshots", ignoreCase = true) -> "Pictures/Screenshots"
+                    else -> "Pictures/${targetAlbum.name}"
+                }
+                android.util.Log.d("MediaRepository", "Using fallback path: $fallbackPath")
+                fallbackPath
+            }
+        } else {
+            null
         }
         
-        android.util.Log.d("MediaRepository", "Copy successful, now deleting originals...")
-        
-        // Then delete originals
-        var allDeleteSuccess = true
-        val failedDeletes = mutableListOf<String>()
+        var allSuccess = true
+        val failedItems = mutableListOf<String>()
         
         mediaItems.forEach { item ->
             try {
-                android.util.Log.d("MediaRepository", "Attempting to delete: ${item.uri}")
+                android.util.Log.d("MediaRepository", "--- Moving: ${item.displayName} ---")
+                android.util.Log.d("MediaRepository", "Current path: ${item.path}")
                 
-                // Try direct delete first
-                val deleted = context.contentResolver.delete(item.uri, null, null)
-                
-                if (deleted > 0) {
-                    android.util.Log.d("MediaRepository", "✓ Deleted original: ${item.displayName} (rows affected: $deleted)")
+                // Determine new file path
+                val newFilePath = if (Build.VERSION.SDK_INT >= 29) {
+                    "/storage/emulated/0/$targetRelativePath/${item.displayName}"
                 } else {
-                    allDeleteSuccess = false
-                    failedDeletes.add(item.displayName)
-                    android.util.Log.e("MediaRepository", "✗ Failed to delete original: ${item.displayName} (no rows affected)")
-                    
-                    // On Android 10+, we might need special permissions
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        android.util.Log.w("MediaRepository", "Delete failed on Android 10+. File might be protected or require MANAGE_MEDIA permission.")
+                    // For older Android, get target directory from album
+                    if (targetAlbum.topMediaItems.isNotEmpty()) {
+                        val targetDir = java.io.File(targetAlbum.topMediaItems.first().path).parent
+                        "$targetDir/${item.displayName}"
+                    } else {
+                        null
                     }
                 }
-            } catch (e: SecurityException) {
-                allDeleteSuccess = false
-                failedDeletes.add(item.displayName)
-                android.util.Log.e("MediaRepository", "✗ SecurityException deleting ${item.displayName}: ${e.message}")
                 
-                // Check if it's a RecoverableSecurityException which needs user consent
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (e is android.app.RecoverableSecurityException) {
-                        android.util.Log.w("MediaRepository", "RecoverableSecurityException - user consent required")
-                    }
+                if (newFilePath == null) {
+                    android.util.Log.e("MediaRepository", "Cannot determine new file path")
+                    allSuccess = false
+                    failedItems.add(item.displayName)
+                    return@forEach
                 }
+                
+                android.util.Log.d("MediaRepository", "Target path: $newFilePath")
+                
+                // Try file system move first (instant, no copy)
+                val sourcePath = java.io.File(item.path)
+                val targetPath = java.io.File(newFilePath)
+                
+                // Ensure target directory exists
+                targetPath.parentFile?.mkdirs()
+                
+                val fileMoved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        // Use NIO for efficient move
+                        java.nio.file.Files.move(
+                            java.nio.file.Paths.get(sourcePath.absolutePath),
+                            java.nio.file.Paths.get(targetPath.absolutePath),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                        )
+                        android.util.Log.d("MediaRepository", "✓ File moved via NIO")
+                        true
+                    } catch (e: Exception) {
+                        android.util.Log.w("MediaRepository", "NIO move failed, trying traditional: ${e.message}")
+                        // Fallback to traditional rename
+                        sourcePath.renameTo(targetPath)
+                    }
+                } else {
+                    // Traditional file rename for older Android
+                    sourcePath.renameTo(targetPath)
+                }
+                
+                if (!fileMoved) {
+                    android.util.Log.e("MediaRepository", "✗ File move failed for ${item.displayName}")
+                    allSuccess = false
+                    failedItems.add(item.displayName)
+                    return@forEach
+                }
+                
+                // Update MediaStore entry to point to new location
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.DATA, newFilePath)
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, targetRelativePath)
+                    }
+                    // Update bucket info
+                    put(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME, targetAlbum.name)
+                }
+                
+                val updated = context.contentResolver.update(item.uri, values, null, null)
+                
+                if (updated > 0) {
+                    android.util.Log.d("MediaRepository", "✓ MediaStore entry updated (rows: $updated)")
+                    
+                    // Trigger media scanner for new location
+                    try {
+                        android.media.MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(newFilePath),
+                            arrayOf(item.mimeType)
+                        ) { path, uri ->
+                            android.util.Log.d("MediaRepository", "Media scanner completed for: $path")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MediaRepository", "Media scanner failed", e)
+                    }
+                    
+                    android.util.Log.d("MediaRepository", "✓ Successfully moved ${item.displayName} to ${targetAlbum.name}")
+                } else {
+                    android.util.Log.e("MediaRepository", "✗ Failed to update MediaStore entry")
+                    // Try to move file back
+                    try {
+                        targetPath.renameTo(sourcePath)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MediaRepository", "Failed to rollback file move", e)
+                    }
+                    allSuccess = false
+                    failedItems.add(item.displayName)
+                }
+                
             } catch (e: Exception) {
-                allDeleteSuccess = false
-                failedDeletes.add(item.displayName)
-                android.util.Log.e("MediaRepository", "✗ Error deleting original: ${item.displayName}", e)
+                allSuccess = false
+                failedItems.add(item.displayName)
+                android.util.Log.e("MediaRepository", "✗ Error moving ${item.displayName}", e)
             }
         }
         
-        if (failedDeletes.isNotEmpty()) {
-            android.util.Log.e("MediaRepository", "Failed to delete ${failedDeletes.size} files: ${failedDeletes.joinToString()}")
+        if (failedItems.isNotEmpty()) {
+            android.util.Log.e("MediaRepository", "Failed to move ${failedItems.size} files: ${failedItems.joinToString()}")
         }
         
-        val success = copySuccess && allDeleteSuccess
-        android.util.Log.d("MediaRepository", "=== MOVE OPERATION END (Copy: $copySuccess, Delete: $allDeleteSuccess, Overall: $success) ===")
-        success
+        android.util.Log.d("MediaRepository", "=== MOVE OPERATION END (Success: $allSuccess) ===")
+        MoveResult(
+            success = allSuccess,
+            message = if (allSuccess) "All files moved" else "Some files failed to move"
+        )
     }
 }
