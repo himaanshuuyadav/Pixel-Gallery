@@ -984,11 +984,13 @@ class MediaViewModel : ViewModel() {
             val items = _itemsToMove.value
             if (items.isNotEmpty()) {
                 android.util.Log.d("MediaViewModel", "Moving ${items.size} items to ${targetAlbum.name}")
-                val success = repository.moveMediaToAlbum(items, targetAlbum)
+                val result = repository.moveMediaToAlbum(items, targetAlbum)
                 
-                android.util.Log.d("MediaViewModel", "Move operation result: $success")
+                android.util.Log.d("MediaViewModel", "Move operation result: ${result.success}, message: ${result.message}")
                 
-                if (success) {
+                if (result.success) {
+                    android.util.Log.d("MediaViewModel", "Move completed successfully")
+                    
                     // Show success message
                     val itemType = if (items.size == 1) {
                         if (items.first().isVideo) "video" else "image"
@@ -1005,11 +1007,9 @@ class MediaViewModel : ViewModel() {
                     
                     // Force immediate refresh with longer delay for MediaStore to fully update
                     viewModelScope.launch {
-                        // Longer delay to ensure both copy and delete are fully processed
-                        android.util.Log.d("MediaViewModel", "Waiting 800ms before refresh...")
-                        kotlinx.coroutines.delay(800)
+                        android.util.Log.d("MediaViewModel", "Waiting 600ms before refresh...")
+                        kotlinx.coroutines.delay(600)
                         android.util.Log.d("MediaViewModel", "Refreshing after move...")
-                        // Force full refresh to show changes in all albums
                         refresh(context)
                         android.util.Log.d("MediaViewModel", "Refresh complete")
                     }
@@ -1019,19 +1019,20 @@ class MediaViewModel : ViewModel() {
                         kotlinx.coroutines.delay(2000)
                         _moveSuccessMessage.value = null
                     }
+                    
+                    return true
                 } else {
                     android.util.Log.e("MediaViewModel", "Move operation failed")
-                    // Still clear state even on failure to prevent stuck dialog
                     hideMoveToAlbumDialog()
+                    return false
                 }
-                success
             } else {
                 android.util.Log.w("MediaViewModel", "No items to move")
-                false
+                return false
             }
         } else {
             android.util.Log.e("MediaViewModel", "Repository not initialized")
-            false
+            return false
         }
     }
     
