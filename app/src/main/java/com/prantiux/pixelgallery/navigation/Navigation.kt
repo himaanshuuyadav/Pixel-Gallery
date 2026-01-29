@@ -17,9 +17,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.*
+import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -167,9 +171,13 @@ fun PixelStyleFloatingNavBar(
                 .fillMaxWidth()
                 .height(72.dp),
             shape = if (isSelectionMode) {
-                RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 26.dp, bottomEnd = 26.dp)
+                SmoothCornerShape(
+                    cornerRadiusTL = 12.dp, cornerRadiusTR = 12.dp,
+                    cornerRadiusBL = 26.dp, cornerRadiusBR = 26.dp,
+                    smoothnessAsPercent = 60
+                )
             } else {
-                RoundedCornerShape(26.dp)
+                SmoothCornerShape(26.dp, 60)
             },
             color = MaterialTheme.colorScheme.surfaceContainer, // Make pill fully opaque
             tonalElevation = 0.dp,
@@ -270,7 +278,7 @@ private fun PixelNavBarItem(
                     }
                     .background(
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = SmoothCornerShape(16.dp, 60)
                     )
             )
             
@@ -809,29 +817,42 @@ fun AppNavigation(
                         DropdownMenu(
                             expanded = showMoreMenu,
                             onDismissRequest = { showMoreMenu = false },
-                            modifier = Modifier
-                                .widthIn(min = 200.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainer,
-                                    shape = RoundedCornerShape(16.dp)
-                                )
+                            modifier = Modifier.widthIn(min = 220.dp),
+                            tonalElevation = 8.dp,
+                            shadowElevation = 8.dp,
+                            shape = SmoothCornerShape(20.dp, 60)
                         ) {
                             // Set as wallpaper
                             DropdownMenuItem(
                                 text = {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
-                                        FontIcon(
-                                            unicode = FontIcons.Image,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            size = 24.sp
-                                        )
+                                        Surface(
+                                            shape = SmoothCornerShape(12.dp, 60),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(40.dp)
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                FontIcon(
+                                                    unicode = FontIcons.Image,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    size = 20.sp
+                                                )
+                                            }
+                                        }
                                         Text(
                                             "Set as wallpaper",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
@@ -849,24 +870,40 @@ fun AppNavigation(
                                             android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
                                         }
                                     }
-                                }
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                             // Move to album
                             DropdownMenuItem(
                                 text = {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
-                                        FontIcon(
-                                            unicode = FontIcons.Move,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            size = 24.sp
-                                        )
+                                        Surface(
+                                            shape = SmoothCornerShape(12.dp, 60),
+                                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(40.dp)
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                FontIcon(
+                                                    unicode = FontIcons.Move,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    size = 20.sp
+                                                )
+                                            }
+                                        }
                                         Text(
                                             "Move to album",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
@@ -875,7 +912,8 @@ fun AppNavigation(
                                     showMoreMenu = false
                                     // Show move to album dialog
                                     viewModel.showMoveToAlbumDialog(selectedItems.toList())
-                                }
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                     }
