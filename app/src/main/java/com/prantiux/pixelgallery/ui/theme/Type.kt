@@ -2,32 +2,19 @@ package com.prantiux.pixelgallery.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.googlefonts.Font
-import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.unit.sp
 import com.prantiux.pixelgallery.R
 
-// Google Fonts provider configuration
-private val provider = GoogleFont.Provider(
-    providerAuthority = "com.google.android.gms.fonts",
-    providerPackage = "com.google.android.gms",
-    certificates = R.array.com_google_android_gms_fonts_certs
+// Google Sans Rounded font family (from local font file)
+val GoogleSansRounded = FontFamily(
+    Font(R.font.google_sans_rounded_regular, FontWeight.Normal)
 )
 
-// Google Sans font family (using Montserrat as fallback since Google Sans isn't publicly available)
-private val googleSansFont = GoogleFont("Montserrat")
-
-val GoogleSansFamily = FontFamily(
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.Black),
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.ExtraBold),
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.Bold),
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.SemiBold),
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.Medium),
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.Normal),
-    Font(googleFont = googleSansFont, fontProvider = provider, weight = FontWeight.Light)
-)
+// Use Google Sans Rounded for all typography
+val GoogleSansFamily = GoogleSansRounded
 
 // Material 3 Typography with Google Sans styling
 val Typography = Typography(
