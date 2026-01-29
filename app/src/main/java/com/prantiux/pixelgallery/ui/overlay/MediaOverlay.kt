@@ -28,9 +28,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.*
+import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -1268,135 +1271,15 @@ fun MediaOverlay(
                         )
                     }
                     
-                    // Right side: Three-dot menu (hidden in trash mode)
+                    // Right side: Favorite button (replaces three-dot menu)
                     if (!isTrashMode) {
-                        var menuExpanded by remember { mutableStateOf(false) }
-                        Box {
-                            IconButton(onClick = { menuExpanded = true }) {
-                                FontIcon(
-                                    unicode = FontIcons.MoreVert,
-                                    contentDescription = "More options",
-                                    tint = Color.White
-                                )
-                            }
-                            // Dropdown attached to top bar, flush to right edge, top-left and bottom-left rounded
-                            DropdownMenu(
-                                expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false },
-                                modifier = Modifier
-                                    .widthIn(min = 220.dp)
-                                    .background(
-                                        Color.Black,
-                                        shape = RoundedCornerShape(
-                                            topStart = 12.dp,
-                                            topEnd = 0.dp,
-                                            bottomEnd = 0.dp,
-                                            bottomStart = 12.dp
-                                        )
-                                    ),
-                                offset = DpOffset(x = 8.dp, y = 0.dp)
-                            ) {
-                                // 1. Set as wallpaper
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            FontIcon(
-                                                unicode = FontIcons.Image,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.9f),
-                                                size = 24.sp
-                                            )
-                                            Text("Set as wallpaper", color = Color.White)
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        setAsWallpaper()
-                                    }
-                                )
-                                // 2. Copy to album
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            FontIcon(
-                                                unicode = FontIcons.Copy,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.9f),
-                                                size = 24.sp
-                                            )
-                                            Text("Copy to album", color = Color.White)
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        // Show copy to album dialog with current item
-                                        viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem))
-                                    }
-                                )
-                                // 3. 3. Move to album
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            FontIcon(
-                                                unicode = FontIcons.Move,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.9f),
-                                                size = 24.sp
-                                            )
-                                            Text("Move to album", color = Color.White)
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        // Show move to album dialog with current item
-                                        viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem))
-                                    }
-                                )
-                                // 4. Details
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            FontIcon(
-                                                unicode = FontIcons.Info,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.9f),
-                                                size = 24.sp
-                                            )
-                                            Text("Details", color = Color.White)
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        showDetailsPanel = true
-                                        showControls = false
-                                        scope.launch {
-                                            detailsPanelProgress.animateTo(
-                                                targetValue = 1f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
-                                            )
-                                        }
-                                    }
-                                )
-                            }
+                        val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
+                        IconButton(onClick = toggleFavorite) {
+                            FontIcon(
+                                unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
+                                contentDescription = if (isFavorited) "Remove from favorites" else "Add to favorites",
+                                tint = if (isFavorited) Color(0xFFFFD700) else Color.White
+                            )
                         }
                     }
                 }
@@ -1448,16 +1331,7 @@ fun MediaOverlay(
                             )
                         }
                     } else {
-                        // Normal mode: Star → Edit → Share → Delete
-                        // Favorite (toggles between filled and unfilled star)
-                        val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
-                        IconButton(onClick = toggleFavorite) {
-                            FontIcon(
-                                unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
-                                contentDescription = if (isFavorited) "Remove from favorites" else "Add to favorites",
-                                tint = if (isFavorited) Color(0xFFFFD700) else Color.White
-                            )
-                        }
+                        // Normal mode: Edit → Share → Delete → Hamburger Menu
                         
                         // Edit
                         IconButton(onClick = editItem) {
@@ -1484,6 +1358,204 @@ fun MediaOverlay(
                                 contentDescription = "Delete",
                                 tint = Color.White
                             )
+                        }
+                        
+                        // Hamburger Menu (more options)
+                        var menuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                FontIcon(
+                                    unicode = FontIcons.Menu,
+                                    contentDescription = "More options",
+                                    tint = Color.White
+                                )
+                            }
+                            // Dropdown menu
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                modifier = Modifier.widthIn(min = 220.dp),
+                                offset = DpOffset(x = (-8).dp, y = (-8).dp),
+                                shape = SmoothCornerShape(20.dp, 60),
+                                containerColor = Color.Black.copy(alpha = 0.95f)
+                            ) {
+                                // 1. Set as wallpaper
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            Surface(
+                                                shape = SmoothCornerShape(12.dp, 60),
+                                                color = Color.White.copy(alpha = 0.15f),
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    FontIcon(
+                                                        unicode = FontIcons.Image,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        size = 20.sp
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                "Set as wallpaper",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = Color.White
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        setAsWallpaper()
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                                // 2. Copy to album
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            Surface(
+                                                shape = SmoothCornerShape(12.dp, 60),
+                                                color = Color.White.copy(alpha = 0.15f),
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    FontIcon(
+                                                        unicode = FontIcons.Copy,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        size = 20.sp
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                "Copy to album",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = Color.White
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        // Show copy to album dialog with current item
+                                        viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem))
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                                // 3. Move to album
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            Surface(
+                                                shape = SmoothCornerShape(12.dp, 60),
+                                                color = Color.White.copy(alpha = 0.15f),
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    FontIcon(
+                                                        unicode = FontIcons.Move,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        size = 20.sp
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                "Move to album",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = Color.White
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        // Show move to album dialog with current item
+                                        viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem))
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                                // 4. Details
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            Surface(
+                                                shape = SmoothCornerShape(12.dp, 60),
+                                                color = Color.White.copy(alpha = 0.15f),
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    FontIcon(
+                                                        unicode = FontIcons.Info,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        size = 20.sp
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                "Details",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = Color.White
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        showDetailsPanel = true
+                                        showControls = false
+                                        scope.launch {
+                                            detailsPanelProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
