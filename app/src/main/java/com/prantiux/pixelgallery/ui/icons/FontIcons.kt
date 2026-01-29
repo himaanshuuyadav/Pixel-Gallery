@@ -87,6 +87,7 @@ object FontIcons {
     
     // Actions & Menu
     const val MoreVert = "\ue5d4"
+    const val Menu = "\ue3c7"  // menu icon (hamburger)
     const val Share = "\ue80d"
     const val StarOutline = "\ue83a"
     const val Add = "\ue145"
