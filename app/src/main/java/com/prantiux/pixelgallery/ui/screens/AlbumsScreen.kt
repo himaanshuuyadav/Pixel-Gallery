@@ -5,9 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -112,7 +114,11 @@ fun AlbumsScreen(
                         .fillMaxSize()
                         .background(
                             color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                            shape = SmoothCornerShape(
+                                cornerRadiusTL = 24.dp, cornerRadiusTR = 24.dp,
+                                cornerRadiusBL = 0.dp, cornerRadiusBR = 0.dp,
+                                smoothnessAsPercent = 60
+                            )
                         ),
                     contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight)
                 ) {
@@ -209,7 +215,18 @@ fun MainAlbumTabs(
     onTabSelected: (Int) -> Unit,
     onViewAllClick: () -> Unit
 ) {
+    val lazyListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    
+    // Auto-scroll to selected tab
+    LaunchedEffect(selectedIndex) {
+        scope.launch {
+            lazyListState.animateScrollToItem(selectedIndex)
+        }
+    }
+    
     LazyRow(
+        state = lazyListState,
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(bottom = 16.dp)
@@ -259,7 +276,7 @@ fun RectangularPillTab(
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = SmoothCornerShape(20.dp, 60),
             color = backgroundColor,
             modifier = Modifier.height(52.dp)
         ) {
@@ -342,6 +359,7 @@ fun HighlightAlbumSection(
     
     val dragOffset = remember { Animatable(0f) }
     var cardWidth by remember { mutableStateOf(0f) }
+    val cardSpacing = with(density) { 18.dp.toPx() } // 18dp spacing between cards
     val swipeThreshold = 0.3f // 30% of card width to trigger tab change
     
     Box(
@@ -378,7 +396,7 @@ fun HighlightAlbumSection(
                             if (targetIndex != currentTabIndex) {
                                 // Complete the swipe transition
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                val targetOffset = if (targetIndex > currentTabIndex) -cardWidth else cardWidth
+                                val targetOffset = if (targetIndex > currentTabIndex) -(cardWidth + cardSpacing) else (cardWidth + cardSpacing)
                                 dragOffset.animateTo(
                                     targetValue = targetOffset,
                                     animationSpec = tween(200)
@@ -440,7 +458,7 @@ fun HighlightAlbumSection(
                 modifier = Modifier
                     .zIndex(0f)
                     .graphicsLayer {
-                        translationX = -cardWidth + offset
+                        translationX = -(cardWidth + cardSpacing) + offset
                         alpha = if (offset > 0) 1f else 0f
                     }
             )
@@ -451,7 +469,7 @@ fun HighlightAlbumSection(
                         .matchParentSize()
                         .zIndex(0.5f)
                         .graphicsLayer {
-                            translationX = -cardWidth + offset
+                            translationX = -(cardWidth + cardSpacing) + offset
                         }
                         .background(Color.Black.copy(alpha = (1f - progress).coerceIn(0f, 0.4f)))
                 )
@@ -467,7 +485,7 @@ fun HighlightAlbumSection(
                 modifier = Modifier
                     .zIndex(0f)
                     .graphicsLayer {
-                        translationX = cardWidth + offset
+                        translationX = (cardWidth + cardSpacing) + offset
                         alpha = if (offset < 0) 1f else 0f
                     }
             )
@@ -478,7 +496,7 @@ fun HighlightAlbumSection(
                         .matchParentSize()
                         .zIndex(0.5f)
                         .graphicsLayer {
-                            translationX = cardWidth + offset
+                            translationX = (cardWidth + cardSpacing) + offset
                         }
                         .background(Color.Black.copy(alpha = (1f + progress).coerceIn(0f, 0.4f)))
                 )
@@ -511,7 +529,7 @@ fun AlbumPreviewCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = SmoothCornerShape(20.dp, 60),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
@@ -866,7 +884,7 @@ fun OtherAlbumPillButton(
 }
 
 /**
- * Special Action Buttons - wider buttons visually different from album tabs
+ * Special Action Buttons - grouped card style like settings
  */
 @Composable
 fun SpecialActionButtons(
@@ -887,85 +905,104 @@ fun SpecialActionButtons(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            SpecialActionButton(
-                iconUnicode = FontIcons.Star,
-                label = "Favourites",
-                description = "Your favorite photos",
-                onClick = onStarredClick
-            )
-            SpecialActionButton(
-                iconUnicode = FontIcons.Lock,
-                label = "Secure Folder",
-                description = "Protected content",
-                onClick = onSecureClick
-            )
-            SpecialActionButton(
-                iconUnicode = FontIcons.Delete,
-                label = "Recycle Bin",
-                description = "Recently deleted",
-                onClick = onRecycleBinClick
-            )
-        }
+        // Favourites - Top card
+        SpecialActionCard(
+            iconUnicode = FontIcons.Star,
+            label = "Favourites",
+            description = "Your favorite photos",
+            onClick = onStarredClick,
+            position = SpecialCardPosition.TOP
+        )
+        
+        Spacer(modifier = Modifier.height(4.dp))
+        
+        // Secure Folder - Bottom card
+        SpecialActionCard(
+            iconUnicode = FontIcons.Lock,
+            label = "Secure Folder",
+            description = "Protected content",
+            onClick = onSecureClick,
+            position = SpecialCardPosition.BOTTOM
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Recycle Bin - Separate single card
+        SpecialActionCard(
+            iconUnicode = FontIcons.Delete,
+            label = "Recycle Bin",
+            description = "Recently deleted",
+            onClick = onRecycleBinClick,
+            position = SpecialCardPosition.SINGLE
+        )
     }
 }
 
+// Position enum for special folder cards
+enum class SpecialCardPosition {
+    TOP, BOTTOM, SINGLE
+}
+
 /**
- * Wide special action button - clearly different from album buttons
+ * Special action card - styled like Grid Type options in Layout Settings
  */
 @Composable
-fun SpecialActionButton(
+fun SpecialActionCard(
     iconUnicode: String,
     label: String,
     description: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    position: SpecialCardPosition
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    val cardShape = when (position) {
+        SpecialCardPosition.TOP -> SmoothCornerShape(
+            cornerRadiusTL = 24.dp,
+            cornerRadiusTR = 24.dp,
+            cornerRadiusBR = 8.dp, 
+            cornerRadiusBL = 8.dp,
+            smoothnessAsPercent = 60
+        )
+        SpecialCardPosition.BOTTOM -> SmoothCornerShape(
+            cornerRadiusTL = 8.dp,
+            cornerRadiusTR = 8.dp,
+            cornerRadiusBR = 24.dp,
+            cornerRadiusBL = 24.dp,
+            smoothnessAsPercent = 60
+        )
+        SpecialCardPosition.SINGLE -> SmoothCornerShape(24.dp, 60)
+    }
+    
+    Surface(
+        onClick = onClick,
+        shape = cardShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(12.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                FontIcon(
-                    unicode = iconUnicode,
-                    contentDescription = label,
-                    size = 24.sp,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
+            FontIcon(
+                unicode = iconUnicode,
+                contentDescription = label,
+                size = 24.sp,
+                tint = MaterialTheme.colorScheme.primary
+            )
             
             Spacer(modifier = Modifier.width(16.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = description,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
