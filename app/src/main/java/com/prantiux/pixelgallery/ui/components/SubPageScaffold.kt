@@ -49,7 +49,7 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
  * - Any secondary screen with scrollable content
  * 
  * DO NOT use for:
- * - Main tab screens (Gallery, Albums, Search, Settings)
+ * - Main tab screens (Photos, Albums, Search, Settings)
  * - Those should use MainTabHeader or their current implementation
  * 
  * @param title The main title text
