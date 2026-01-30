@@ -62,6 +62,10 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
+import coil.size.Size
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import kotlinx.coroutines.delay
@@ -953,44 +957,93 @@ fun MediaOverlay(
             
             Log.d("MediaOverlay_Render", "Rendering: currentIndex=$currentIndex, prev=${currentIndex-1}, next=${currentIndex+1}, offset=${horizontalOffset.value}")
             
-            // Render previous, current, and next images for smooth horizontal swipe
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Previous image
+            // Preload adjacent images into memory to prevent blink on swipe
+            LaunchedEffect(currentIndex) {
+                // Preload next and previous images
                 prevItem?.let { prev ->
-                    AsyncImage(
-                        model = prev.uri,
-                        contentDescription = prev.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(end = 4.dp)  // Small gap between images
-                            .graphicsLayer {
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                this.translationX = horizontalOffset.value - screenWidth
-                            }
-                    )
+                    val imageLoader = coil.Coil.imageLoader(context)
+                    val request = ImageRequest.Builder(context)
+                        .data(prev.uri)
+                        .size(Size.ORIGINAL)  // Load full size
+                        .memoryCacheKey(prev.uri.toString())
+                        .diskCacheKey(prev.uri.toString())
+                        .build()
+                    imageLoader.enqueue(request)
                 }
                 
-                // Current image
-                AsyncImage(
-                    model = item.uri,
-                    contentDescription = item.displayName,
-                    contentScale = if (detailsPanelProgress.value > 0.01f) ContentScale.Crop else ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            // Double-tap detection for images (before single tap)
-                            detectTapGestures(
-                                onDoubleTap = { handleDoubleTap() },
-                                onTap = {
-                                    // Single tap to toggle UI
-                                    if (animationProgress >= 1f && !isClosing) {
-                                        showControls = !showControls
+                nextItem?.let { next ->
+                    val imageLoader = coil.Coil.imageLoader(context)
+                    val request = ImageRequest.Builder(context)
+                        .data(next.uri)
+                        .size(Size.ORIGINAL)  // Load full size
+                        .memoryCacheKey(next.uri.toString())
+                        .diskCacheKey(next.uri.toString())
+                        .build()
+                    imageLoader.enqueue(request)
+                }
+            }
+            
+            // Render previous, current, and next images for smooth horizontal swipe
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Previous image - use stable key to prevent rebinding
+                prevItem?.let { prev ->
+                    key(prev.id) {  // Stable key prevents recomposition
+                        SubcomposeAsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(prev.uri)
+                                .size(Size.ORIGINAL)
+                                .memoryCacheKey(prev.uri.toString())
+                                .diskCacheKey(prev.uri.toString())
+                                .crossfade(false)  // No crossfade to prevent blink
+                                .build(),
+                            contentDescription = prev.displayName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(end = 4.dp)  // Small gap between images
+                                .graphicsLayer {
+                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                    this.translationX = horizontalOffset.value - screenWidth
+                                },
+                            loading = {
+                                // Show black background during load (matches overlay)
+                                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                            }
+                        )
+                    }
+                }
+                
+                // Current image - use stable key to prevent rebinding on index change
+                key(item.id) {  // Stable key prevents unnecessary recomposition
+                    SubcomposeAsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(item.uri)
+                            .size(Size.ORIGINAL)
+                            .memoryCacheKey(item.uri.toString())
+                            .diskCacheKey(item.uri.toString())
+                            .crossfade(false)  // Disable crossfade to prevent blink
+                            .build(),
+                        contentDescription = item.displayName,
+                        contentScale = if (detailsPanelProgress.value > 0.01f) ContentScale.Crop else ContentScale.Fit,
+                        loading = {
+                            // Show black background during load (matches overlay)
+                            Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                // Double-tap detection for images (before single tap)
+                                detectTapGestures(
+                                    onDoubleTap = { handleDoubleTap() },
+                                    onTap = {
+                                        // Single tap to toggle UI
+                                        if (animationProgress >= 1f && !isClosing) {
+                                            showControls = !showControls
+                                        }
                                     }
-                                }
-                            )
-                        }
-                        .graphicsLayer {
+                                )
+                            }
+                            .graphicsLayer {
                             // Opening animation only
                             if (animationProgress < 1f && !isClosing) {
                                 // Opening animation - thumbnail to fullscreen
@@ -1101,22 +1154,35 @@ fun MediaOverlay(
                                 }
                             }
                         }
-                )
-                
-                // Next image
-                nextItem?.let { next ->
-                    AsyncImage(
-                        model = next.uri,
-                        contentDescription = next.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(start = 4.dp)  // Small gap between images
-                            .graphicsLayer {
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                this.translationX = horizontalOffset.value + screenWidth
-                            }
                     )
+                }
+                
+                // Next image - use stable key to prevent rebinding
+                nextItem?.let { next ->
+                    key(next.id) {  // Stable key prevents recomposition
+                        SubcomposeAsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(next.uri)
+                                .size(Size.ORIGINAL)
+                                .memoryCacheKey(next.uri.toString())
+                                .diskCacheKey(next.uri.toString())
+                                .crossfade(false)  // No crossfade to prevent blink
+                                .build(),
+                            contentDescription = next.displayName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 4.dp)  // Small gap between images
+                                .graphicsLayer {
+                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                    this.translationX = horizontalOffset.value + screenWidth
+                                },
+                            loading = {
+                                // Show black background during load (matches overlay)
+                                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                            }
+                        )
+                    }
                 }
             }
         }
