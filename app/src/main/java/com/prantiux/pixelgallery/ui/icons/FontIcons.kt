@@ -27,6 +27,10 @@ object FontIcons {
     const val Refresh = "\ue5d5"
     const val KeyboardArrowRight = "\ue315"
     const val KeyboardArrowDown = "\ue313"
+    const val ChevronRight = "\ue5cc"
+    const val SwapVert = "\ue8d5"
+    const val DragHandle = "\ue25d"
+    const val Numbers = "\uea39"
     
     // Media Controls
     const val PlayArrow = "\ue037"
