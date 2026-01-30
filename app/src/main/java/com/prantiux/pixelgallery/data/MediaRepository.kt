@@ -29,12 +29,11 @@ class MediaRepository(private val context: Context) {
         return try {
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 val exif = ExifInterface(inputStream)
-                val latLong = FloatArray(2)
-                val hasGps = exif.getLatLong(latLong)
+                val latLong = exif.latLong
                 
-                if (hasGps) {
+                if (latLong != null) {
                     android.util.Log.d("MediaRepository", "✓✓ EXIF GPS found: (${latLong[0]}, ${latLong[1]})")
-                    Pair(latLong[0].toDouble(), latLong[1].toDouble())
+                    Pair(latLong[0], latLong[1])
                 } else {
                     android.util.Log.d("MediaRepository", "✗ No EXIF GPS data")
                     Pair(null, null)
@@ -721,12 +720,14 @@ class MediaRepository(private val context: Context) {
                     
                     // Trigger media scanner to ensure file is indexed
                     try {
-                        context.sendBroadcast(
-                            android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE).apply {
-                                data = newUri
-                            }
-                        )
-                        android.util.Log.d("MediaRepository", "Media scanner broadcast sent")
+                        android.media.MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(newUri.path),
+                            null
+                        ) { _, _ ->
+                            android.util.Log.d("MediaRepository", "Media scanner completed")
+                        }
+                        android.util.Log.d("MediaRepository", "Media scanner triggered")
                     } catch (e: Exception) {
                         android.util.Log.w("MediaRepository", "Media scan broadcast failed", e)
                     }
