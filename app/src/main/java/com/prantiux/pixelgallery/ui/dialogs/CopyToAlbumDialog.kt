@@ -120,7 +120,7 @@ fun CopyToAlbumDialog(
                     }
                 }
                 
-                Divider()
+                HorizontalDivider()
                 
                 if (isLoading) {
                     Box(
