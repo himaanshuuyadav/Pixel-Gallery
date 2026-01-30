@@ -36,6 +36,7 @@ fun SetStatusBarColor(color: Color) {
             val colorArgb = color.toArgb()
             
             // Set status bar color to match header
+            @Suppress("DEPRECATION")
             window.statusBarColor = colorArgb
             Log.d(TAG, "SetStatusBarColor: #${Integer.toHexString(colorArgb)}")
             
