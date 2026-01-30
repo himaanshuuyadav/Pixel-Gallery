@@ -61,7 +61,7 @@ data class NavItem(
 )
 
 sealed class Screen(val route: String, val title: String, val iconUnicode: String? = null) {
-    object Photos : Screen("photos", "Gallery", FontIcons.Home)
+    object Photos : Screen("photos", "Photos", FontIcons.Home)
     object Albums : Screen("albums", "Albums", FontIcons.Person)
     object Search : Screen("search", "Search", FontIcons.Search)
     object Settings : Screen("settings", "Settings", FontIcons.Settings)
@@ -72,7 +72,7 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object RecycleBin : Screen("recycle_bin", "Recycle Bin")
     object Favorites : Screen("favorites", "Favourites")
     object GridTypeSetting : Screen("grid_type_setting", "Layout")
-    object GalleryViewSetting : Screen("gallery_view_setting", "Gallery view")
+    object GalleryViewSetting : Screen("gallery_view_setting", "Photos view")
     object ThemeSetting : Screen("theme_setting", "Theme")
     object PreviewsSetting : Screen("previews_setting", "Previews")
     object GesturesSetting : Screen("gestures_setting", "Gestures")
@@ -332,8 +332,8 @@ fun AppNavigation(
     // Determine start destination based on default tab setting
     val startDestination = remember(defaultTab, lastUsedTab) {
         val tab = if (defaultTab == "Last used") {
-            // Don't open Settings tab on launch, default to Gallery
-            if (lastUsedTab == "Settings") "Gallery" else lastUsedTab
+            // Don't open Settings tab on launch, default to Photos
+            if (lastUsedTab == "Settings") "Photos" else lastUsedTab
         } else {
             defaultTab
         }
@@ -348,7 +348,7 @@ fun AppNavigation(
     // Track current tab changes
     androidx.compose.runtime.LaunchedEffect(currentRoute) {
         when (currentRoute) {
-            Screen.Photos.route -> onTabChanged("Gallery")
+            Screen.Photos.route -> onTabChanged("Photos")
             Screen.Albums.route -> onTabChanged("Albums")
             Screen.Search.route -> onTabChanged("Search")
             Screen.Settings.route -> onTabChanged("Settings")
@@ -356,7 +356,7 @@ fun AppNavigation(
     }
 
     val bottomNavItems = listOf(
-        NavItem(Screen.Photos.route, "Gallery", FontIcons.Home),
+        NavItem(Screen.Photos.route, "Photos", FontIcons.Home),
         NavItem(Screen.Albums.route, "Albums", FontIcons.Person),
         NavItem(Screen.Search.route, "Search", FontIcons.Search),
         NavItem(Screen.Settings.route, "Settings", FontIcons.Settings)
@@ -394,7 +394,10 @@ fun AppNavigation(
                 popEnterTransition = { popEnterTransition() },
                 popExitTransition = { popExitTransition() }
             ) {
-                PhotosScreen(viewModel = viewModel)
+                PhotosScreen(
+                    viewModel = viewModel,
+                    onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                )
             }
 
             composable(
@@ -645,7 +648,7 @@ fun AppNavigation(
             }
 
             // Media overlay (always present, visibility controlled by state)
-            // Wrapped in layout {} to prevent overlay from affecting gallery scroll position
+            // Wrapped in layout {} to prevent overlay from affecting photo grid scroll position
             // Skip if trash mode (RecycleBinScreen shows its own overlay)
             if (overlayState.mediaType != "trash") {
                 androidx.compose.ui.layout.Layout(
