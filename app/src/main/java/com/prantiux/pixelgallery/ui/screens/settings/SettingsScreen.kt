@@ -42,27 +42,30 @@ fun SettingsScreen(
     
     val navBarHeight = calculateFloatingNavBarHeight()
     
-    Column(modifier = Modifier.fillMaxSize()) {
-        com.prantiux.pixelgallery.ui.components.MainTabHeader(
-            title = "Settings"
-        )
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color = MaterialTheme.colorScheme.surface),
+        contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight + 16.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        // Scrollable Header
+        item {
+            com.prantiux.pixelgallery.ui.components.MainTabHeader(
+                title = "Settings"
+            )
+        }
         
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                ),
-            contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            // Appearance Section
-            item {
-                CategoryHeader("Appearance")
-            }
-            item {
-                SettingsGroup {
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        
+        // Appearance Section
+        item {
+            CategoryHeader("Appearance")
+        }
+        item {
+            SettingsGroup {
                     GroupedSettingItem(
                         title = "Layout",
                         subtitle = gridTypeText,
@@ -71,7 +74,7 @@ fun SettingsScreen(
                         onClick = onNavigateToGridType
                     )
                     GroupedSettingItem(
-                        title = "Gallery view",
+                        title = "Photos view",
                         subtitle = "Choose folders to show",
                         iconUnicode = FontIcons.Folder,
                         position = SettingPosition.MIDDLE,
@@ -97,8 +100,8 @@ fun SettingsScreen(
             // Interaction Section
             item {
                 CategoryHeader("Interaction")
-            }
-            item {
+        }
+        item {
                 SettingsGroup {
                     GroupedSettingItem(
                         title = "Gestures",
@@ -127,8 +130,8 @@ fun SettingsScreen(
             // Storage and Privacy Section
             item {
                 CategoryHeader("Storage and Privacy")
-            }
-            item {
+        }
+        item {
                 SettingsGroup {
                     GroupedSettingItem(
                         title = "Storage",
@@ -154,27 +157,26 @@ fun SettingsScreen(
                 }
             }
             
-            // Support Section
-            item {
-                CategoryHeader("Support")
-            }
-            item {
-                SettingsGroup {
-                    GroupedSettingItem(
-                        title = "About and help",
-                        subtitle = "App info and support",
-                        iconUnicode = FontIcons.Info,
-                        position = SettingPosition.TOP,
-                        onClick = { /* TODO */ }
-                    )
-                    GroupedSettingItem(
-                        title = "Debug",
-                        subtitle = "Developer tools",
-                        iconUnicode = FontIcons.Settings,
-                        position = SettingPosition.BOTTOM,
-                        onClick = onNavigateToDebug
-                    )
-                }
+        // Support Section
+        item {
+            CategoryHeader("Support")
+        }
+        item {
+            SettingsGroup {
+                GroupedSettingItem(
+                    title = "About and help",
+                    subtitle = "App info and support",
+                    iconUnicode = FontIcons.Info,
+                    position = SettingPosition.TOP,
+                    onClick = { /* TODO */ }
+                )
+                GroupedSettingItem(
+                    title = "Debug",
+                    subtitle = "Developer tools",
+                    iconUnicode = FontIcons.Settings,
+                    position = SettingPosition.BOTTOM,
+                    onClick = onNavigateToDebug
+                )
             }
         }
     }
