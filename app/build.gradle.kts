@@ -81,6 +81,9 @@ dependencies {
     
     // Material3 - REQUIRED MINIMUM ALPHA VERSION (EXPLICIT)
     implementation("androidx.compose.material3:material3:1.5.0-alpha11")
+    
+    // Material Icons Extended (for DragIndicator and other rounded icons)
+    implementation("androidx.compose.material:material-icons-extended")
 
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.8.5")
@@ -127,6 +130,9 @@ dependencies {
     
     // WorkManager for background ML processing
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    
+    // Reorderable list for drag and drop
+    implementation("sh.calvin.reorderable:reorderable:2.5.0")
 
     // Core
     implementation("androidx.core:core-ktx:1.15.0")
