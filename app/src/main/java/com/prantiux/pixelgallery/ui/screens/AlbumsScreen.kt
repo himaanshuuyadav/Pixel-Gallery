@@ -1,6 +1,7 @@
 package com.prantiux.pixelgallery.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,15 +29,22 @@ import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import android.view.HapticFeedbackConstants
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DragIndicator
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.math.abs
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.zIndex
@@ -105,70 +113,79 @@ fun AlbumsScreen(
             val albums = categorizedAlbums!!
             val navBarHeight = calculateFloatingNavBarHeight()
             
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Sticky Header - use MainTabHeader for main tabs
-                com.prantiux.pixelgallery.ui.components.MainTabHeader(title = "Albums")
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(color = MaterialTheme.colorScheme.surface),
+                contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight)
+            ) {
+                // Scrollable Header
+                item {
+                    com.prantiux.pixelgallery.ui.components.MainTabHeader(title = "Albums")
+                }
                 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = SmoothCornerShape(
-                                cornerRadiusTL = 24.dp, cornerRadiusTR = 24.dp,
-                                cornerRadiusBL = 0.dp, cornerRadiusBR = 0.dp,
-                                smoothnessAsPercent = 60
-                            )
-                        ),
-                    contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight)
-                ) {
-                    // Main Album Tabs (rectangular pills) with View All button
-                    item {
-                        MainAlbumTabs(
-                            albums = albums.mainAlbums,
-                            selectedIndex = selectedMainAlbumIndex,
-                            onTabSelected = { index ->
-                                selectedMainAlbumIndex = index
-                            },
-                            onViewAllClick = onNavigateToAllAlbums
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                
+                // Main Album Tabs (rectangular pills) with View All and Edit buttons
+                item {
+                    var showReorderBottomSheet by remember { mutableStateOf(false) }
+                    
+                    MainAlbumTabs(
+                        albums = albums.mainAlbums,
+                        selectedIndex = selectedMainAlbumIndex,
+                        onTabSelected = { index ->
+                            selectedMainAlbumIndex = index
+                        },
+                        onViewAllClick = onNavigateToAllAlbums,
+                        onEditClick = { showReorderBottomSheet = true }
+                    )
+                    
+                    // Reorder Bottom Sheet
+                    if (showReorderBottomSheet) {
+                        ReorderBottomSheet(
+                            mainAlbums = albums.mainAlbums,
+                            otherAlbums = albums.otherAlbums,
+                            onDismiss = { showReorderBottomSheet = false }
                         )
                     }
+                }
 
-                    // Highlighted section for selected album
+                // Highlighted section for selected album
+                item {
                     if (selectedMainAlbumIndex < albums.mainAlbums.size) {
-                        item {
-                            HighlightAlbumSection(
-                                albums = albums.mainAlbums,
-                                viewModel = viewModel,
-                                currentTabIndex = selectedMainAlbumIndex,
-                                onTabChange = { newIndex ->
-                                    selectedMainAlbumIndex = newIndex
-                                },
-                                onViewAllClick = { 
-                                    onNavigateToAlbum(albums.mainAlbums[selectedMainAlbumIndex].id) 
-                                }
-                            )
-                        }
-                    }
-
-                    // Other Albums Section
-                    if (albums.otherAlbums.isNotEmpty()) {
-                        item {
-                            OtherAlbumsSection(
-                                albums = albums.otherAlbums,
-                                onAlbumClick = onNavigateToAlbum
-                            )
-                        }
-                    }
-
-                    // Special Action Buttons
-                    item {
-                        SpecialActionButtons(
-                            onStarredClick = onNavigateToFavorites,
-                            onSecureClick = { /* TODO */ },
-                            onRecycleBinClick = onNavigateToRecycleBin
+                        HighlightAlbumSection(
+                            albums = albums.mainAlbums,
+                            viewModel = viewModel,
+                            currentTabIndex = selectedMainAlbumIndex,
+                            onTabChange = { newIndex ->
+                                selectedMainAlbumIndex = newIndex
+                            },
+                            onViewAllClick = { 
+                                onNavigateToAlbum(albums.mainAlbums[selectedMainAlbumIndex].id) 
+                            }
                         )
                     }
+                }
+
+                // Other Albums Section
+                item {
+                    if (albums.otherAlbums.isNotEmpty()) {
+                        OtherAlbumsSection(
+                            albums = albums.otherAlbums,
+                            onAlbumClick = onNavigateToAlbum
+                        )
+                    }
+                }
+
+                // Special Action Buttons
+                item {
+                    SpecialActionButtons(
+                        onStarredClick = onNavigateToFavorites,
+                        onSecureClick = { /* TODO */ },
+                        onRecycleBinClick = onNavigateToRecycleBin
+                    )
                 }
             }
         }
@@ -213,7 +230,8 @@ fun MainAlbumTabs(
     albums: List<Album>,
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
-    onViewAllClick: () -> Unit
+    onViewAllClick: () -> Unit,
+    onEditClick: () -> Unit = {}
 ) {
     val lazyListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -235,100 +253,102 @@ fun MainAlbumTabs(
             RectangularPillTab(
                 label = albums[index].name,
                 count = albums[index].itemCount,
-                isSelected = selectedIndex == index,
+                index = index,
+                selectedIndex = selectedIndex,
                 onClick = { onTabSelected(index) }
             )
         }
         
-        // View All button at the end
+        // View All button
         item {
             ViewAllPillButton(
                 onClick = onViewAllClick
             )
         }
-    }
-}
-
-/**
- * Rectangular pill tab with indicator - inspired by music app tabs
- */
-@Composable
-fun RectangularPillTab(
-    label: String,
-    count: Int,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val backgroundColor = if (isSelected) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    
-    val contentColor = if (isSelected) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick)
-    ) {
-        Surface(
-            shape = SmoothCornerShape(20.dp, 60),
-            color = backgroundColor,
-            modifier = Modifier.height(52.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                    ),
-                    color = contentColor
-                )
-            }
-        }
         
-        // Indicator line below selected tab
-        if (isSelected) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Box(
-                modifier = Modifier
-                    .width(32.dp)
-                    .height(3.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(2.dp)
-                    )
+        // Edit button (icon only)
+        item {
+            EditPillButton(
+                onClick = onEditClick
             )
         }
     }
 }
 
 /**
- * View All pill button - same style as album tabs but without selection
+ * Rectangular pill tab with indicator - inspired by music app tabs with Pixel Play animations
+ */
+@Composable
+fun RectangularPillTab(
+    label: String,
+    count: Int,
+    index: Int,
+    selectedIndex: Int,
+    onClick: () -> Unit
+) {
+    val isSelected = index == selectedIndex
+    
+    val contentColor = if (isSelected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        com.prantiux.pixelgallery.ui.components.AlbumTabAnimation(
+            index = index,
+            selectedIndex = selectedIndex,
+            onClick = onClick,
+            selectedColor = MaterialTheme.colorScheme.primaryContainer,
+            unselectedColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                ),
+                color = contentColor
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(6.dp))
+        
+        // Animated indicator line
+        val indicatorWidth by animateDpAsState(
+            targetValue = if (isSelected) 40.dp else 0.dp,
+            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+            label = "Indicator Width"
+        )
+        
+        Box(
+            modifier = Modifier
+                .width(indicatorWidth)
+                .height(3.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(2.dp)
+                )
+        )
+    }
+}
+
+/**
+ * View All pill button - matches tab pill styling
  */
 @Composable
 fun ViewAllPillButton(
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier
-            .height(52.dp)
-            .clickable(onClick = onClick)
+        modifier = Modifier.clickable(onClick = onClick)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             Text(
                 text = "View All",
@@ -336,6 +356,33 @@ fun ViewAllPillButton(
                     fontWeight = FontWeight.SemiBold
                 ),
                 color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+    }
+}
+
+/**
+ * Edit pill button - icon only, same style as View All
+ */
+@Composable
+fun EditPillButton(
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier
+            .size(44.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            FontIcon(
+                unicode = FontIcons.Edit,
+                contentDescription = "Edit albums layout",
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
     }
@@ -1006,6 +1053,373 @@ fun SpecialActionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+/**
+ * Reorder bottom sheet (using Modal BottomSheet with Reorderable library)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReorderBottomSheet(
+    mainAlbums: List<Album>,
+    otherAlbums: List<Album>,
+    onDismiss: () -> Unit
+) {
+    var albumsOrder by remember { mutableStateOf("Based on no. of images") }
+    var albumsOrderExpanded by remember { mutableStateOf(false) }
+    
+    // Mutable lists for reordering
+    var mainAlbumsList by remember { mutableStateOf(mainAlbums.toMutableList()) }
+    var otherAlbumsList by remember { mutableStateOf(otherAlbums.toMutableList()) }
+    
+    val albumsOrderRotation by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (albumsOrderExpanded) 180f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(300)
+    )
+    
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    // Single LazyListState for the entire bottom sheet
+    val listState = rememberLazyListState()
+    
+    // Single reorderable state for all albums (both main and other)
+    val allAlbums = remember(mainAlbumsList, otherAlbumsList) {
+        mainAlbumsList + otherAlbumsList
+    }
+    
+    val reorderableState = rememberReorderableLazyListState(
+        onMove = { from, to ->
+            android.util.Log.d("AlbumsScreen", "Album drag: from=${from.index} to=${to.index}")
+            
+            val fromGlobalIndex = from.index
+            val toGlobalIndex = to.index
+            val mainSize = mainAlbumsList.size
+            
+            // Determine which list the item is moving from/to
+            if (fromGlobalIndex < mainSize && toGlobalIndex < mainSize) {
+                // Moving within main albums
+                android.util.Log.d("AlbumsScreen", "Moving within main albums")
+                mainAlbumsList = mainAlbumsList.toMutableList().apply {
+                    add(toGlobalIndex, removeAt(fromGlobalIndex))
+                }
+            } else if (fromGlobalIndex >= mainSize && toGlobalIndex >= mainSize) {
+                // Moving within other albums
+                android.util.Log.d("AlbumsScreen", "Moving within other albums")
+                val adjustedFrom = fromGlobalIndex - mainSize
+                val adjustedTo = toGlobalIndex - mainSize
+                otherAlbumsList = otherAlbumsList.toMutableList().apply {
+                    add(adjustedTo, removeAt(adjustedFrom))
+                }
+            }
+            // Ignore cross-list moves for now
+            
+            android.util.Log.d("AlbumsScreen", "After move - Main: ${mainAlbumsList.map { it.name }}, Other: ${otherAlbumsList.map { it.name }}")
+        },
+        lazyListState = listState
+    )
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        android.util.Log.d("AlbumsScreen", "ReorderBottomSheet opened with ${mainAlbumsList.size} main albums and ${otherAlbumsList.size} other albums")
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Reorder your albums",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                // Albums order setting with expandable options
+                item {
+                    Surface(
+                        onClick = { albumsOrderExpanded = !albumsOrderExpanded },
+                        shape = if (albumsOrderExpanded) 
+                            RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp) 
+                            else RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FontIcon(
+                                unicode = FontIcons.SwapVert,
+                                contentDescription = null,
+                                size = 24.sp,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Albums order",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = albumsOrder,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            FontIcon(
+                                unicode = FontIcons.KeyboardArrowDown,
+                                contentDescription = null,
+                                size = 24.sp,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.graphicsLayer { rotationZ = albumsOrderRotation }
+                            )
+                        }
+                    }
+                }
+                
+                // Expandable options (inspired by badge type)
+                item {
+                    Column {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = albumsOrderExpanded,
+                            enter = androidx.compose.animation.expandVertically(animationSpec = androidx.compose.animation.core.tween(300)) + androidx.compose.animation.fadeIn(),
+                            exit = androidx.compose.animation.shrinkVertically(animationSpec = androidx.compose.animation.core.tween(300)) + androidx.compose.animation.fadeOut()
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                AlbumOrderOption(
+                                    label = "Based on no. of images",
+                                    iconUnicode = FontIcons.Numbers,
+                                    isSelected = albumsOrder == "Based on no. of images",
+                                    onClick = {
+                                        albumsOrder = "Based on no. of images"
+                                    },
+                                    position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP
+                                )
+                                AlbumOrderOption(
+                                    label = "Custom",
+                                    iconUnicode = FontIcons.DragHandle,
+                                    isSelected = albumsOrder == "Custom",
+                                    onClick = {
+                                        albumsOrder = "Custom"
+                                    },
+                                    position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+                
+                // Main albums heading
+                item {
+                    Text(
+                        text = "Main albums",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                }
+                
+                // Main albums list  
+                items(mainAlbumsList.size, key = { mainAlbumsList[it].id }) { index ->
+                    android.util.Log.d("AlbumsScreen", "Rendering main album item: index=$index, id=${mainAlbumsList[index].id}, name=${mainAlbumsList[index].name}")
+                    ReorderableItem(reorderableState, key = mainAlbumsList[index].id) { isDragging ->
+                        android.util.Log.d("AlbumsScreen", "Main album isDragging=$isDragging for ${mainAlbumsList[index].name}")
+                        DraggableAlbumItem(
+                            albumName = mainAlbumsList[index].name,
+                            position = when {
+                                mainAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
+                                index == 0 -> AlbumItemPosition.TOP
+                                index == mainAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
+                                else -> AlbumItemPosition.MIDDLE
+                            },
+                            isDragging = isDragging
+                        )
+                    }
+                }
+                
+                item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+                
+                // Other albums heading
+                item {
+                    Text(
+                        text = "Other albums",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                }
+                
+                // Other albums list
+                items(otherAlbumsList.size, key = { otherAlbumsList[it].id }) { index ->
+                    android.util.Log.d("AlbumsScreen", "Rendering other album item: index=$index, id=${otherAlbumsList[index].id}, name=${otherAlbumsList[index].name}")
+                    ReorderableItem(reorderableState, key = otherAlbumsList[index].id) { isDragging ->
+                        android.util.Log.d("AlbumsScreen", "Other album isDragging=$isDragging for ${otherAlbumsList[index].name}")
+                        DraggableAlbumItem(
+                            albumName = otherAlbumsList[index].name,
+                            position = when {
+                                otherAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
+                                index == 0 -> AlbumItemPosition.TOP
+                                index == otherAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
+                                else -> AlbumItemPosition.MIDDLE
+                            },
+                            isDragging = isDragging
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+enum class AlbumItemPosition {
+    TOP, MIDDLE, BOTTOM, SINGLE
+}
+
+/**
+ * Album order option - inspired by badge type expandable option
+ */
+@Composable
+private fun AlbumOrderOption(
+    label: String,
+    iconUnicode: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    position: com.prantiux.pixelgallery.ui.screens.settings.SettingPosition
+) {
+    val shape = when (position) {
+        com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
+        com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.MIDDLE -> RoundedCornerShape(8.dp)
+        com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
+        else -> RoundedCornerShape(0.dp)
+    }
+    
+    Surface(
+        onClick = onClick,
+        shape = shape,
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FontIcon(
+                unicode = iconUnicode,
+                contentDescription = null,
+                size = 24.sp,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            
+            // Radio button
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .border(
+                        width = 2.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary 
+                               else MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = CircleShape
+                    )
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primary 
+                        else MaterialTheme.colorScheme.surface,
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(MaterialTheme.colorScheme.onPrimary, CircleShape)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Draggable album item with drag handle
+ */
+@Composable
+private fun DraggableAlbumItem(
+    albumName: String,
+    position: AlbumItemPosition,
+    isDragging: Boolean
+) {
+    val shape = when (position) {
+        AlbumItemPosition.TOP -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+        AlbumItemPosition.MIDDLE -> RoundedCornerShape(4.dp)
+        AlbumItemPosition.BOTTOM -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+        AlbumItemPosition.SINGLE -> RoundedCornerShape(16.dp)
+    }
+    
+    Surface(
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shadowElevation = if (isDragging) 4.dp else 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.DragIndicator,
+                contentDescription = "Drag to reorder",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Text(
+                text = albumName,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
