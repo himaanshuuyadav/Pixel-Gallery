@@ -89,8 +89,8 @@ fun GalleryViewSettingScreen(
     }
     
     SubPageScaffold(
-        title = "Gallery view",
-        subtitle = "Choose folder to show in main gallery",
+        title = "Photos view",
+        subtitle = "Choose folder to show in main Photos tab",
         onNavigateBack = onBackClick
     ) {
         if (isLoading) {
