@@ -120,7 +120,7 @@ fun MoveToAlbumDialog(
                     }
                 }
                 
-                Divider()
+                HorizontalDivider()
                 
                 if (isLoading) {
                     Box(
