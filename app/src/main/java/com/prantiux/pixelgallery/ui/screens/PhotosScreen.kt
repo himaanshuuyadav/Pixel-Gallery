@@ -58,7 +58,8 @@ data class MediaGroup(
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PhotosScreen(
-    viewModel: MediaViewModel
+    viewModel: MediaViewModel,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val images by viewModel.images.collectAsState()
@@ -90,7 +91,8 @@ fun PhotosScreen(
             isLoading = isLoading,
             sortMode = sortMode,
             onSortModeChanged = { viewModel.setSortMode(it) },
-            viewModel = viewModel
+            viewModel = viewModel,
+            onNavigateToSettings = onNavigateToSettings
         )
     } else {
         PermissionRequestScreen(
@@ -107,7 +109,8 @@ fun PhotosContent(
     isLoading: Boolean,
     sortMode: SortMode,
     onSortModeChanged: (SortMode) -> Unit,
-    viewModel: MediaViewModel
+    viewModel: MediaViewModel,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(context) }
@@ -237,6 +240,17 @@ fun PhotosContent(
     // Remember scroll state to preserve position
     val gridState = rememberLazyGridState()
     
+    // Calculate scroll progress for expandable app bar
+    val scrollProgress = remember {
+        derivedStateOf {
+            com.prantiux.pixelgallery.ui.components.calculateScrollProgress(
+                firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset,
+                collapseThreshold = 150
+            )
+        }
+    }
+    
     // Calculate navbar height for proper content padding
     val navBarHeight = calculateFloatingNavBarHeight()
     
@@ -263,41 +277,33 @@ fun PhotosContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Header - always show Gallery title
-            com.prantiux.pixelgallery.ui.components.MainTabHeader(
-                title = "Gallery"
-            )
-            
-            // Gallery content
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                    )
-            ) {
-                // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
-                // Never show on subsequent navigations to prevent UI jank
-                // Show loading FIRST, only show "no media" after loading completes
-                if (showLoading) {
-                    Log.d("PhotosScreenLoad", "Showing loading indicator")
-                    com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                        size = 48.dp
-                    )
-                } else if (allMedia.isEmpty()) {
-                    // Only show "no media" after loading is complete (when not loading)
-                    Log.d("PhotosScreenLoad", "Showing 'No media found' (loading complete, no items)")
-                    Text(
-                        "No media found",
-                        modifier = Modifier.align(Alignment.Center),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                } else {
-                    Log.d("PhotosScreenLoad", "Showing media grid (${allMedia.size} items)")
-                    LazyVerticalGrid(
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    color = MaterialTheme.colorScheme.surface
+                )
+        ) {
+            // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
+            // Never show on subsequent navigations to prevent UI jank
+            // Show loading FIRST, only show "no media" after loading completes
+            if (showLoading) {
+                Log.d("PhotosScreenLoad", "Showing loading indicator")
+                com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                    size = 48.dp
+                )
+            } else if (allMedia.isEmpty()) {
+                // Only show "no media" after loading is complete (when not loading)
+                Log.d("PhotosScreenLoad", "Showing 'No media found' (loading complete, no items)")
+                Text(
+                    "No media found",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            } else {
+                Log.d("PhotosScreenLoad", "Showing media grid (${allMedia.size} items)")
+                LazyVerticalGrid(
                         columns = GridCells.Fixed(columnCount),
                         state = gridState,
                         modifier = Modifier
@@ -310,11 +316,12 @@ fun PhotosContent(
                             bottom = navBarHeight + 2.dp,
                             start = 2.dp,
                             end = 2.dp,
-                            top = 16.dp
+                            top = 216.dp // Space for expanded app bar (Material 3 Large)
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        
                         groupedMedia.forEach { group ->
                         // Date Header - spans all columns with checkbox when in selection mode
                         item(span = { GridItemSpan(columnCount) }) {
@@ -434,7 +441,6 @@ fun PhotosContent(
                             )
                         }
                     }
-                    }
                 }
             }
         }
@@ -444,7 +450,7 @@ fun PhotosContent(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
-            topPadding = 88.dp + 16.dp + 32.dp, // Align with first date header
+            topPadding = 216.dp + 16.dp + 32.dp, // Align with first date header (expandable app bar height + spacing)
             dateGroups = dateGroupsForScrollbar,
             coroutineScope = coroutineScope,
             isDarkTheme = isDarkTheme,
@@ -455,6 +461,15 @@ fun PhotosContent(
                 scrollbarOverlayText = text
                 showScrollbarOverlay = text.isNotEmpty()
             }
+        )
+        
+        // Expandable Top App Bar - overlays on top
+        com.prantiux.pixelgallery.ui.components.ExpandableTopAppBar(
+            title = "Photos",
+            subtitle = "All your photos and videos",
+            scrollProgress = scrollProgress.value,
+            onSettingsClick = onNavigateToSettings,
+            modifier = Modifier.align(Alignment.TopCenter)
         )
         
         // Selection Top Bar - overlay above navigation bar
