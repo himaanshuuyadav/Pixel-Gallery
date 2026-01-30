@@ -104,10 +104,11 @@ fun SearchScreen(
     val quickFilters = remember { SearchEngine.getQuickFilters() }
     val dateShortcuts = remember { SearchEngine.getDateShortcuts() }
 
+    val navBarHeight = calculateFloatingNavBarHeight()
+    
     Column(modifier = Modifier.fillMaxSize()) {
+        // Header at top
         com.prantiux.pixelgallery.ui.components.MainTabHeader(title = "Search")
-        
-        val navBarHeight = calculateFloatingNavBarHeight()
         
         val keyboardController = LocalSoftwareKeyboardController.current
         
