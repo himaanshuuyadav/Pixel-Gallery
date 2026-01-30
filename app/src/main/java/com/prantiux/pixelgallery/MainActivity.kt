@@ -15,6 +15,9 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import coil.request.CachePolicy
 import com.prantiux.pixelgallery.navigation.AppNavigation
 import com.prantiux.pixelgallery.ui.theme.PixelGalleryTheme
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
@@ -123,11 +126,30 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "FINAL navigationBarColor: BLACK")
         Log.d(TAG, "=== SYSTEM BARS SETUP END ===")
         
-        // Configure Coil ImageLoader with video support
+        // Configure Coil ImageLoader with aggressive caching for high-resolution images
         val imageLoader = ImageLoader.Builder(this)
             .components {
                 add(VideoFrameDecoder.Factory())
             }
+            // Memory cache: 25% of available memory (for high-res images)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .strongReferencesEnabled(true)  // Keep strong references
+                    .build()
+            }
+            // Disk cache: 250MB for quick re-access
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(250L * 1024 * 1024)  // 250MB
+                    .build()
+            }
+            // Default cache policies for all requests
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            // Enable crossfade for smooth transitions
+            .crossfade(false)  // We'll handle crossfade per-image in overlay
             .build()
         coil.Coil.setImageLoader(imageLoader)
         
@@ -274,6 +296,7 @@ class MainActivity : ComponentActivity() {
                 android.util.Log.d(TAG, "appTheme: $appTheme")
                 android.util.Log.d(TAG, "isSystemDark: $isSystemDark")
                 android.util.Log.d(TAG, "Target color: ${if (darkTheme) "BLACK (#000000)" else "WHITE (#FFFFFF)"}")
+                @Suppress("DEPRECATION")
                 android.util.Log.d(TAG, "Current window.navigationBarColor BEFORE: #${Integer.toHexString(window.navigationBarColor)}")
                 
                 // On Android 15+, window.navigationBarColor may be ignored in edge-to-edge
@@ -285,6 +308,7 @@ class MainActivity : ComponentActivity() {
                 // CRITICAL: Set the appearance (light/dark icons) for proper contrast
                 insetsController.isAppearanceLightNavigationBars = !darkTheme
                 
+                @Suppress("DEPRECATION")
                 android.util.Log.d(TAG, "Current window.navigationBarColor AFTER: #${Integer.toHexString(window.navigationBarColor)}")
                 android.util.Log.d(TAG, "isAppearanceLightNavigationBars: ${!darkTheme}")
                 android.util.Log.d(TAG, "NOTE: On Android 15+, actual nav bar color comes from NavigationBarBackground composable")
