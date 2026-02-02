@@ -276,13 +276,21 @@ fun PhotosContent(
         viewModel.exitSelectionMode()
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Expandable Top App Bar - sticky header
+        com.prantiux.pixelgallery.ui.components.ExpandableTopAppBar(
+            title = "Photos",
+            subtitle = "All your photos and videos",
+            scrollProgress = scrollProgress.value,
+            onSettingsClick = onNavigateToSettings,
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        // Content area with grid
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    color = MaterialTheme.colorScheme.surface
-                )
+                .background(color = MaterialTheme.colorScheme.surface)
         ) {
             // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
             // Never show on subsequent navigations to prevent UI jank
@@ -316,7 +324,7 @@ fun PhotosContent(
                             bottom = navBarHeight + 2.dp,
                             start = 2.dp,
                             end = 2.dp,
-                            top = 216.dp // Space for expanded app bar (Material 3 Large)
+                            top = 0.dp // No top padding - app bar is above grid now
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -443,48 +451,39 @@ fun PhotosContent(
                     }
                 }
             }
+            
+            // Unified Scrollbar Component - overlaid on grid
+            com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
+                modifier = Modifier.align(Alignment.TopEnd),
+                gridState = gridState,
+                mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
+                topPadding = 0.dp, // No offset needed since app bar is above
+                dateGroups = dateGroupsForScrollbar,
+                coroutineScope = coroutineScope,
+                isDarkTheme = isDarkTheme,
+                onScrollbarVisibilityChanged = { visible ->
+                    viewModel.setScrollbarVisible(visible)
+                },
+                onOverlayTextChanged = { text ->
+                    scrollbarOverlayText = text
+                    showScrollbarOverlay = text.isNotEmpty()
+                }
+            )
+            
+            // Selection Top Bar - overlay above navigation bar
+            val copySuccessMessage by viewModel.copySuccessMessage.collectAsState()
+            val moveSuccessMessage by viewModel.moveSuccessMessage.collectAsState()
+            val deleteSuccessMessage by viewModel.deleteSuccessMessage.collectAsState()
+            com.prantiux.pixelgallery.ui.components.SelectionTopBar(
+                isVisible = isSelectionMode || copySuccessMessage != null || moveSuccessMessage != null || deleteSuccessMessage != null,
+                selectedCount = selectedItems.size,
+                onCancelSelection = { viewModel.exitSelectionMode() },
+                successMessage = copySuccessMessage ?: moveSuccessMessage ?: deleteSuccessMessage,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
+            )
         }
-        
-        // Unified Scrollbar Component
-        com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
-            modifier = Modifier.align(Alignment.TopEnd),
-            gridState = gridState,
-            mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
-            topPadding = 216.dp + 16.dp + 32.dp, // Align with first date header (expandable app bar height + spacing)
-            dateGroups = dateGroupsForScrollbar,
-            coroutineScope = coroutineScope,
-            isDarkTheme = isDarkTheme,
-            onScrollbarVisibilityChanged = { visible ->
-                viewModel.setScrollbarVisible(visible)
-            },
-            onOverlayTextChanged = { text ->
-                scrollbarOverlayText = text
-                showScrollbarOverlay = text.isNotEmpty()
-            }
-        )
-        
-        // Expandable Top App Bar - overlays on top
-        com.prantiux.pixelgallery.ui.components.ExpandableTopAppBar(
-            title = "Photos",
-            subtitle = "All your photos and videos",
-            scrollProgress = scrollProgress.value,
-            onSettingsClick = onNavigateToSettings,
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
-        
-        // Selection Top Bar - overlay above navigation bar
-        val copySuccessMessage by viewModel.copySuccessMessage.collectAsState()
-        val moveSuccessMessage by viewModel.moveSuccessMessage.collectAsState()
-        val deleteSuccessMessage by viewModel.deleteSuccessMessage.collectAsState()
-        com.prantiux.pixelgallery.ui.components.SelectionTopBar(
-            isVisible = isSelectionMode || copySuccessMessage != null || moveSuccessMessage != null || deleteSuccessMessage != null,
-            selectedCount = selectedItems.size,
-            onCancelSelection = { viewModel.exitSelectionMode() },
-            successMessage = copySuccessMessage ?: moveSuccessMessage ?: deleteSuccessMessage,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
-        )
     }
 }
 
