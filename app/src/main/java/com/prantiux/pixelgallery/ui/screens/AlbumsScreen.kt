@@ -119,37 +119,17 @@ fun AlbumsScreen(
                     .background(color = MaterialTheme.colorScheme.surface),
                 contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight)
             ) {
-                // Scrollable Header
+                // Extended Header with Tabs - unified background
                 item {
-                    com.prantiux.pixelgallery.ui.components.MainTabHeader(title = "Albums")
-                }
-                
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-                
-                // Main Album Tabs (rectangular pills) with View All and Edit buttons
-                item {
-                    var showReorderBottomSheet by remember { mutableStateOf(false) }
-                    
-                    MainAlbumTabs(
+                    AlbumsHeaderWithTabs(
                         albums = albums.mainAlbums,
                         selectedIndex = selectedMainAlbumIndex,
                         onTabSelected = { index ->
                             selectedMainAlbumIndex = index
                         },
                         onViewAllClick = onNavigateToAllAlbums,
-                        onEditClick = { showReorderBottomSheet = true }
+                        onEditClick = { /* showReorderBottomSheet = true */ }
                     )
-                    
-                    // Reorder Bottom Sheet
-                    if (showReorderBottomSheet) {
-                        ReorderBottomSheet(
-                            mainAlbums = albums.mainAlbums,
-                            otherAlbums = albums.otherAlbums,
-                            onDismiss = { showReorderBottomSheet = false }
-                        )
-                    }
                 }
 
                 // Highlighted section for selected album
@@ -188,6 +168,54 @@ fun AlbumsScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Combined header with title and album tabs - unified background
+ * - Smaller title font (titleLarge instead of headlineLarge)
+ * - Extended background behind both header and tabs
+ * - Smooth bottom transition
+ */
+@Composable
+fun AlbumsHeaderWithTabs(
+    albums: List<Album>,
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    onViewAllClick: () -> Unit,
+    onEditClick: () -> Unit = {}
+) {
+    val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    
+    // Set status bar to match header background
+    com.prantiux.pixelgallery.ui.components.SetStatusBarColor(headerColor)
+    
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = headerColor
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Title - reduced font size
+            Text(
+                text = "Albums",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .statusBarsPadding()
+            )
+            
+            // Tabs - directly below without spacer
+            MainAlbumTabs(
+                albums = albums,
+                selectedIndex = selectedIndex,
+                onTabSelected = onTabSelected,
+                onViewAllClick = onViewAllClick,
+                onEditClick = onEditClick
+            )
         }
     }
 }
