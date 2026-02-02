@@ -47,15 +47,23 @@ fun ExpandableTopAppBar(
     modifier: Modifier = Modifier
 ) {
     // Material 3 Large Top App Bar dimensions
+    // Collapsed height calculation:
+    // - Status bar: 24-25dp
+    // - Top padding: 14dp
+    // - Title (26sp) + line height: 36dp
+    // - Icon container (48dp) with padding: 54dp
+    // - Proper vertical distribution: 14dp top + 54dp icon area = 68dp
+    // - Bottom padding: 20dp
+    // - Total: ~104dp (spacious for icon at collapsed state)
     val expandedHeight = 216.dp // Increased for immersive feel
-    val collapsedHeight = 64.dp
+    val collapsedHeight = 108.dp // Increased for proper icon spacing
     
     // Interpolate height smoothly
     val currentHeight = lerp(expandedHeight, collapsedHeight, scrollProgress)
     
     // Title size interpolation - more dramatic transition
     val expandedTitleSize = 45.sp // Larger for more impact
-    val collapsedTitleSize = 22.sp
+    val collapsedTitleSize = 26.sp // Increased from 22sp for better readability
     val currentTitleSize = lerp(expandedTitleSize, collapsedTitleSize, scrollProgress)
     
     // Title weight interpolation for smooth transition
@@ -64,8 +72,8 @@ fun ExpandableTopAppBar(
     // Subtitle alpha - fade out smoothly but completely
     val subtitleAlpha = (1f - scrollProgress * 1.5f).coerceIn(0f, 1f)
     
-    // Title vertical alignment - stays visible in collapsed state
-    val titleBottomPadding = lerp(24.dp, 16.dp, scrollProgress)
+    // Title vertical alignment - stays visible in collapsed state with better spacing
+    val titleBottomPadding = lerp(24.dp, 22.dp, scrollProgress)
     
     // Background color with proper opacity
     val backgroundColor = MaterialTheme.colorScheme.surface
