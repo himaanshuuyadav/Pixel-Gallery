@@ -164,7 +164,7 @@ fun PixelStyleFloatingNavBar(
     // Outer padding here acts like margin so the pill truly floats
     Box(
         modifier = modifier
-            .padding(start = 16.dp, end = 16.dp, bottom = navBarInsetPadding)
+            .padding(start = 24.dp, end = 24.dp, bottom = navBarInsetPadding)
     ) {
         Surface(
             modifier = Modifier
@@ -351,15 +351,15 @@ fun AppNavigation(
             Screen.Photos.route -> onTabChanged("Photos")
             Screen.Albums.route -> onTabChanged("Albums")
             Screen.Search.route -> onTabChanged("Search")
-            Screen.Settings.route -> onTabChanged("Settings")
+            // Settings is no longer a tab, accessed from header icon only
         }
     }
 
+    // Bottom navigation items - Settings removed (open from header only)
     val bottomNavItems = listOf(
         NavItem(Screen.Photos.route, "Photos", FontIcons.Home),
         NavItem(Screen.Albums.route, "Albums", FontIcons.Person),
-        NavItem(Screen.Search.route, "Search", FontIcons.Search),
-        NavItem(Screen.Settings.route, "Settings", FontIcons.Settings)
+        NavItem(Screen.Search.route, "Search", FontIcons.Search)
     )
     
     val selectionModeItems = listOf(
