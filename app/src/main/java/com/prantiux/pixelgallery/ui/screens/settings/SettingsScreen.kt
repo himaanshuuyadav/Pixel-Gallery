@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -40,123 +41,108 @@ fun SettingsScreen(
         com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> "Month"
     }
     
-    val navBarHeight = calculateFloatingNavBarHeight()
-    
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(color = MaterialTheme.colorScheme.surface),
-        contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight + 16.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
+    SubPageScaffold(
+        title = "Settings",
+        subtitle = null,
+        onNavigateBack = onBackClick
     ) {
-        // Scrollable Header
-        item {
-            com.prantiux.pixelgallery.ui.components.MainTabHeader(
-                title = "Settings"
-            )
-        }
-        
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-        
         // Appearance Section
         item {
             CategoryHeader("Appearance")
         }
         item {
             SettingsGroup {
-                    GroupedSettingItem(
-                        title = "Layout",
-                        subtitle = gridTypeText,
-                        iconUnicode = FontIcons.GridView,
-                        position = SettingPosition.TOP,
-                        onClick = onNavigateToGridType
-                    )
-                    GroupedSettingItem(
-                        title = "Photos view",
-                        subtitle = "Choose folders to show",
-                        iconUnicode = FontIcons.Folder,
-                        position = SettingPosition.MIDDLE,
-                        onClick = onNavigateToGalleryView
-                    )
-                    GroupedSettingItem(
-                        title = "Theme",
-                        subtitle = "System default",
-                        iconUnicode = FontIcons.Palette,
-                        position = SettingPosition.MIDDLE,
-                        onClick = onNavigateToTheme
-                    )
-                    GroupedSettingItem(
-                        title = "Previews",
-                        subtitle = "Thumbnail and media settings",
-                        iconUnicode = FontIcons.Image,
-                        position = SettingPosition.BOTTOM,
-                        onClick = onNavigateToPreviews
-                    )
-                }
+                GroupedSettingItem(
+                    title = "Layout",
+                    subtitle = gridTypeText,
+                    iconUnicode = FontIcons.GridView,
+                    position = SettingPosition.TOP,
+                    onClick = onNavigateToGridType
+                )
+                GroupedSettingItem(
+                    title = "Photos view",
+                    subtitle = "Choose folders to show",
+                    iconUnicode = FontIcons.Folder,
+                    position = SettingPosition.MIDDLE,
+                    onClick = onNavigateToGalleryView
+                )
+                GroupedSettingItem(
+                    title = "Theme",
+                    subtitle = "System default",
+                    iconUnicode = FontIcons.Palette,
+                    position = SettingPosition.MIDDLE,
+                    onClick = onNavigateToTheme
+                )
+                GroupedSettingItem(
+                    title = "Previews",
+                    subtitle = "Thumbnail and media settings",
+                    iconUnicode = FontIcons.Image,
+                    position = SettingPosition.BOTTOM,
+                    onClick = onNavigateToPreviews
+                )
             }
-            
-            // Interaction Section
-            item {
-                CategoryHeader("Interaction")
+        }
+        
+        // Interaction Section
+        item {
+            CategoryHeader("Interaction")
         }
         item {
-                SettingsGroup {
-                    GroupedSettingItem(
-                        title = "Gestures",
-                        subtitle = "Swipe and tap controls",
-                        iconUnicode = FontIcons.SwipeDown,
-                        position = SettingPosition.TOP,
-                        onClick = onNavigateToGestures
-                    )
-                    GroupedSettingItem(
-                        title = "Playback",
-                        subtitle = "Video and audio settings",
-                        iconUnicode = FontIcons.PlayArrow,
-                        position = SettingPosition.MIDDLE,
-                        onClick = onNavigateToPlayback
-                    )
-                    GroupedSettingItem(
-                        title = "Viewing",
-                        subtitle = "Display and zoom preferences",
-                        iconUnicode = FontIcons.ZoomIn,
-                        position = SettingPosition.BOTTOM,
-                        onClick = { /* TODO */ }
-                    )
-                }
+            SettingsGroup {
+                GroupedSettingItem(
+                    title = "Gestures",
+                    subtitle = "Swipe and tap controls",
+                    iconUnicode = FontIcons.SwipeDown,
+                    position = SettingPosition.TOP,
+                    onClick = onNavigateToGestures
+                )
+                GroupedSettingItem(
+                    title = "Playback",
+                    subtitle = "Video and audio settings",
+                    iconUnicode = FontIcons.PlayArrow,
+                    position = SettingPosition.MIDDLE,
+                    onClick = onNavigateToPlayback
+                )
+                GroupedSettingItem(
+                    title = "Viewing",
+                    subtitle = "Display and zoom preferences",
+                    iconUnicode = FontIcons.ZoomIn,
+                    position = SettingPosition.BOTTOM,
+                    onClick = { /* TODO */ }
+                )
             }
-            
-            // Storage and Privacy Section
-            item {
-                CategoryHeader("Storage and Privacy")
+        }
+        
+        // Storage and Privacy Section
+        item {
+            CategoryHeader("Storage and Privacy")
         }
         item {
-                SettingsGroup {
-                    GroupedSettingItem(
-                        title = "Storage",
-                        subtitle = "Manage space and cache",
-                        iconUnicode = FontIcons.Storage,
-                        position = SettingPosition.TOP,
-                        onClick = { /* TODO */ }
-                    )
-                    GroupedSettingItem(
-                        title = "Hidden",
-                        subtitle = "Hidden albums and items",
-                        iconUnicode = FontIcons.VisibilityOff,
-                        position = SettingPosition.MIDDLE,
-                        onClick = { /* TODO */ }
-                    )
-                    GroupedSettingItem(
-                        title = "Performance",
-                        subtitle = "Optimize app performance",
-                        iconUnicode = FontIcons.Settings,
-                        position = SettingPosition.BOTTOM,
-                        onClick = { /* TODO */ }
-                    )
-                }
+            SettingsGroup {
+                GroupedSettingItem(
+                    title = "Storage",
+                    subtitle = "Manage space and cache",
+                    iconUnicode = FontIcons.Storage,
+                    position = SettingPosition.TOP,
+                    onClick = { /* TODO */ }
+                )
+                GroupedSettingItem(
+                    title = "Hidden",
+                    subtitle = "Hidden albums and items",
+                    iconUnicode = FontIcons.VisibilityOff,
+                    position = SettingPosition.MIDDLE,
+                    onClick = { /* TODO */ }
+                )
+                GroupedSettingItem(
+                    title = "Performance",
+                    subtitle = "Optimize app performance",
+                    iconUnicode = FontIcons.Settings,
+                    position = SettingPosition.BOTTOM,
+                    onClick = { /* TODO */ }
+                )
             }
-            
+        }
+        
         // Support Section
         item {
             CategoryHeader("Support")
