@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
 import com.prantiux.pixelgallery.model.MediaItem
+import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -17,8 +18,21 @@ class AlbumRepository(private val context: Context) {
     private val MAIN_ALBUM_THRESHOLD = 10
 
     suspend fun loadCategorizedAlbums(): CategorizedAlbums = withContext(Dispatchers.IO) {
-        val allAlbums = loadAllAlbums()
-        categorizeAlbums(allAlbums)
+        val regularAlbums = loadAllAlbums()
+        // Don't include smart albums in main Albums screen
+        categorizeAlbums(regularAlbums)
+    }
+    
+    /**
+     * Load ML-based smart albums (used by Search screen only)
+     */
+    suspend fun loadSmartAlbums(): List<Album> = withContext(Dispatchers.IO) {
+        try {
+            SmartAlbumGenerator.generateSmartAlbums(context)
+        } catch (e: Exception) {
+            android.util.Log.e("AlbumRepository", "Error loading smart albums", e)
+            emptyList()
+        }
     }
 
     private suspend fun loadAllAlbums(): List<Album> = withContext(Dispatchers.IO) {
