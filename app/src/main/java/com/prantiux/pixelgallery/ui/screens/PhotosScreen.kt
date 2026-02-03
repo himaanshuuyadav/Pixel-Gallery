@@ -280,7 +280,6 @@ fun PhotosContent(
         // Expandable Top App Bar - sticky header
         com.prantiux.pixelgallery.ui.components.ExpandableTopAppBar(
             title = "Photos",
-            subtitle = "All your photos and videos",
             scrollProgress = scrollProgress.value,
             onSettingsClick = onNavigateToSettings,
             modifier = Modifier.fillMaxWidth()
@@ -336,7 +335,7 @@ fun PhotosContent(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp),
+                                    .padding(start = 8.dp, top = 28.dp, bottom = 8.dp, end = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
