@@ -47,6 +47,10 @@ import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
 import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
+import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
+import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -82,11 +86,37 @@ fun AlbumDetailScreen(
         viewModel.exitSelectionMode()
     }
     
+    // State for smart album media (populated asynchronously)
+    var smartAlbumMedia by remember { mutableStateOf<List<MediaItem>?>(null) }
+    
+    // More menu state
+    var showMoreMenu by remember { mutableStateOf(false) }
+    
+    // Check if this is a smart album and load media accordingly
+    val isSmartAlbum = SmartAlbumGenerator.isSmartAlbum(albumId)
+    
+    // Load smart album media if needed
+    LaunchedEffect(albumId, images, videos) {
+        if (isSmartAlbum) {
+            coroutineScope.launch {
+                val allMedia = images + videos
+                val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMedia)
+                smartAlbumMedia = smartMedia
+            }
+        }
+    }
+    
     // Combine images and videos for this album
-    val albumMedia = remember(images, videos, albumId) {
-        (images + videos)
-            .filter { it.bucketId == albumId }
-            .sortedByDescending { it.dateAdded }
+    val albumMedia = remember(images, videos, albumId, smartAlbumMedia) {
+        if (isSmartAlbum) {
+            // Use smart album results
+            smartAlbumMedia?.sortedByDescending { it.dateAdded } ?: emptyList()
+        } else {
+            // Regular album - filter by bucketId
+            (images + videos)
+                .filter { it.bucketId == albumId }
+                .sortedByDescending { it.dateAdded }
+        }
     }
     
     // Determine column count based on grid type
@@ -347,10 +377,181 @@ fun AlbumDetailScreen(
                                 if (success) viewModel.exitSelectionMode()
                             }
                         }
-                        "more" -> { /* TODO: More options */ }
+                        "more" -> { showMoreMenu = true }
                     }
                 }
             )
+        }
+        
+        // More menu dropdown for selection mode
+        if (showMoreMenu && isSelectionMode) {
+            val navBarInset = androidx.compose.foundation.layout.WindowInsets.navigationBars
+                .asPaddingValues().calculateBottomPadding()
+            
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = navBarInset + 80.dp, end = 16.dp)
+            ) {
+                DropdownMenu(
+                    expanded = showMoreMenu,
+                    onDismissRequest = { showMoreMenu = false },
+                    modifier = Modifier.widthIn(min = 220.dp),
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp,
+                    shape = SmoothCornerShape(20.dp, 60)
+                ) {
+                    // Set as wallpaper
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Surface(
+                                    shape = SmoothCornerShape(12.dp, 60),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Image,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            size = 20.sp
+                                        )
+                                    }
+                                }
+                                Text(
+                                    "Set as wallpaper",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            selectedItems.firstOrNull()?.let { item ->
+                                if (!item.isVideo) {
+                                    val wallpaperIntent = Intent(Intent.ACTION_ATTACH_DATA).apply {
+                                        setDataAndType(item.uri, "image/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(wallpaperIntent, "Set as"))
+                                } else {
+                                    android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                    
+                    // Move to album
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Surface(
+                                    shape = SmoothCornerShape(12.dp, 60),
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Move,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            size = 20.sp
+                                        )
+                                    }
+                                }
+                                Text(
+                                    "Move to album",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            viewModel.showMoveToAlbumDialog(selectedItems.toList())
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                    
+                    // Hide from this label (only for smart albums)
+                    if (isSmartAlbum) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Surface(
+                                        shape = SmoothCornerShape(12.dp, 60),
+                                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) {
+                                            FontIcon(
+                                                unicode = FontIcons.VisibilityOff,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                size = 20.sp
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "Hide from this label",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                coroutineScope.launch {
+                                    viewModel.hideFromSmartAlbum(context, albumId, selectedItems.toList())
+                                    viewModel.exitSelectionMode()
+                                    // Reload smart album media
+                                    val allMedia = images + videos
+                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMedia)
+                                    smartAlbumMedia = smartMedia
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Hidden ${selectedItems.size} ${if (selectedItems.size == 1) "item" else "items"} from this label",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
         }
     }
     
