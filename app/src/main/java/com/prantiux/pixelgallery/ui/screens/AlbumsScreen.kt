@@ -14,6 +14,7 @@ import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.runtime.*
@@ -80,6 +81,7 @@ fun AlbumsScreen(
     var categorizedAlbums by remember { mutableStateOf<CategorizedAlbums?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
+    var showReorderBottomSheet by remember { mutableStateOf(false) }
 
     // Load albums on launch
     LaunchedEffect(Unit) {
@@ -112,11 +114,29 @@ fun AlbumsScreen(
         } else if (!isLoading && categorizedAlbums != null) {
             val albums = categorizedAlbums!!
             val navBarHeight = calculateFloatingNavBarHeight()
+            val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            val backgroundColor = MaterialTheme.colorScheme.surface
+            
+            // Gradient background layer - extends behind entire content area
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                headerColor,
+                                headerColor,
+                                headerColor.copy(alpha = 0.15f),
+                                backgroundColor
+                            )
+                        )
+                    )
+            )
             
             LazyColumn(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(color = MaterialTheme.colorScheme.surface),
+                    .fillMaxSize(),
                 contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight)
             ) {
                 // Extended Header with Tabs - unified background
@@ -128,7 +148,7 @@ fun AlbumsScreen(
                             selectedMainAlbumIndex = index
                         },
                         onViewAllClick = onNavigateToAllAlbums,
-                        onEditClick = { /* showReorderBottomSheet = true */ }
+                        onEditClick = { showReorderBottomSheet = true }
                     )
                 }
 
@@ -168,15 +188,23 @@ fun AlbumsScreen(
                     )
                 }
             }
+            
+            // Reorder Bottom Sheet
+            if (showReorderBottomSheet) {
+                ReorderBottomSheet(
+                    mainAlbums = albums.mainAlbums,
+                    otherAlbums = albums.otherAlbums,
+                    onDismiss = { showReorderBottomSheet = false }
+                )
+            }
         }
     }
 }
 
 /**
- * Combined header with title and album tabs - unified background
- * - Smaller title font (titleLarge instead of headlineLarge)
- * - Extended background behind both header and tabs
- * - Smooth bottom transition
+ * Combined header with title and album tabs
+ * - Font size matched with Photos collapsed heading (26sp)
+ * - Background handled by parent composable
  */
 @Composable
 fun AlbumsHeaderWithTabs(
@@ -191,32 +219,28 @@ fun AlbumsHeaderWithTabs(
     // Set status bar to match header background
     com.prantiux.pixelgallery.ui.components.SetStatusBarColor(headerColor)
     
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = headerColor
+    Column(
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // Title - reduced font size
-            Text(
-                text = "Albums",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-                    .statusBarsPadding()
-            )
-            
-            // Tabs - directly below without spacer
-            MainAlbumTabs(
-                albums = albums,
-                selectedIndex = selectedIndex,
-                onTabSelected = onTabSelected,
-                onViewAllClick = onViewAllClick,
-                onEditClick = onEditClick
-            )
-        }
+        // Title - same font size as Photos collapsed heading (26sp)
+        Text(
+            text = "Albums",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .statusBarsPadding()
+        )
+        
+        // Tabs - directly below without spacer
+        MainAlbumTabs(
+            albums = albums,
+            selectedIndex = selectedIndex,
+            onTabSelected = onTabSelected,
+            onViewAllClick = onViewAllClick,
+            onEditClick = onEditClick
+        )
     }
 }
 
