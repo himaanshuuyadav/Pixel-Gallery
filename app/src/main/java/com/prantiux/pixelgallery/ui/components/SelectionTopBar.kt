@@ -102,11 +102,11 @@ private fun SelectionTopBarContent(
         )
     }
     
-    // Container with proper spacing from edges (no status bar padding as it comes below header)
+    // Container with proper spacing from edges - matches nav bar padding (24.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 0.dp)
+            .padding(horizontal = 24.dp, vertical = 0.dp)
     ) {
         // Pill-shaped container
         Surface(
