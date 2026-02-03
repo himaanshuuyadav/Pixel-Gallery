@@ -112,11 +112,14 @@ class ImageLabelWorker(
                             "${label.text.lowercase()}(${(label.confidence * 100).toInt()}%)"
                         }
                         
-                        // Store in database
+                        // Store in database with confidence scores
                         labelDao.insert(
                             MediaLabelEntity(
                                 mediaId = mediaItem.id,
-                                labels = labels.joinToString(",") { it.text.lowercase() }
+                                labels = labels.joinToString(",") { it.text.lowercase() },
+                                labelsWithConfidence = labels.joinToString(",") { label ->
+                                    "${label.text.lowercase()}:${label.confidence}"
+                                }
                             )
                         )
                         
@@ -130,7 +133,8 @@ class ImageLabelWorker(
                                 KEY_PROGRESS to currentProcessed,
                                 KEY_TOTAL to totalImages
                             ))
-                            Log.d(TAG, "  📊 Progress: $currentProcessed / $totalImages (${(currentProcessed * 100 / totalImages)}%)")
+                            val progressPercent = (currentProcessed * 100.0 / totalImages).toInt()
+                            Log.d(TAG, "  📊 Progress: $currentProcessed / $totalImages ($progressPercent%)")
                         }
                         
                         // Recycle bitmap
