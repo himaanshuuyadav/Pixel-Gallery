@@ -1,9 +1,11 @@
 package com.prantiux.pixelgallery.data
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -14,6 +16,12 @@ interface MediaLabelDao {
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<MediaLabelEntity>)
+    
+    @Update
+    suspend fun update(entity: MediaLabelEntity)
+    
+    @Delete
+    suspend fun delete(entity: MediaLabelEntity)
     
     /**
      * Search for media by label using LIKE query
@@ -58,4 +66,10 @@ interface MediaLabelDao {
      */
     @Query("SELECT COUNT(*) FROM media_labels")
     fun observeProcessedCount(): Flow<Int>
+    
+    /**
+     * Get all labeled media for smart album generation
+     */
+    @Query("SELECT * FROM media_labels")
+    suspend fun getAllLabels(): List<MediaLabelEntity>
 }
