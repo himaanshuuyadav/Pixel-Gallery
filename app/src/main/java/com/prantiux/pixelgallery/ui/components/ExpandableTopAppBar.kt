@@ -41,9 +41,9 @@ private const val TAG = "ExpandableTopAppBar"
 @Composable
 fun ExpandableTopAppBar(
     title: String,
-    subtitle: String,
     scrollProgress: Float, // 0f = fully expanded, 1f = fully collapsed
     onSettingsClick: () -> Unit,
+    subtitle: String? = null,  // Optional subtitle - removed from Photos header
     modifier: Modifier = Modifier
 ) {
     // Material 3 Large Top App Bar dimensions
@@ -51,12 +51,12 @@ fun ExpandableTopAppBar(
     // - Status bar: 24-25dp
     // - Top padding: 14dp
     // - Title (26sp) + line height: 36dp
-    // - Icon container (48dp) with padding: 54dp
-    // - Proper vertical distribution: 14dp top + 54dp icon area = 68dp
-    // - Bottom padding: 20dp
-    // - Total: ~104dp (spacious for icon at collapsed state)
+    // - Icon container (48dp) with padding: 48dp
+    // - Proper vertical distribution: 14dp top + 48dp icon area = 62dp
+    // - Bottom padding: 12dp (reduced for more breathing room)
+    // - Total: ~98dp (spacious for icon at collapsed state)
     val expandedHeight = 216.dp // Increased for immersive feel
-    val collapsedHeight = 108.dp // Increased for proper icon spacing
+    val collapsedHeight = 102.dp // Slightly reduced with better internal spacing
     
     // Interpolate height smoothly
     val currentHeight = lerp(expandedHeight, collapsedHeight, scrollProgress)
@@ -72,8 +72,8 @@ fun ExpandableTopAppBar(
     // Subtitle alpha - fade out smoothly but completely
     val subtitleAlpha = (1f - scrollProgress * 1.5f).coerceIn(0f, 1f)
     
-    // Title vertical alignment - stays visible in collapsed state with better spacing
-    val titleBottomPadding = lerp(24.dp, 22.dp, scrollProgress)
+    // Title vertical alignment - reduced padding for better icon spacing
+    val titleBottomPadding = lerp(24.dp, 12.dp, scrollProgress)
     
     // Background color with proper opacity
     val backgroundColor = MaterialTheme.colorScheme.surface
@@ -118,8 +118,8 @@ fun ExpandableTopAppBar(
                         lineHeight = currentTitleSize * 1.1f
                     )
                     
-                    // Subtitle - only show when expanded
-                    if (subtitleAlpha > 0.01f) {
+                    // Subtitle - only show when expanded and provided
+                    if (subtitle != null && subtitleAlpha > 0.01f) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = subtitle,
@@ -135,7 +135,7 @@ fun ExpandableTopAppBar(
                     onClick = onSettingsClick,
                     modifier = Modifier
                         .size(48.dp)
-                        .padding(bottom = 4.dp)
+                        .padding(bottom = 0.dp)
                 ) {
                     Surface(
                         shape = CircleShape,
