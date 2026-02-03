@@ -17,6 +17,7 @@ import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchEngine
+import com.prantiux.pixelgallery.search.SearchResultFilter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -533,6 +534,56 @@ class MediaViewModel : ViewModel() {
         repository.shareMediaItems(context, uris)
     }
     
+    /**
+     * Hide selected items from a smart album by removing the associated labels
+     */
+    suspend fun hideFromSmartAlbum(context: Context, smartAlbumId: String, items: List<MediaItem>) {
+        try {
+            val albumType = com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator.SmartAlbumType.fromId(smartAlbumId)
+            if (albumType == null) {
+                android.util.Log.e("MediaViewModel", "Invalid smart album ID: $smartAlbumId")
+                return
+            }
+            
+            val labelDao = database.mediaLabelDao()
+            val labelsToRemove = albumType.labels.map { it.lowercase() }.toSet()
+            
+            items.forEach { mediaItem ->
+                // Get existing label entity
+                val existingEntity = labelDao.getLabelsForMedia(mediaItem.id)
+                if (existingEntity != null) {
+                    // Parse existing labels
+                    val parsedLabels = com.prantiux.pixelgallery.search.SearchResultFilter
+                        .parseLabelsWithConfidence(existingEntity.labelsWithConfidence)
+                    
+                    // Filter out labels associated with this smart album
+                    val filteredLabels = parsedLabels.filter { it.label !in labelsToRemove }
+                    
+                    if (filteredLabels.isEmpty()) {
+                        // Remove the entire entity if no labels remain
+                        labelDao.delete(existingEntity)
+                    } else {
+                        // Rebuild the labelsWithConfidence string
+                        val newLabelsString = filteredLabels.joinToString(",") { 
+                            "${it.label}:${String.format("%.2f", it.confidence)}" 
+                        }
+                        
+                        // Update the entity
+                        val updatedEntity = existingEntity.copy(
+                            labels = filteredLabels.joinToString(",") { it.label },
+                            labelsWithConfidence = newLabelsString
+                        )
+                        labelDao.update(updatedEntity)
+                    }
+                }
+            }
+            
+            android.util.Log.d("MediaViewModel", "Hidden ${items.size} items from smart album: ${albumType.displayName}")
+        } catch (e: Exception) {
+            android.util.Log.e("MediaViewModel", "Error hiding items from smart album", e)
+        }
+    }
+    
     // Search functions
     fun searchMedia(query: String) {
         // Cancel previous search job first
@@ -569,15 +620,19 @@ class MediaViewModel : ViewModel() {
             // Perform traditional search on cached data (filename, date, location)
             val traditionalResults = SearchEngine.search(query, cachedMedia)
             
-            // Perform ML-based label search (if database initialized)
+            // Perform ML-based label search with confidence filtering (if database initialized)
             val mlResults = if (::database.isInitialized) {
                 try {
                     val labelDao = database.mediaLabelDao()
                     val labelMatches = labelDao.searchByLabel(query.lowercase())
-                    val matchedIds = labelMatches.map { it.mediaId }.toSet()
                     
-                    // Filter cached media by matched IDs
-                    cachedMedia.filter { it.id in matchedIds }
+                    // Apply post-processing filter and ranking
+                    SearchResultFilter.filterAndRankMedia(
+                        query = query,
+                        matchedLabels = labelMatches,
+                        mediaItems = cachedMedia,
+                        hardFilter = true // Remove low-confidence matches
+                    )
                 } catch (e: Exception) {
                     emptyList()
                 }
