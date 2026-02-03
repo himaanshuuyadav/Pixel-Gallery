@@ -80,18 +80,11 @@ fun SubPageScaffold(
         scrollBehavior.state.collapsedFraction
     }
     
-    // Custom colors when collapsed (only for special pages like Grid Type)
-    val containerColor = if (useCustomCollapseColors && collapseFraction > 0.5f) {
-        MaterialTheme.colorScheme.surfaceContainer
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
-    
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = if (useCustomCollapseColors) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             MediumTopAppBar(
                 title = {
@@ -123,8 +116,8 @@ fun SubPageScaffold(
                 actions = actions,
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = containerColor,
-                    scrolledContainerColor = containerColor
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
