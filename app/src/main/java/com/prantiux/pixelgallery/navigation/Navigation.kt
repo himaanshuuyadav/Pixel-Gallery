@@ -53,6 +53,9 @@ import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
 import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
+import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 
 data class NavItem(
     val route: String,
@@ -67,6 +70,10 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object Settings : Screen("settings", "Settings", FontIcons.Settings)
     object AlbumDetail : Screen("album/{albumId}", "Album") {
         fun createRoute(albumId: String) = "album/$albumId"
+    }
+    
+    object SmartAlbumView : Screen("smartalbum/{albumId}", "Smart Album") {
+        fun createRoute(albumId: String) = "smartalbum/$albumId"
     }
     object AllAlbums : Screen("all_albums", "All Albums")
     object RecycleBin : Screen("recycle_bin", "Recycle Bin")
@@ -612,6 +619,24 @@ fun AppNavigation(
                     settingsDataStore = settingsDataStore
                 )
             }
+            
+            composable(
+                route = Screen.SmartAlbumView.route,
+                arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() }
+            ) { backStackEntry ->
+                val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
+                SmartAlbumViewScreen(
+                    viewModel = viewModel,
+                    albumId = albumId,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToViewer = { },
+                    settingsDataStore = settingsDataStore
+                )
+            }
         }
 
             // Media overlay state
@@ -633,17 +658,57 @@ fun AppNavigation(
             // Get favorite items for overlay
             val favoriteItems by viewModel.favoriteItems.collectAsState()
             
+            // Get context for smart album loading
+            val context = androidx.compose.ui.platform.LocalContext.current
+            
             // Filter media based on overlay state (album or all media)
             val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, allMediaUnfiltered, searchResults, favoriteItems) {
                 when (overlayState.mediaType) {
-                    "album" -> allMediaUnfiltered.filter { it.bucketId == overlayState.albumId }
-                        .sortedByDescending { it.dateAdded }
+                    "album" -> {
+                        // Check if this is a smart album
+                        if (SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)) {
+                            // Smart album - needs async loading, return empty for now
+                            // Will be populated by LaunchedEffect below
+                            emptyList()
+                        } else {
+                            // Regular album - filter by bucketId
+                            allMediaUnfiltered.filter { it.bucketId == overlayState.albumId }
+                                .sortedByDescending { it.dateAdded }
+                        }
+                    }
                     "search" -> {
                         // Use actual search results from SearchEngine, not simple filter
                         searchResults?.matchedMedia ?: emptyList()
                     }
                     "favorites" -> favoriteItems
                     else -> allMedia
+                }
+            }
+            
+            // Smart album media state (loaded asynchronously)
+            var smartAlbumOverlayMedia by remember { mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>?>(null) }
+            val coroutineScope = rememberCoroutineScope()
+            
+            // Load smart album media if overlay is showing a smart album
+            androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, allMediaUnfiltered) {
+                if (overlayState.mediaType == "album" && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)) {
+                    coroutineScope.launch {
+                        val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(
+                            context,
+                            overlayState.albumId,
+                            allMediaUnfiltered
+                        )
+                        smartAlbumOverlayMedia = smartMedia.sortedByDescending { it.dateAdded }
+                    }
+                }
+            }
+            
+            // Final media list with smart album support
+            val finalOverlayMediaItems = remember(overlayMediaItems, smartAlbumOverlayMedia, overlayState.mediaType, overlayState.albumId) {
+                if (overlayState.mediaType == "album" && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)) {
+                    smartAlbumOverlayMedia ?: emptyList()
+                } else {
+                    overlayMediaItems
                 }
             }
 
@@ -656,7 +721,7 @@ fun AppNavigation(
                         com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
                             viewModel = viewModel,
                             overlayState = overlayState,
-                            mediaItems = overlayMediaItems,
+                            mediaItems = finalOverlayMediaItems,
                             settingsDataStore = settingsDataStore,
                             videoPositionDataStore = videoPositionDataStore,
                             onDismiss = { viewModel.hideMediaOverlay() }
@@ -783,8 +848,8 @@ fun AppNavigation(
                     },
                     selectedRoute = currentRoute ?: Screen.Photos.route,
                     onItemSelected = { item ->
-                        if (isSelectionMode && currentRoute == Screen.Photos.route) {
-                            // Handle selection mode actions
+                        if (isSelectionMode || item.route == "more") {
+                            // Handle selection mode actions for any screen
                             when (item.route) {
                                 "copy" -> { 
                                     // Show copy to album dialog
@@ -799,7 +864,8 @@ fun AppNavigation(
                                 }
                                 "more" -> { showMoreMenu = true }
                             }
-                        } else {
+                        }
+                        if (!isSelectionMode) {
                             // Normal navigation
                             navController.navigate(item.route) {
                                 popUpTo(Screen.Photos.route) { saveState = true }
@@ -811,7 +877,22 @@ fun AppNavigation(
                 )
                 
                 // More options dropdown for selection mode
-                if (isSelectionMode && currentRoute == Screen.Photos.route && showMoreMenu) {
+                // Show on all screens when More button is clicked
+                if (showMoreMenu) {
+                    // Extract albumId from current route if we're in an album screen
+                    val currentAlbumId = remember(currentRoute) {
+                        currentRoute?.let {
+                            if (it.startsWith("album/")) {
+                                it.substringAfter("album/").substringBefore("/")
+                            } else null
+                        }
+                    }
+                    
+                    // Check if we're in a smart album
+                    val isInSmartAlbum = currentAlbumId?.let { 
+                        SmartAlbumGenerator.isSmartAlbum(it) 
+                    } ?: false
+                    
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -918,6 +999,61 @@ fun AppNavigation(
                                 },
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
+                            
+                            // Hide from this label (only for smart albums)
+                            if (isInSmartAlbum && currentAlbumId != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            Surface(
+                                                shape = SmoothCornerShape(12.dp, 60),
+                                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                                                modifier = Modifier.size(40.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    FontIcon(
+                                                        unicode = FontIcons.VisibilityOff,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                        size = 20.sp
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                "Hide from this label",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        // Hide selected items from this smart album
+                                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                            viewModel.hideFromSmartAlbum(context, currentAlbumId, selectedItems.toList())
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                viewModel.exitSelectionMode()
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Hidden ${selectedItems.size} ${if (selectedItems.size == 1) "item" else "items"} from this label",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
