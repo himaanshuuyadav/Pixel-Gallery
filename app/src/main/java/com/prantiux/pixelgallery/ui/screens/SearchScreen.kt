@@ -1,15 +1,20 @@
 package com.prantiux.pixelgallery.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -19,11 +24,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -31,15 +38,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Brush
 import coil.compose.AsyncImage
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
-import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.search.SearchEngine
+import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
+import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import kotlinx.coroutines.launch
 
 data class AlbumInfo(val name: String, val count: Int, val thumbnailUri: android.net.Uri)
 
@@ -51,6 +61,7 @@ fun SearchScreen(
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val images by viewModel.images.collectAsState()
     val videos by viewModel.videos.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -61,12 +72,39 @@ fun SearchScreen(
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     
-    // Real recent searches from DataStore
+    // SearchBar active state
+    var isSearchBarActive by remember { mutableStateOf(false) }
+    
+    // Search filter state
+    var selectedFilter by remember { mutableStateOf("All") }
+    val filterOptions = listOf("All", "Albums", "Images and Videos", "Images", "Videos")
+    
+    // Get real recent searches from DataStore
     val recentSearches by viewModel.recentSearches.collectAsState()
+    
+    // Smart albums state
+    var smartAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    
+    // Load smart albums on launch
+    LaunchedEffect(images, videos) {
+        if (images.isNotEmpty() || videos.isNotEmpty()) {
+            coroutineScope.launch {
+                val albums = SmartAlbumGenerator.generateSmartAlbums(context)
+                smartAlbums = albums
+            }
+        }
+    }
     
     // Material 3 Expressive: Adaptive loading with delay threshold
     // Show loader only if search takes longer than 100ms (prevents flicker on fast searches)
     var showLoadingIndicator by remember { mutableStateOf(false) }
+    
+    // Animated values for search bar shape
+    val bottomCornerRadius by animateDpAsState(
+        targetValue = if (isSearchBarActive) 8.dp else 24.dp,
+        animationSpec = tween(300),
+        label = "SearchBarBottomCornerRadius"
+    )
     
     LaunchedEffect(isSearching) {
         if (isSearching) {
@@ -82,9 +120,13 @@ fun SearchScreen(
         viewModel.refresh(context)
     }
     
-    // Handle back gesture when search query is active - clear search
-    BackHandler(enabled = searchQuery.isNotEmpty()) {
-        viewModel.clearSearch()
+    // Handle back gesture
+    BackHandler(enabled = isSearchBarActive || searchQuery.isNotEmpty()) {
+        if (isSearchBarActive) {
+            isSearchBarActive = false
+        } else {
+            viewModel.clearSearch()
+        }
     }
 
     // Combine and sort by date - use remember only, derivedStateOf is for internal recomposition optimization
@@ -102,61 +144,331 @@ fun SearchScreen(
     
     // Quick filters from SearchEngine
     val quickFilters = remember { SearchEngine.getQuickFilters() }
-    val dateShortcuts = remember { SearchEngine.getDateShortcuts() }
 
     val navBarHeight = calculateFloatingNavBarHeight()
+    val showSearchCards = isSearchBarActive && searchQuery.isBlank()
+    val showFilterCard = isSearchBarActive && searchQuery.isNotBlank()
     
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Header at top
-        com.prantiux.pixelgallery.ui.components.MainTabHeader(title = "Search")
-        
-        val keyboardController = LocalSoftwareKeyboardController.current
-        
-        TextField(
-            value = searchQuery,
-            onValueChange = { viewModel.searchMedia(it) },
-            placeholder = { Text("Try 'camera photos' or 'videos today'") },
-            leadingIcon = { FontIcon(unicode = FontIcons.Search, contentDescription = "Search") },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.clearSearch() }) {
-                        FontIcon(unicode = FontIcons.Clear, contentDescription = "Clear")
-                    }
-                }
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    if (searchQuery.isNotBlank()) {
-                        viewModel.addRecentSearch(searchQuery.trim())
-                        keyboardController?.hide()
-                    }
-                }
-            ),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent
-            ),
-            shape = RoundedCornerShape(28.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        )
-        
+    val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Gradient background layer - covers search bar area
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .height(240.dp)
                 .background(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            headerColor,
+                            headerColor.copy(alpha = 0.3f),
+                            headerColor.copy(alpha = 0.1f),
+                            headerColor.copy(alpha = 0.05f)
+                        )
+                    )
                 )
+                .pointerInput(Unit) {
+                    detectTapGestures { /* Consume tap to prevent color changes */ }
+                }
+        )
+        
+        Column(modifier = Modifier.fillMaxSize()) {
+        // Search Bar Header with Animated Cards
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
+            // Material 3 DockedSearchBar with animated shape
+            DockedSearchBar(
+                query = searchQuery,
+                onQueryChange = { viewModel.searchMedia(it) },
+                onSearch = { query ->
+                    if (query.isNotBlank()) {
+                        viewModel.addRecentSearch(query.trim())
+                    }
+                },
+                active = isSearchBarActive,
+                onActiveChange = { isSearchBarActive = it },
+                placeholder = { Text("Search your photos") },
+                leadingIcon = { 
+                    if (isSearchBarActive) {
+                        IconButton(onClick = { 
+                            // Clear search and close search bar
+                            if (searchQuery.isNotEmpty()) {
+                                viewModel.clearSearch()
+                            }
+                            isSearchBarActive = false
+                        }) {
+                            FontIcon(
+                                unicode = FontIcons.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                    } else {
+                        FontIcon(
+                            unicode = FontIcons.Search,
+                            contentDescription = "Search"
+                        )
+                    }
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.clearSearch() }) {
+                            FontIcon(unicode = FontIcons.Clear, contentDescription = "Clear")
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(
+                    topStart = 24.dp,
+                    topEnd = 24.dp,
+                    bottomStart = bottomCornerRadius,
+                    bottomEnd = bottomCornerRadius
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 56.dp)
+            ) {}
+            
+            AnimatedVisibility(
+                visible = showSearchCards && recentSearches.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 2.dp),
+                        shape = RoundedCornerShape(
+                            topStart = 8.dp,
+                            topEnd = 8.dp,
+                            bottomStart = 8.dp,
+                            bottomEnd = 8.dp
+                        ),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 3.dp
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp)
+                        ) {
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Recent searches",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    TextButton(
+                                        onClick = { viewModel.clearRecentSearches() },
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text(
+                                            text = "Clear all",
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                }
+                            }
+                            item {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(recentSearches.take(10).size) { index ->
+                                        val search = recentSearches.take(10)[index]
+                                        RecentSearchPill(
+                                            text = search,
+                                            onClick = {
+                                                viewModel.searchMedia(search)
+                                                viewModel.addRecentSearch(search)
+                                                isSearchBarActive = false
+                                            },
+                                            onDelete = {
+                                                viewModel.removeRecentSearch(search)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showSearchCards,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(
+                            topStart = 8.dp,
+                            topEnd = 8.dp,
+                            bottomStart = 24.dp,
+                            bottomEnd = 24.dp
+                        ),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 3.dp
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp)
+                        ) {
+                            item {
+                                Text(
+                                    text = "Suggestions",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+                            item {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(quickFilters) { filter ->
+                                        // Simple pill shape like recent searches - text only, no icon, no delete
+                                        Surface(
+                                            modifier = Modifier
+                                                .wrapContentWidth()
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .clickable {
+                                                    viewModel.searchMedia(filter.label.lowercase())
+                                                    isSearchBarActive = false
+                                                },
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                            tonalElevation = 1.dp
+                                        ) {
+                                            Text(
+                                                text = filter.label,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }            
+            // Filter Card - Animated In when typing
+            AnimatedVisibility(
+                visible = showFilterCard,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(
+                            topStart = 8.dp,
+                            topEnd = 8.dp,
+                            bottomStart = 24.dp,
+                            bottomEnd = 24.dp
+                        ),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 3.dp
+                    ) {
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp, horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            filterOptions.forEach { filter ->
+                                val isSelected = selectedFilter == filter
+                                Surface(
+                                    modifier = Modifier
+                                        .wrapContentWidth()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .clickable { selectedFilter = filter },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isSelected) 
+                                        MaterialTheme.colorScheme.primaryContainer 
+                                    else 
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                    tonalElevation = if (isSelected) 2.dp else 1.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (isSelected) {
+                                            FontIcon(
+                                                unicode = "\ue86c",
+                                                contentDescription = null,
+                                                size = 16.sp,
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                        Text(
+                                            text = filter,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (isSelected) 
+                                                MaterialTheme.colorScheme.onPrimaryContainer 
+                                            else 
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Main content area
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            // Add rounded corner surface only when not in active state
+            if (!isSearchBarActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                        )
+                )
+            }
+            
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
             when {
-                searchQuery.isBlank() -> {
-                    // Empty state with suggestions
+                searchQuery.isBlank() && !isSearchBarActive -> {
+                    // Empty state with quick filters and date shortcuts only
                     val lazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
                     
                     // Track scrolling to save search
@@ -171,157 +483,120 @@ fun SearchScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
                     ) {
-                        // Recent Searches with pill UI
-                        if (recentSearches.isNotEmpty()) {
+                        // Smart Albums section (2-column grid)
+                        if (smartAlbums.isNotEmpty()) {
                             item {
-                                Row(
+                                SectionLabel("Smart Albums")
+                            }
+                            
+                            item {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(2),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .height(((smartAlbums.size / 2 + smartAlbums.size % 2) * 180).dp)
                                 ) {
-                                    Text(
-                                        text = "Recent searches",
-                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    TextButton(
-                                        onClick = { viewModel.clearRecentSearches() }
-                                    ) {
-                                        Text(
-                                            text = "Clear all",
-                                            style = MaterialTheme.typography.labelMedium
-                                        )
-                                    }
-                                }
-                            }
-                            item {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp)
-                                ) {
-                                    items(recentSearches.take(10).size) { index ->
-                                        val search = recentSearches.take(10)[index]
-                                        RecentSearchPill(
-                                            text = search,
+                                    items(smartAlbums) { album ->
+                                        SmartAlbumGridCard(
+                                            album = album,
+                                            allMediaItems = allMedia,
                                             onClick = {
-                                                viewModel.searchMedia(search)
-                                                viewModel.addRecentSearch(search)
-                                            },
-                                            onDelete = {
-                                                viewModel.removeRecentSearch(search)
+                                                navController.navigate(
+                                                    com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
+                                                )
                                             }
                                         )
                                     }
                                 }
                             }
-                            item { Spacer(modifier = Modifier.height(16.dp)) }
+                            
+                            item {
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
                         }
                         
-                        // Quick filters
-                        item {
-                            SectionLabel("Quick filters")
-                        }
-                        item {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp)
-                            ) {
-                                items(quickFilters) { filter ->
-                                    val iconUnicode = when (filter.label) {
-                                        "Photos" -> FontIcons.Image
-                                        "Videos" -> FontIcons.VideoLibrary
-                                        "Screenshots" -> FontIcons.Screenshot
-                                        "Camera" -> FontIcons.CameraAlt
-                                        "Large Files" -> FontIcons.Storage
-                                        else -> FontIcons.Image
-                                    }
-                                    QuickFilterChip(
-                                        label = filter.label,
-                                        iconUnicode = iconUnicode,
-                                        onClick = { viewModel.searchMedia(filter.label.lowercase()) }
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(24.dp))
-                        }
-                        
-                        // Date shortcuts
-                        item {
-                            SectionLabel("Quick access")
-                        }
-                        item {
-                            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                                dateShortcuts.forEach { shortcut ->
-                                    val iconUnicode = when (shortcut.label) {
-                                        "Today" -> FontIcons.Today
-                                        "Yesterday" -> FontIcons.CalendarToday
-                                        "This Week" -> FontIcons.DateRange
-                                        "This Month" -> FontIcons.CalendarMonth
-                                        else -> FontIcons.CalendarToday
-                                    }
-                                    DateShortcutItem(shortcut.label, iconUnicode) {
-                                        viewModel.searchMedia(shortcut.label.lowercase())
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(24.dp))
-                        }
                     }
                 }
                 // Material 3 Expressive: Adaptive loading with 100ms delay
                 // Shows LoadingIndicator only if search takes longer than 100ms
                 showLoadingIndicator && searchQuery.isNotBlank() -> {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
-                            size = 56.dp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "Searching...",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(
+                            modifier = Modifier.padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
+                                size = 56.dp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                "Searching...",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
                 searchQuery.isNotBlank() && !showLoadingIndicator && searchResults.matchedAlbums.isEmpty() && searchResults.matchedMedia.isEmpty() -> {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        FontIcon(
-                            unicode = FontIcons.SearchOff,
-                            contentDescription = null,
-                            size = 64.sp,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "No results found",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Try a different search term",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(
+                            modifier = Modifier.padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            FontIcon(
+                                unicode = FontIcons.SearchOff,
+                                contentDescription = null,
+                                size = 64.sp,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                "No results found",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Try a different search term",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
                 else -> {
-                    // Show search results with priority: Albums first, then media
+                    // Show search results with filter applied
                     val gridState = rememberLazyGridState()
                     val coroutineScope = rememberCoroutineScope()
                     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+                    
+                    // Apply filter logic
+                    val showAlbums = when (selectedFilter) {
+                        "All", "Albums" -> true
+                        else -> false
+                    }
+                    
+                    val filteredMedia = when (selectedFilter) {
+                        "All", "Images and Videos" -> searchResults.matchedMedia
+                        "Images" -> searchResults.matchedMedia.filter { !it.isVideo }
+                        "Videos" -> searchResults.matchedMedia.filter { it.isVideo }
+                        else -> emptyList()
+                    }
+                    
+                    val categoryHeading = when (selectedFilter) {
+                        "Images" -> "Images (${filteredMedia.size})"
+                        "Videos" -> "Videos (${filteredMedia.size})"
+                        else -> "Photos & Videos (${filteredMedia.size})"
+                    }
                     
                     Box(modifier = Modifier.fillMaxSize()) {
                         LazyVerticalGrid(
@@ -333,7 +608,7 @@ fun SearchScreen(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                         // Matched albums section
-                        if (searchResults.matchedAlbums.isNotEmpty()) {
+                        if (showAlbums && searchResults.matchedAlbums.isNotEmpty()) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Text(
                                     text = "Albums (${searchResults.matchedAlbums.size})",
@@ -373,10 +648,10 @@ fun SearchScreen(
                         }
                         
                         // Matched media section
-                        if (searchResults.matchedMedia.isNotEmpty()) {
+                        if (filteredMedia.isNotEmpty()) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Text(
-                                    text = "Photos & Videos (${searchResults.matchedMedia.size})",
+                                    text = categoryHeading,
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
@@ -384,17 +659,15 @@ fun SearchScreen(
                             }
                             
                             // Grid of media items
-                            val matchedMedia = searchResults.matchedMedia
-                            
-                            items(matchedMedia.size) { index ->
-                                val item = matchedMedia[index]
+                            items(filteredMedia.size) { index ->
+                                val item = filteredMedia[index]
                                 MediaThumbnail(
                                     item = item,
                                     isSelected = false,
                                     isSelectionMode = false,
                                     shape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                         index = index,
-                                        totalItems = matchedMedia.size,
+                                        totalItems = filteredMedia.size,
                                         columns = 3,
                                         cornerType = cornerType
                                     ),
@@ -433,13 +706,15 @@ fun SearchScreen(
                             gridState = gridState,
                             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.SMOOTH_SCROLLING,
                             topPadding = 88.dp + 2.dp,
-                            totalItems = searchResults.matchedAlbums.size + searchResults.matchedMedia.size + 3,
+                            totalItems = (if (showAlbums) searchResults.matchedAlbums.size else 0) + filteredMedia.size + 3,
                             coroutineScope = coroutineScope,
                             isDarkTheme = isDarkTheme
                         )
                     }
                 }
             }
+        }
+        }
         }
     }
 }
@@ -719,6 +994,105 @@ fun AlbumResultItem(name: String, count: Int, thumbnailUri: android.net.Uri, onC
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/**
+ * Smart Album grid card - rounded square with thumbnail background and text overlay
+ */
+@Composable
+fun SmartAlbumGridCard(
+    album: Album, 
+    allMediaItems: List<MediaItem>,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var thumbnailUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    
+    LaunchedEffect(album.id) {
+        coroutineScope.launch {
+            val media = SmartAlbumGenerator.getMediaForSmartAlbum(context, album.id, allMediaItems)
+            thumbnailUri = media.firstOrNull()?.uri
+        }
+    }
+    
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.BottomStart
+    ) {
+        // Thumbnail background
+        if (thumbnailUri != null) {
+            AsyncImage(
+                model = thumbnailUri,
+                contentDescription = album.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            // Gradient overlay for text readability
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.5f)
+                            ),
+                            startY = 0f,
+                            endY = Float.POSITIVE_INFINITY
+                        )
+                    )
+            )
+        } else {
+            // Placeholder
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+        
+        // Text overlay at bottom
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = album.name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            
+            // Item count badge overlay
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+            ) {
+                Text(
+                    text = "${album.itemCount} ${if (album.itemCount == 1) "item" else "items"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
         }
     }
 }
