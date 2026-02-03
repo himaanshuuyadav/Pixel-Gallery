@@ -188,9 +188,7 @@ internal fun CategoryHeader(title: String) {
 @Composable
 internal fun SettingsGroup(content: @Composable () -> Unit) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         content()
