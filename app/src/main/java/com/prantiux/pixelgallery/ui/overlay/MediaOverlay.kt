@@ -76,6 +76,10 @@ import kotlin.math.roundToInt
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.components.DetailsBottomSheetContent
+import com.prantiux.pixelgallery.ui.animation.SharedElementBounds
+import com.prantiux.pixelgallery.ui.animation.rememberSharedElementAnimation
+import com.prantiux.pixelgallery.ui.animation.calculateMediaTransform
+import androidx.compose.ui.unit.IntSize
 
 
 // Gesture direction locking
@@ -86,13 +90,6 @@ private enum class GestureMode {
     VERTICAL_DOWN,
     ZOOM
 }
-
-private data class Transforms(
-    val translationX: Float,
-    val translationY: Float,
-    val scaleX: Float,
-    val scaleY: Float
-)
 
 @Composable
 fun MediaOverlay(
@@ -148,13 +145,6 @@ fun MediaOverlay(
     
     // Check if this is trash mode
     val isTrashMode = overlayState.mediaType == "trash"
-    
-    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
-    val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
-
-    // Animation progress
-    var animationProgress by remember { mutableFloatStateOf(0f) }
-    var isClosing by remember { mutableStateOf(false) }
 
     // Current index state
     var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
@@ -192,8 +182,18 @@ fun MediaOverlay(
     val verticalOffset = remember { Animatable(0f) }
     val detailsPanelProgress = remember { Animatable(0f) }
     
-    // Track if closing from downward swipe (to prevent opening animation reversal)
-    var closingFromSwipe by remember { mutableStateOf(false) }
+    // Shared element animation state - MUST be here before LaunchedEffects use it
+    val sharedElementAnimation = rememberSharedElementAnimation()
+    
+    // Convert ViewModel bounds to SharedElementBounds - MUST be here before LaunchedEffects use it
+    val thumbnailBounds = overlayState.thumbnailBounds?.let {
+        SharedElementBounds(
+            left = it.startLeft,
+            top = it.startTop,
+            width = it.startWidth,
+            height = it.startHeight
+        )
+    }
     
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
@@ -242,7 +242,7 @@ fun MediaOverlay(
     }
     
     // Update video playback when current item changes
-    LaunchedEffect(currentIndex, mediaItems, autoPlayVideos, resumePlayback) {
+    LaunchedEffect(currentIndex, mediaItems, autoPlayVideos, resumePlayback, sharedElementAnimation.isAnimating) {
         exoPlayer?.let { player ->
             // Save position of previous video before switching
             val previousIndex = currentIndex - 1
@@ -275,9 +275,17 @@ fun MediaOverlay(
                     }
                 }
                 
-                // Use autoPlayVideos setting to determine if video should start playing
-                player.playWhenReady = autoPlayVideos
-                isPlaying = autoPlayVideos
+                // IMPORTANT: Wait for animation to complete before starting playback
+                // This prevents video from playing during the opening animation
+                if (sharedElementAnimation.isAnimating) {
+                    // Pause during animation
+                    player.playWhenReady = false
+                    isPlaying = false
+                } else {
+                    // Use autoPlayVideos setting after animation completes
+                    player.playWhenReady = autoPlayVideos
+                    isPlaying = autoPlayVideos
+                }
             } else {
                 player.pause()
                 player.clearMediaItems()
@@ -314,76 +322,45 @@ fun MediaOverlay(
         0f
     }
 
-    // Unified closing animation - returns image to thumbnail position
-    val closeOverlayWithAnimation: () -> Unit = {
-        scope.launch {
-            closingFromSwipe = true  // Use gesture-driven transforms during close
-            isClosing = true
-            showControls = false
-            
-            // Animate to thumbnail position
-            launch {
-                animate(
-                    initialValue = animationProgress,
-                    targetValue = 0f,
-                    animationSpec = tween(300, easing = FastOutSlowInEasing)
-                ) { value, _ ->
-                    animationProgress = value
-                }
-            }
-            
-            // Also animate verticalOffset if there's any drag offset
-            if (abs(verticalOffset.value) > 0f) {
-                launch {
-                    verticalOffset.animateTo(
-                        targetValue = overlayState.thumbnailBounds?.startTop ?: 0f,
-                        animationSpec = tween(300, easing = FastOutSlowInEasing)
-                    )
-                }
-            }
-            
-            // Wait for animation then dismiss
-            kotlinx.coroutines.delay(300)
-            onDismiss()
-        }
-    }
+
 
     // Back handler - intercept system back gesture
-    BackHandler(enabled = overlayState.isVisible && !isClosing) {
-        closeOverlayWithAnimation()
+    BackHandler(enabled = overlayState.isVisible) {
+        onDismiss()
     }
 
-    // Opening animation
+    // Initialize state and trigger opening animation
     LaunchedEffect(overlayState.isVisible) {
-        if (overlayState.isVisible && !isClosing) {
+        if (overlayState.isVisible) {
             currentIndex = overlayState.selectedIndex
             displayIndex = overlayState.selectedIndex
-            animationProgress = 0f
             scale = 1f
             offsetX = 0f
             offsetY = 0f
             gestureMode = GestureMode.NONE
-            closingFromSwipe = false
             horizontalOffset.snapTo(0f)
             verticalOffset.snapTo(0f)
             detailsPanelProgress.snapTo(0f)
             showDetailsPanel = false
             
-            animate(
-                initialValue = 0f,
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
-            ) { value, _ ->
-                animationProgress = value
+            // Trigger shared element animation
+            if (thumbnailBounds != null) {
+                // Animate from thumbnail to fullscreen (12dp corner radius for thumbnails)
+                sharedElementAnimation.animateOpen(thumbnailCornerRadius = 12f * density.density)
+                // Show controls after animation completes
+                showControls = true
+            } else {
+                // No thumbnail bounds - snap directly to fullscreen
+                sharedElementAnimation.snapToFullscreen()
+                showControls = true
             }
-            showControls = true
         }
     }
 
     // Current media item (use currentIndex for rendering to prevent blink)
     val currentItem = mediaItems.getOrNull(currentIndex)
     
-    // Action handlers (defined after currentItem and closeOverlayWithAnimation)
+    // Action handlers (defined after currentItem)
     val shareItem: () -> Unit = {
         mediaItems.getOrNull(currentIndex)?.let { item ->
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -416,7 +393,7 @@ fun MediaOverlay(
                         
                         // If no more items, close overlay
                         if (mediaItems.size <= 1) {
-                            closeOverlayWithAnimation()
+                            onDismiss()
                         } else {
                             // Slide to next item without closing
                             displayIndex = nextIndex
@@ -437,7 +414,7 @@ fun MediaOverlay(
             mediaItems.getOrNull(currentIndex)?.let { item ->
                 // Trigger system restore dialog directly
                 viewModel.restoreFromTrash(context, item)
-                closeOverlayWithAnimation()
+                onDismiss()
             }
         }
     }
@@ -492,7 +469,7 @@ fun MediaOverlay(
     
     // Double-tap zoom handler (images only)
     val handleDoubleTap: () -> Unit = {
-        if (currentItem?.isVideo != true && animationProgress >= 1f && !isClosing && doubleTapToZoom) {
+        if (currentItem?.isVideo != true && doubleTapToZoom) {
             scope.launch {
                 // Calculate target scale based on zoom level setting
                 val targetScale = if (scale > 1f) {
@@ -521,57 +498,27 @@ fun MediaOverlay(
         }
     }
 
-    // Calculate transforms based on thumbnail bounds
-    val thumbnailBounds = overlayState.thumbnailBounds
-    val (openingTranslationX, openingTranslationY, openingScaleX, openingScaleY) = remember(animationProgress, thumbnailBounds) {
-        if (thumbnailBounds == null) {
-            Transforms(0f, 0f, 1f, 1f)
-        } else {
-            val startLeft = thumbnailBounds.startLeft
-            val startTop = thumbnailBounds.startTop
-            val startWidth = thumbnailBounds.startWidth
-            val startHeight = thumbnailBounds.startHeight
+    // Calculate screen dimensions for gesture calculations
+    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
 
-            val finalLeft = 0f
-            val finalTop = 0f
-            val finalWidth = screenWidth
-            val finalHeight = screenHeight
-
-            val startScaleX = startWidth / finalWidth
-            val startScaleY = startHeight / finalHeight
-
-            val progress = if (isClosing) 1f - animationProgress else animationProgress
-
-            val tx = startLeft + (finalLeft - startLeft) * progress
-            val ty = startTop + (finalTop - startTop) * progress
-            val sx = startScaleX + (1f - startScaleX) * progress
-            val sy = startScaleY + (1f - startScaleY) * progress
-
-            Transforms(tx, ty, sx, sy)
-        }
-    }
-
-    // Background scrim alpha
+    // Background scrim alpha - combines animation and gesture states
     val backgroundAlpha = when {
-        isClosing -> animationProgress * 0.5f
-        animationProgress < 0.7f -> 0f
         gestureMode == GestureMode.VERTICAL_DOWN -> {
-            // During downward swipe, fade background based on drag distance
-            val baseAlpha = if (animationProgress >= 0.7f) (animationProgress - 0.7f) / 0.3f else 0f
-            baseAlpha * (1f - closeProgress)
+            // During swipe down, fade out based on drag distance
+            sharedElementAnimation.backgroundAlpha.value * (1f - closeProgress)
         }
         else -> {
-            (animationProgress - 0.7f) / 0.3f
+            // Normal state: use animation alpha
+            sharedElementAnimation.backgroundAlpha.value
         }
     }
 
     // Controls visibility based on gesture
     val controlsVisible = showControls && 
-        !isClosing && 
-        animationProgress >= 0.8f && 
         gestureMode != GestureMode.VERTICAL_UP &&
-        detailsPanelProgress.value < 0.01f &&  // Hide immediately when details gesture starts
-        closeProgress == 0f  // Hide controls when downward swipe starts
+        detailsPanelProgress.value < 0.01f &&
+        closeProgress == 0f
 
     Box(
         modifier = Modifier
@@ -579,24 +526,11 @@ fun MediaOverlay(
             .pointerInput(scale) {
                 // Centralized gesture coordinator - DO NOT consume until direction locked
                 awaitEachGesture {
-                    // 1️⃣ LOG POINTER ENTRY
-                    Log.d("GESTURE_DEBUG", "========== Gesture START ==========")
                     
                     val down = awaitFirstDown(requireUnconsumed = false)
                     
-                    // LOG FIRST DOWN
-                    Log.d("GESTURE_DEBUG", "First DOWN - scale=$scale, animationProgress=$animationProgress")
-                    
-                    // 1️⃣ INVARIANT: Only process when animation complete AND scale = 1f
-                    if (animationProgress < 1f) {
-                        Log.d("GESTURE_DEBUG", "BLOCKED - Animation not complete (progress=$animationProgress)")
-                        return@awaitEachGesture
-                    }
-                    
-                    // 2️⃣ LOG SCALE GATING
-                    Log.d("GESTURE_DEBUG", "Scale check - currentScale=$scale (swipeAllowed=${scale == 1f})")
+                    // Only process when scale = 1f
                     if (scale != 1f) {
-                        Log.d("GESTURE_DEBUG", "BLOCKED - Scale is not 1f (scale=$scale)")
                         return@awaitEachGesture
                     }
 
@@ -873,37 +807,11 @@ fun MediaOverlay(
                                 // Details panel is closed, proceed with image close only if enabled
                                 val threshold = 150f
                                 
-                                Log.d("GESTURE_DEBUG", "THRESHOLD CHECK - offset=${verticalOffset.value}, threshold=$threshold")
                                 
                                 scope.launch {
                                     if (abs(verticalOffset.value) > threshold) {
-                                        // Complete close gesture - animate to thumbnail
-                                        Log.d("GESTURE_DEBUG", "GESTURE RESULT → CLOSE_OVERLAY")
-                                        closingFromSwipe = true
-                                        isClosing = true
+                                        // Complete close gesture
                                         showControls = false
-                                        
-                                        // Animate image back to thumbnail position
-                                        launch {
-                                            animate(
-                                                initialValue = animationProgress,
-                                                targetValue = 0f,
-                                                animationSpec = tween(300, easing = FastOutSlowInEasing)
-                                            ) { value, _ ->
-                                                animationProgress = value
-                                            }
-                                        }
-                                        
-                                        // Animate verticalOffset to thumbnail top position
-                                        launch {
-                                            verticalOffset.animateTo(
-                                                targetValue = thumbnailBounds?.startTop ?: 0f,
-                                                animationSpec = tween(300, easing = FastOutSlowInEasing)
-                                            )
-                                        }
-                                        
-                                        // Wait for animation then dismiss
-                                        kotlinx.coroutines.delay(300)
                                         onDismiss()
                                     } else {
                                         // Snap back
@@ -1037,119 +945,88 @@ fun MediaOverlay(
                                     onDoubleTap = { handleDoubleTap() },
                                     onTap = {
                                         // Single tap to toggle UI
-                                        if (animationProgress >= 1f && !isClosing) {
-                                            showControls = !showControls
-                                        }
+                                        showControls = !showControls
                                     }
                                 )
                             }
                             .graphicsLayer {
-                            // Opening animation only
-                            if (animationProgress < 1f && !isClosing) {
-                                // Opening animation - thumbnail to fullscreen
-                                this.translationX = openingTranslationX
-                                this.translationY = openingTranslationY
-                                this.scaleX = openingScaleX
-                                this.scaleY = openingScaleY
-                                transformOrigin = TransformOrigin(0f, 0f)
-                            } else if (isClosing && !closingFromSwipe) {
-                                // Back button close - use opening animation in reverse
-                                this.translationX = openingTranslationX
-                                this.translationY = openingTranslationY
-                                this.scaleX = openingScaleX
-                                this.scaleY = openingScaleY
-                                transformOrigin = TransformOrigin(0f, 0f)
-                            } else if (closingFromSwipe && isClosing) {
-                                // Swipe close - animate from current state to thumbnail
-                                transformOrigin = TransformOrigin(0f, 0f)
-                                
-                                // Calculate target thumbnail bounds
-                                val thumbnailBounds = overlayState.thumbnailBounds
-                                if (thumbnailBounds != null) {
-                                    val targetX = thumbnailBounds.startLeft
-                                    val targetY = thumbnailBounds.startTop
-                                    val targetScaleX = thumbnailBounds.startWidth / screenWidth
-                                    val targetScaleY = thumbnailBounds.startHeight / screenHeight
+                                // SHARED ELEMENT ANIMATION: Priority #1
+                                // During opening animation, apply thumbnail-to-fullscreen transform
+                                if (sharedElementAnimation.isAnimating && thumbnailBounds != null) {
+                                    val transform = calculateMediaTransform(
+                                        thumbnailBounds = thumbnailBounds,
+                                        screenSize = IntSize(screenWidth.toInt(), screenHeight.toInt()),
+                                        progress = sharedElementAnimation.progress.value,
+                                        scaleMultiplier = sharedElementAnimation.scale.value
+                                    )
                                     
-                                    // Transition from current position to thumbnail
-                                    // animationProgress goes from 1 to 0, so closeProgress goes from 0 to 1
-                                    val closeTransitionProgress = 1f - animationProgress
+                                    this.translationX = transform.translationX
+                                    this.translationY = transform.translationY
+                                    this.scaleX = transform.scaleX
+                                    this.scaleY = transform.scaleY
+                                    this.transformOrigin = transform.transformOrigin
                                     
-                                    // Start from gesture offsets, end at thumbnail position
-                                    val startX = horizontalOffset.value
-                                    val startY = verticalOffset.value
-                                    val startScale = 1f - closeProgress * 0.15f
-                                    
-                                    this.translationX = startX + (targetX - startX) * closeTransitionProgress
-                                    this.translationY = startY + (targetY - startY) * closeTransitionProgress
-                                    this.scaleX = startScale + (targetScaleX - startScale) * closeTransitionProgress
-                                    this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
+                                    // Round corners during animation
+                                    this.clip = true
+                                    this.shape = RoundedCornerShape(sharedElementAnimation.cornerRadius.value.dp)
                                 } else {
-                                    // Fallback if no thumbnail bounds
-                                    this.translationX = horizontalOffset.value
-                                    this.translationY = verticalOffset.value
-                                    this.scaleX = 1f - closeProgress * 0.15f
-                                    this.scaleY = 1f - closeProgress * 0.15f
-                                }
-                            } else {
-                                // Gesture-driven state (normal interaction)
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                
-                                // Details panel active - move image to upper half
-                                if (detailsPanelProgress.value > 0.01f) {
-                                    // Image slides up to fit in upper half
-                                    val imageOffset = screenHeight * 0.25f * detailsPanelProgress.value
-                                    this.translationY = -imageOffset
-                                    transformOrigin = TransformOrigin(0.5f, 0f)
-                                } else {
-                                    // Horizontal swipe offset from Animatable
-                                    this.translationX = horizontalOffset.value
+                                    // GESTURE-DRIVEN STATE: After animation completes
+                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                    this.clip = false
                                     
-                                    // Subtle scale during horizontal swipe (for depth)
-                                    if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
-                                        val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
-                                        val scaleAmount = swipeProgress * 0.05f
-                                        this.scaleX = 1f - scaleAmount
-                                        this.scaleY = 1f - scaleAmount
-                                    }
-                                    
-                                    // Vertical offset from Animatable
-                                    this.translationY = verticalOffset.value
-                                    
-                                    // Vertical close - scale down effect (1f → 0.85f)
-                                    if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                        val scaleAmount = 0.15f * closeProgress
-                                        this.scaleX = 1f - scaleAmount
-                                        this.scaleY = 1f - scaleAmount
-                                    }
-                                    
-                                    // Zoom transforms (only when zoomed)
-                                    if (scale > 1f) {
-                                        this.scaleX *= scale
-                                        this.scaleY *= scale
-                                        this.translationX += offsetX
-                                        this.translationY += offsetY
+                                    // Details panel active - move image to upper half
+                                    if (detailsPanelProgress.value > 0.01f) {
+                                        // Image slides up to fit in upper half
+                                        val imageOffset = screenHeight * 0.25f * detailsPanelProgress.value
+                                        this.translationY = -imageOffset
+                                        transformOrigin = TransformOrigin(0.5f, 0f)
+                                    } else {
+                                        // Horizontal swipe offset from Animatable
+                                        this.translationX = horizontalOffset.value
+                                        
+                                        // Subtle scale during horizontal swipe (for depth)
+                                        if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
+                                            val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
+                                            val scaleAmount = swipeProgress * 0.05f
+                                            this.scaleX = 1f - scaleAmount
+                                            this.scaleY = 1f - scaleAmount
+                                        }
+                                        
+                                        // Vertical offset from Animatable
+                                        this.translationY = verticalOffset.value
+                                        
+                                        // Vertical close - scale down effect (1f → 0.85f)
+                                        if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                                            val scaleAmount = 0.15f * closeProgress
+                                            this.scaleX = 1f - scaleAmount
+                                            this.scaleY = 1f - scaleAmount
+                                        }
+                                        
+                                        // Zoom transforms (only when zoomed)
+                                        if (scale > 1f) {
+                                            this.scaleX *= scale
+                                            this.scaleY *= scale
+                                            this.translationX += offsetX
+                                            this.translationY += offsetY
+                                        }
                                     }
                                 }
                             }
-                        }
                         .pointerInput(Unit) {
                             // Pinch zoom (highest priority) - disabled for videos
                             if (item.isVideo != true) {
                                 detectTransformGestures { _, pan, zoom, _ ->
-                                    if (animationProgress >= 1f && !isClosing) {
-                                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                        scale = newScale
+                                    val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                    scale = newScale
                                         
                                         if (scale > 1f) {
                                             gestureMode = GestureMode.ZOOM
                                             offsetX += pan.x
                                             offsetY += pan.y
                                         } else {
-                                            offsetX = 0f
-                                            offsetY = 0f
-                                            gestureMode = GestureMode.NONE
-                                        }
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                        gestureMode = GestureMode.NONE
                                     }
                                 }
                             }
@@ -1197,56 +1074,51 @@ fun MediaOverlay(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                        // Apply same transformations as image
-                        if (animationProgress < 1f && !isClosing) {
-                            this.translationX = openingTranslationX
-                            this.translationY = openingTranslationY
-                            this.scaleX = openingScaleX
-                            this.scaleY = openingScaleY
-                            transformOrigin = TransformOrigin(0f, 0f)
-                        } else if (closingFromSwipe && isClosing) {
-                            transformOrigin = TransformOrigin(0f, 0f)
-                            val thumbnailBounds = overlayState.thumbnailBounds
-                            if (thumbnailBounds != null) {
-                                val targetX = thumbnailBounds.startLeft
-                                val targetY = thumbnailBounds.startTop
-                                val targetScaleX = thumbnailBounds.startWidth / screenWidth
-                                val targetScaleY = thumbnailBounds.startHeight / screenHeight
-                                val closeTransitionProgress = 1f - animationProgress
-                                val startX = horizontalOffset.value
-                                val startY = verticalOffset.value
-                                val startScale = 1f - closeProgress * 0.15f
-                                this.translationX = startX + (targetX - startX) * closeTransitionProgress
-                                this.translationY = startY + (targetY - startY) * closeTransitionProgress
-                                this.scaleX = startScale + (targetScaleX - startScale) * closeTransitionProgress
-                                this.scaleY = startScale + (targetScaleY - startScale) * closeTransitionProgress
-                            }
-                        } else {
-                            // Gesture-driven state (normal interaction)
-                            transformOrigin = TransformOrigin(0.5f, 0.5f)
-                            
-                            // Details panel active - move video to upper half
-                            if (detailsPanelProgress.value > 0.01f) {
-                                val imageOffset = screenHeight * 0.25f * detailsPanelProgress.value
-                                this.translationY = -imageOffset
-                                transformOrigin = TransformOrigin(0.5f, 0f)
+                            // SHARED ELEMENT ANIMATION: Apply to video player too
+                            if (sharedElementAnimation.isAnimating && thumbnailBounds != null) {
+                                val transform = calculateMediaTransform(
+                                    thumbnailBounds = thumbnailBounds,
+                                    screenSize = IntSize(screenWidth.toInt(), screenHeight.toInt()),
+                                    progress = sharedElementAnimation.progress.value,
+                                    scaleMultiplier = sharedElementAnimation.scale.value
+                                )
+                                
+                                this.translationX = transform.translationX
+                                this.translationY = transform.translationY
+                                this.scaleX = transform.scaleX
+                                this.scaleY = transform.scaleY
+                                this.transformOrigin = transform.transformOrigin
+                                
+                                // Round corners during animation
+                                this.clip = true
+                                this.shape = RoundedCornerShape(sharedElementAnimation.cornerRadius.value.dp)
                             } else {
-                                // Horizontal swipe offset
-                                this.translationX = horizontalOffset.value
+                                // GESTURE-DRIVEN STATE: After animation completes
+                                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                this.clip = false
                                 
-                                // Vertical offset
-                                this.translationY = verticalOffset.value
-                                
-                                // Vertical close - scale down effect
-                                if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                    val scaleAmount = 0.15f * closeProgress
-                                    this.scaleX = 1f - scaleAmount
-                                    this.scaleY = 1f - scaleAmount
+                                // Details panel active - move video to upper half
+                                if (detailsPanelProgress.value > 0.01f) {
+                                    val imageOffset = screenHeight * 0.25f * detailsPanelProgress.value
+                                    this.translationY = -imageOffset
+                                    transformOrigin = TransformOrigin(0.5f, 0f)
+                                } else {
+                                    // Horizontal swipe offset
+                                    this.translationX = horizontalOffset.value
+                                    
+                                    // Vertical offset
+                                    this.translationY = verticalOffset.value
+                                    
+                                    // Vertical close - scale down effect
+                                    if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                                        val scaleAmount = 0.15f * closeProgress
+                                        this.scaleX = 1f - scaleAmount
+                                        this.scaleY = 1f - scaleAmount
+                                    }
                                 }
                             }
                         }
-                    }
-            ) {
+                ) {
                 // Video player surface only (no default controls)
                 AndroidView(
                     factory = { ctx ->
@@ -1739,7 +1611,7 @@ fun MediaOverlay(
                                 val deleted = context.contentResolver.delete(item.uri, null, null)
                                 if (deleted > 0) {
                                     Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
-                                    closeOverlayWithAnimation()
+                                    onDismiss()
                                 } else {
                                     Toast.makeText(context, "Failed to delete", Toast.LENGTH_SHORT).show()
                                 }
