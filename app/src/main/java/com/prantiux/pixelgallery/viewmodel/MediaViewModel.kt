@@ -2,6 +2,8 @@ package com.prantiux.pixelgallery.viewmodel
 
 import android.content.Context
 import android.os.Build
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -61,6 +63,10 @@ class MediaViewModel : ViewModel() {
 
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
+
+    private val _smartAlbumThumbnailCache = mutableStateMapOf<String, android.net.Uri?>()
+    val smartAlbumThumbnailCache: SnapshotStateMap<String, android.net.Uri?>
+        get() = _smartAlbumThumbnailCache
 
     private val _categorizedAlbums = MutableStateFlow<CategorizedAlbums?>(null)
     val categorizedAlbums: StateFlow<CategorizedAlbums?> = _categorizedAlbums.asStateFlow()
@@ -208,6 +214,10 @@ class MediaViewModel : ViewModel() {
         val searchQuery: String? = null
     )
 
+    /**
+     * Thumbnail bounds for shared element animation.
+     * Captured from the thumbnail composable's position in window coordinates.
+     */
     data class ThumbnailBounds(
         val startLeft: Float,
         val startTop: Float,
@@ -404,7 +414,7 @@ class MediaViewModel : ViewModel() {
         mediaType: String,
         albumId: String,
         selectedIndex: Int,
-        thumbnailBounds: ThumbnailBounds?,
+        thumbnailBounds: ThumbnailBounds? = null,
         searchQuery: String? = null
     ) {
         _overlayState.value = MediaOverlayState(
