@@ -35,6 +35,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +63,8 @@ fun SearchScreen(
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
     val images by viewModel.images.collectAsState()
     val videos by viewModel.videos.collectAsState()
@@ -84,6 +88,7 @@ fun SearchScreen(
     
     // Smart albums state
     var smartAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    val smartAlbumThumbnailCache = viewModel.smartAlbumThumbnailCache
     
     // Load smart albums on launch
     LaunchedEffect(images, videos) {
@@ -122,10 +127,15 @@ fun SearchScreen(
     
     // Handle back gesture
     BackHandler(enabled = isSearchBarActive || searchQuery.isNotEmpty()) {
-        if (isSearchBarActive) {
-            isSearchBarActive = false
-        } else {
+        if (searchQuery.isNotEmpty()) {
             viewModel.clearSearch()
+            isSearchBarActive = false
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        } else if (isSearchBarActive) {
+            isSearchBarActive = false
+            focusManager.clearFocus()
+            keyboardController?.hide()
         }
     }
 
@@ -147,7 +157,7 @@ fun SearchScreen(
 
     val navBarHeight = calculateFloatingNavBarHeight()
     val showSearchCards = isSearchBarActive && searchQuery.isBlank()
-    val showFilterCard = isSearchBarActive && searchQuery.isNotBlank()
+    val showFilterCard = searchQuery.isNotBlank()
     
     val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     
@@ -182,44 +192,54 @@ fun SearchScreen(
         ) {
             // Material 3 DockedSearchBar with animated shape
             DockedSearchBar(
-                query = searchQuery,
-                onQueryChange = { viewModel.searchMedia(it) },
-                onSearch = { query ->
-                    if (query.isNotBlank()) {
-                        viewModel.addRecentSearch(query.trim())
-                    }
-                },
-                active = isSearchBarActive,
-                onActiveChange = { isSearchBarActive = it },
-                placeholder = { Text("Search your photos") },
-                leadingIcon = { 
-                    if (isSearchBarActive) {
-                        IconButton(onClick = { 
-                            // Clear search and close search bar
-                            if (searchQuery.isNotEmpty()) {
-                                viewModel.clearSearch()
+                inputField = {
+                    SearchBarDefaults.InputField(
+                        query = searchQuery,
+                        onQueryChange = { viewModel.searchMedia(it) },
+                        onSearch = { query ->
+                            if (query.isNotBlank()) {
+                                viewModel.searchMedia(query)
+                                viewModel.addRecentSearch(query.trim())
+                                isSearchBarActive = false
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
                             }
-                            isSearchBarActive = false
-                        }) {
-                            FontIcon(
-                                unicode = FontIcons.ArrowBack,
-                                contentDescription = "Back"
-                            )
+                        },
+                        expanded = isSearchBarActive,
+                        onExpandedChange = { isSearchBarActive = it },
+                        placeholder = { Text("Search your photos") },
+                        leadingIcon = {
+                            if (isSearchBarActive) {
+                                IconButton(onClick = {
+                                    // Clear search and close search bar
+                                    if (searchQuery.isNotEmpty()) {
+                                        viewModel.clearSearch()
+                                    }
+                                    isSearchBarActive = false
+                                }) {
+                                    FontIcon(
+                                        unicode = FontIcons.ArrowBack,
+                                        contentDescription = "Back"
+                                    )
+                                }
+                            } else {
+                                FontIcon(
+                                    unicode = FontIcons.Search,
+                                    contentDescription = "Search"
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.clearSearch() }) {
+                                    FontIcon(unicode = FontIcons.Clear, contentDescription = "Clear")
+                                }
+                            }
                         }
-                    } else {
-                        FontIcon(
-                            unicode = FontIcons.Search,
-                            contentDescription = "Search"
-                        )
-                    }
+                    )
                 },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.clearSearch() }) {
-                            FontIcon(unicode = FontIcons.Clear, contentDescription = "Clear")
-                        }
-                    }
-                },
+                expanded = isSearchBarActive,
+                onExpandedChange = { isSearchBarActive = it },
                 shape = RoundedCornerShape(
                     topStart = 24.dp,
                     topEnd = 24.dp,
@@ -294,6 +314,8 @@ fun SearchScreen(
                                                 viewModel.searchMedia(search)
                                                 viewModel.addRecentSearch(search)
                                                 isSearchBarActive = false
+                                                focusManager.clearFocus()
+                                                keyboardController?.hide()
                                             },
                                             onDelete = {
                                                 viewModel.removeRecentSearch(search)
@@ -352,7 +374,10 @@ fun SearchScreen(
                                                 .clip(RoundedCornerShape(20.dp))
                                                 .clickable {
                                                     viewModel.searchMedia(filter.label.lowercase())
+                                                    viewModel.addRecentSearch(filter.label)
                                                     isSearchBarActive = false
+                                                    focusManager.clearFocus()
+                                                    keyboardController?.hide()
                                                 },
                                             shape = RoundedCornerShape(20.dp),
                                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
@@ -443,29 +468,11 @@ fun SearchScreen(
         }
         
         // Main content area
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            // Add rounded corner surface only when not in active state
-            if (!isSearchBarActive) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(24.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                        )
-                )
-            }
-            
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface)
-            ) {
             when {
                 searchQuery.isBlank() && !isSearchBarActive -> {
                     // Empty state with quick filters and date shortcuts only
@@ -478,6 +485,8 @@ fun SearchScreen(
                         }
                     }
                     
+                    val smartAlbumRows = smartAlbums.chunked(2)
+
                     LazyColumn(
                         state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
@@ -486,29 +495,41 @@ fun SearchScreen(
                         // Smart Albums section (2-column grid)
                         if (smartAlbums.isNotEmpty()) {
                             item {
-                                SectionLabel("Smart Albums")
+                                SectionLabel("Suggested")
                             }
                             
-                            item {
-                                LazyVerticalGrid(
-                                    columns = GridCells.Fixed(2),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(((smartAlbums.size / 2 + smartAlbums.size % 2) * 180).dp)
-                                ) {
-                                    items(smartAlbums) { album ->
-                                        SmartAlbumGridCard(
-                                            album = album,
-                                            allMediaItems = allMedia,
-                                            onClick = {
-                                                navController.navigate(
-                                                    com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
+                            items(smartAlbumRows.size) { rowIndex ->
+                                val row = smartAlbumRows[rowIndex]
+                                Column {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        row.forEach { album ->
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                SmartAlbumGridCard(
+                                                    album = album,
+                                                    allMediaItems = allMedia,
+                                                    cachedThumbnailUri = smartAlbumThumbnailCache[album.id],
+                                                    onThumbnailCached = { uri ->
+                                                        smartAlbumThumbnailCache[album.id] = uri
+                                                    },
+                                                    onClick = {
+                                                        navController.navigate(
+                                                            com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
+                                                        )
+                                                    }
                                                 )
                                             }
-                                        )
+                                        }
+                                        if (row.size == 1) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                    if (rowIndex != smartAlbumRows.lastIndex) {
+                                        Spacer(modifier = Modifier.height(12.dp))
                                     }
                                 }
                             }
@@ -713,7 +734,6 @@ fun SearchScreen(
                     }
                 }
             }
-        }
         }
         }
     }
@@ -1005,16 +1025,17 @@ fun AlbumResultItem(name: String, count: Int, thumbnailUri: android.net.Uri, onC
 fun SmartAlbumGridCard(
     album: Album, 
     allMediaItems: List<MediaItem>,
+    cachedThumbnailUri: android.net.Uri?,
+    onThumbnailCached: (android.net.Uri?) -> Unit,
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    var thumbnailUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val thumbnailUri = cachedThumbnailUri
     
-    LaunchedEffect(album.id) {
-        coroutineScope.launch {
+    LaunchedEffect(album.id, allMediaItems, cachedThumbnailUri) {
+        if (cachedThumbnailUri == null) {
             val media = SmartAlbumGenerator.getMediaForSmartAlbum(context, album.id, allMediaItems)
-            thumbnailUri = media.firstOrNull()?.uri
+            onThumbnailCached(media.firstOrNull()?.uri)
         }
     }
     
