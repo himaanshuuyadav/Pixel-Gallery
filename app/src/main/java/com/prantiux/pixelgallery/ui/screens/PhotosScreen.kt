@@ -416,26 +416,19 @@ fun PhotosContent(
                                     if (isSelectionMode) {
                                         viewModel.toggleSelection(item)
                                     } else {
-                                        bounds?.let {
-                                            viewModel.showMediaOverlay(
-                                                mediaType = "photos",
-                                                albumId = "all",
-                                                selectedIndex = globalIndex,
-                                                thumbnailBounds = MediaViewModel.ThumbnailBounds(
+                                        viewModel.showMediaOverlay(
+                                            mediaType = "photos",
+                                            albumId = "all",
+                                            selectedIndex = globalIndex,
+                                            thumbnailBounds = bounds?.let {
+                                                MediaViewModel.ThumbnailBounds(
                                                     startLeft = it.left,
                                                     startTop = it.top,
                                                     startWidth = it.width,
                                                     startHeight = it.height
                                                 )
-                                            )
-                                        } ?: run {
-                                            viewModel.showMediaOverlay(
-                                                mediaType = "photos",
-                                                albumId = "all",
-                                                selectedIndex = globalIndex,
-                                                thumbnailBounds = null
-                                            )
-                                        }
+                                            }
+                                        )
                                     }
                                 },
                                 onLongClick = {
