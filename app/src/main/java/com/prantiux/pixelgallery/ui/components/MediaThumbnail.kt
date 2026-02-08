@@ -66,6 +66,7 @@ fun MediaThumbnail(
     badgeEnabled: Boolean = true,
     thumbnailQuality: String = "Standard"
 ) {
+    // Capture thumbnail bounds for shared element animation
     var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     
     // Log selection state changes for debugging
@@ -160,13 +161,14 @@ fun MediaThumbnail(
                 )
                 .clip(innerShape)
                 .onGloballyPositioned { coordinates ->
+                    // Capture bounds in window coordinates for animation
                     val position = coordinates.positionInWindow()
                     val size = coordinates.size
                     thumbnailBounds = Rect(
-                        position.x,
-                        position.y,
-                        position.x + size.width,
-                        position.y + size.height
+                        left = position.x,
+                        top = position.y,
+                        right = position.x + size.width,
+                        bottom = position.y + size.height
                     )
                 }
                 .combinedClickable(
