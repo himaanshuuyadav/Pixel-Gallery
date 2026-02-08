@@ -34,7 +34,7 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
  * 
  * @param isSelectionMode Whether selection mode is active
  * @param item The media item being clicked
- * @param thumbnailBounds The bounds for animation (null if unavailable)
+ * @param thumbnailBounds The thumbnail bounds for shared element animation
  * @param viewModel The MediaViewModel for state management
  * @param mediaType The type of media source ("photos", "album", "favorites", etc.)
  * @param albumId The album ID (for album-specific views)
@@ -54,27 +54,20 @@ fun handleMediaItemClick(
         viewModel.toggleSelection(item)
     } else {
         // Normal mode: open overlay with animation
-        thumbnailBounds?.let { bounds ->
-            viewModel.showMediaOverlay(
-                mediaType = mediaType,
-                albumId = albumId,
-                selectedIndex = index,
-                thumbnailBounds = MediaViewModel.ThumbnailBounds(
-                    startLeft = bounds.left,
-                    startTop = bounds.top,
-                    startWidth = bounds.width,
-                    startHeight = bounds.height
-                )
-            )
-        } ?: run {
-            // Fallback without animation bounds
-            viewModel.showMediaOverlay(
-                mediaType = mediaType,
-                albumId = albumId,
-                selectedIndex = index,
-                thumbnailBounds = null
+        val bounds = thumbnailBounds?.let {
+            MediaViewModel.ThumbnailBounds(
+                startLeft = it.left,
+                startTop = it.top,
+                startWidth = it.width,
+                startHeight = it.height
             )
         }
+        viewModel.showMediaOverlay(
+            mediaType = mediaType,
+            albumId = albumId,
+            selectedIndex = index,
+            thumbnailBounds = bounds
+        )
     }
 }
 
