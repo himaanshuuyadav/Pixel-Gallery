@@ -107,7 +107,7 @@ object SmartAlbumGenerator {
                 
                 Album(
                     id = albumType.id,
-                    name = "${albumType.icon} ${albumType.displayName}",
+                    name = albumType.displayName,
                     coverUri = null, // Will be resolved from media items
                     itemCount = matchingLabels.size,
                     bucketDisplayName = albumType.displayName,
