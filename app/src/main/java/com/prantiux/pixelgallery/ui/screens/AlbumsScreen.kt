@@ -54,6 +54,7 @@ import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
+import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import kotlinx.coroutines.launch
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -72,7 +73,7 @@ fun AlbumsScreen(
     onNavigateToAllAlbums: () -> Unit,
     onNavigateToRecycleBin: () -> Unit = {},
     onNavigateToFavorites: () -> Unit = {},
-    viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
+    viewModel: MediaViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -672,26 +673,19 @@ fun AlbumPreviewCard(
                                             )
                                         }
                                         .clickable {
-                                            thumbnailBounds?.let { bounds ->
-                                                viewModel.showMediaOverlay(
-                                                    mediaType = "album",
-                                                    albumId = album.id,
-                                                    selectedIndex = index,
-                                                    thumbnailBounds = com.prantiux.pixelgallery.viewmodel.MediaViewModel.ThumbnailBounds(
-                                                        startLeft = bounds.left,
-                                                        startTop = bounds.top,
-                                                        startWidth = bounds.width,
-                                                        startHeight = bounds.height
+                                            viewModel.showMediaOverlay(
+                                                mediaType = "album",
+                                                albumId = album.id,
+                                                selectedIndex = index,
+                                                thumbnailBounds = thumbnailBounds?.let {
+                                                    MediaViewModel.ThumbnailBounds(
+                                                        startLeft = it.left,
+                                                        startTop = it.top,
+                                                        startWidth = it.width,
+                                                        startHeight = it.height
                                                     )
-                                                )
-                                            } ?: run {
-                                                viewModel.showMediaOverlay(
-                                                    mediaType = "album",
-                                                    albumId = album.id,
-                                                    selectedIndex = index,
-                                                    thumbnailBounds = null
-                                                )
-                                            }
+                                                }
+                                            )
                                         },
                                     contentScale = ContentScale.Crop
                                 )
@@ -766,26 +760,19 @@ fun AlbumPreviewCard(
                                             if (isSixthImage && remainingCount > 0) {
                                                 onViewAllClick()
                                             } else {
-                                                thumbnailBounds?.let { bounds ->
-                                                    viewModel.showMediaOverlay(
-                                                        mediaType = "album",
-                                                        albumId = album.id,
-                                                        selectedIndex = index,
-                                                        thumbnailBounds = com.prantiux.pixelgallery.viewmodel.MediaViewModel.ThumbnailBounds(
-                                                            startLeft = bounds.left,
-                                                            startTop = bounds.top,
-                                                            startWidth = bounds.width,
-                                                            startHeight = bounds.height
+                                                viewModel.showMediaOverlay(
+                                                    mediaType = "album",
+                                                    albumId = album.id,
+                                                    selectedIndex = index,
+                                                    thumbnailBounds = thumbnailBounds?.let {
+                                                        MediaViewModel.ThumbnailBounds(
+                                                            startLeft = it.left,
+                                                            startTop = it.top,
+                                                            startWidth = it.width,
+                                                            startHeight = it.height
                                                         )
-                                                    )
-                                                } ?: run {
-                                                    viewModel.showMediaOverlay(
-                                                        mediaType = "album",
-                                                        albumId = album.id,
-                                                        selectedIndex = index,
-                                                        thumbnailBounds = null
-                                                    )
-                                                }
+                                                    }
+                                                )
                                             }
                                         },
                                     contentScale = ContentScale.Crop
