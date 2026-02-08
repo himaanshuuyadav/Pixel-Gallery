@@ -661,12 +661,14 @@ fun AppNavigation(
             // Get context for smart album loading
             val context = androidx.compose.ui.platform.LocalContext.current
             
+            val isAlbumOverlay = overlayState.mediaType == "album" || overlayState.mediaType == "smartalbum"
+            val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
+
             // Filter media based on overlay state (album or all media)
             val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, allMediaUnfiltered, searchResults, favoriteItems) {
                 when (overlayState.mediaType) {
-                    "album" -> {
-                        // Check if this is a smart album
-                        if (SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)) {
+                    "album", "smartalbum" -> {
+                        if (isSmartAlbumOverlay) {
                             // Smart album - needs async loading, return empty for now
                             // Will be populated by LaunchedEffect below
                             emptyList()
@@ -691,7 +693,7 @@ fun AppNavigation(
             
             // Load smart album media if overlay is showing a smart album
             androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, allMediaUnfiltered) {
-                if (overlayState.mediaType == "album" && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)) {
+                if (isSmartAlbumOverlay) {
                     coroutineScope.launch {
                         val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(
                             context,
@@ -705,7 +707,7 @@ fun AppNavigation(
             
             // Final media list with smart album support
             val finalOverlayMediaItems = remember(overlayMediaItems, smartAlbumOverlayMedia, overlayState.mediaType, overlayState.albumId) {
-                if (overlayState.mediaType == "album" && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)) {
+                if (isSmartAlbumOverlay) {
                     smartAlbumOverlayMedia ?: emptyList()
                 } else {
                     overlayMediaItems
@@ -1001,7 +1003,7 @@ fun AppNavigation(
                             )
                             
                             // Hide from this label (only for smart albums)
-                            if (isInSmartAlbum && currentAlbumId != null) {
+                            if (isInSmartAlbum) {
                                 DropdownMenuItem(
                                     text = {
                                         Row(
