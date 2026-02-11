@@ -7,7 +7,6 @@ import android.view.View
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.geometry.Rect
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 
@@ -34,7 +33,6 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
  * 
  * @param isSelectionMode Whether selection mode is active
  * @param item The media item being clicked
- * @param thumbnailBounds The thumbnail bounds for shared element animation
  * @param viewModel The MediaViewModel for state management
  * @param mediaType The type of media source ("photos", "album", "favorites", etc.)
  * @param albumId The album ID (for album-specific views)
@@ -43,30 +41,30 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 fun handleMediaItemClick(
     isSelectionMode: Boolean,
     item: MediaItem,
-    thumbnailBounds: Rect?,
     viewModel: MediaViewModel,
     mediaType: String,
     albumId: String,
-    index: Int
+    index: Int,
+    bounds: androidx.compose.ui.geometry.Rect? = null
 ) {
     if (isSelectionMode) {
         // Selection mode: toggle selection
         viewModel.toggleSelection(item)
     } else {
         // Normal mode: open overlay with animation
-        val bounds = thumbnailBounds?.let {
-            MediaViewModel.ThumbnailBounds(
-                startLeft = it.left,
-                startTop = it.top,
-                startWidth = it.width,
-                startHeight = it.height
+        val thumbnailBounds = bounds?.let {
+            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
+                left = it.left,
+                top = it.top,
+                width = it.width,
+                height = it.height
             )
         }
         viewModel.showMediaOverlay(
             mediaType = mediaType,
             albumId = albumId,
             selectedIndex = index,
-            thumbnailBounds = bounds
+            thumbnailBounds = thumbnailBounds
         )
     }
 }
@@ -175,11 +173,11 @@ fun SelectableMediaItem(
             handleMediaItemClick(
                 isSelectionMode = isSelectionMode,
                 item = item,
-                thumbnailBounds = bounds,
                 viewModel = viewModel,
                 mediaType = mediaType,
                 albumId = albumId,
-                index = index
+                index = index,
+                bounds = bounds
             )
         },
         onLongClick = {
