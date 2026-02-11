@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +30,7 @@ fun FavoritesScreen(
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
+    val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     
     SubPageScaffoldGrid(
         title = "Favourites",
@@ -74,33 +76,39 @@ fun FavoritesScreen(
                 }
             }
         } else {
-            items(favoriteItems) { item ->
+            itemsIndexed(favoriteItems) { index, item ->
+                val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                    index = index,
+                    totalItems = favoriteItems.size,
+                    columns = 3,
+                    cornerType = cornerType
+                )
                 MediaThumbnail(
                     item = item,
                     isSelected = false,
                     isSelectionMode = false,
-                    shape = RoundedCornerShape(4.dp),
+                    shape = gridShape,
                     badgeType = badgeType,
                     badgeEnabled = badgeEnabled,
                     thumbnailQuality = thumbnailQuality,
                     onClick = { bounds ->
                         val index = favoriteItems.indexOf(item)
+                        val thumbnailBounds = bounds?.let {
+                            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
+                                left = it.left,
+                                top = it.top,
+                                width = it.width,
+                                height = it.height
+                            )
+                        }
                         viewModel.showMediaOverlay(
                             mediaType = "favorites",
                             albumId = "",
                             selectedIndex = index,
-                            thumbnailBounds = bounds?.let {
-                                MediaViewModel.ThumbnailBounds(
-                                    startLeft = it.left,
-                                    startTop = it.top,
-                                    startWidth = it.width,
-                                    startHeight = it.height
-                                )
-                            }
+                            thumbnailBounds = thumbnailBounds
                         )
                     },
-                    onLongClick = {},
-                    showFavorite = true
+                    onLongClick = {}
                 )
             }
         }
