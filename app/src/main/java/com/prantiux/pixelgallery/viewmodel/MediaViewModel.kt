@@ -210,19 +210,8 @@ class MediaViewModel : ViewModel() {
         val mediaType: String = "photos",
         val albumId: String = "all",
         val selectedIndex: Int = 0,
-        val thumbnailBounds: ThumbnailBounds? = null,
-        val searchQuery: String? = null
-    )
-
-    /**
-     * Thumbnail bounds for shared element animation.
-     * Captured from the thumbnail composable's position in window coordinates.
-     */
-    data class ThumbnailBounds(
-        val startLeft: Float,
-        val startTop: Float,
-        val startWidth: Float,
-        val startHeight: Float
+        val searchQuery: String? = null,
+        val thumbnailBounds: com.prantiux.pixelgallery.ui.animation.SharedElementBounds? = null
     )
 
     private val _overlayState = MutableStateFlow(MediaOverlayState())
@@ -414,16 +403,16 @@ class MediaViewModel : ViewModel() {
         mediaType: String,
         albumId: String,
         selectedIndex: Int,
-        thumbnailBounds: ThumbnailBounds? = null,
-        searchQuery: String? = null
+        searchQuery: String? = null,
+        thumbnailBounds: com.prantiux.pixelgallery.ui.animation.SharedElementBounds? = null
     ) {
         _overlayState.value = MediaOverlayState(
             isVisible = true,
             mediaType = mediaType,
             albumId = albumId,
             selectedIndex = selectedIndex,
-            thumbnailBounds = thumbnailBounds,
-            searchQuery = searchQuery
+            searchQuery = searchQuery,
+            thumbnailBounds = thumbnailBounds
         )
     }
 
@@ -888,14 +877,17 @@ class MediaViewModel : ViewModel() {
     }
     
     // Trash overlay functions
-    fun showTrashMediaOverlay(selectedIndex: Int, thumbnailBounds: ThumbnailBounds? = null) {
+    fun showTrashMediaOverlay(
+        selectedIndex: Int,
+        thumbnailBounds: com.prantiux.pixelgallery.ui.animation.SharedElementBounds? = null
+    ) {
         _overlayState.value = MediaOverlayState(
             isVisible = true,
             mediaType = "trash",
             albumId = "",
             selectedIndex = selectedIndex,
-            thumbnailBounds = thumbnailBounds,
-            searchQuery = null
+            searchQuery = null,
+            thumbnailBounds = thumbnailBounds
         )
     }
     
