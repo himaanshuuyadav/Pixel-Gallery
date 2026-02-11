@@ -12,11 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -648,8 +646,6 @@ fun AlbumPreviewCard(
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         itemsToShow.take(3).forEachIndexed { index, mediaItem ->
-                            var thumbnailBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-                            
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
@@ -662,29 +658,11 @@ fun AlbumPreviewCard(
                                         .fillMaxSize()
                                         .clip(com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index))
                                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .onGloballyPositioned { coordinates ->
-                                            val position = coordinates.positionInWindow()
-                                            val size = coordinates.size
-                                            thumbnailBounds = androidx.compose.ui.geometry.Rect(
-                                                position.x,
-                                                position.y,
-                                                position.x + size.width,
-                                                position.y + size.height
-                                            )
-                                        }
                                         .clickable {
                                             viewModel.showMediaOverlay(
                                                 mediaType = "album",
                                                 albumId = album.id,
-                                                selectedIndex = index,
-                                                thumbnailBounds = thumbnailBounds?.let {
-                                                    MediaViewModel.ThumbnailBounds(
-                                                        startLeft = it.left,
-                                                        startTop = it.top,
-                                                        startWidth = it.width,
-                                                        startHeight = it.height
-                                                    )
-                                                }
+                                                selectedIndex = index
                                             )
                                         },
                                     contentScale = ContentScale.Crop
@@ -731,7 +709,6 @@ fun AlbumPreviewCard(
                             val index = relIndex + 3
                             val isSixthImage = index == 5
                             val remainingCount = album.itemCount - 5
-                            var thumbnailBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
                             
                             Box(
                                 modifier = Modifier
@@ -745,16 +722,6 @@ fun AlbumPreviewCard(
                                         .fillMaxSize()
                                         .clip(com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index))
                                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .onGloballyPositioned { coordinates ->
-                                            val position = coordinates.positionInWindow()
-                                            val size = coordinates.size
-                                            thumbnailBounds = androidx.compose.ui.geometry.Rect(
-                                                position.x,
-                                                position.y,
-                                                position.x + size.width,
-                                                position.y + size.height
-                                            )
-                                        }
                                         .clickable {
                                             // If 6th image and more items exist, open album view
                                             if (isSixthImage && remainingCount > 0) {
@@ -763,15 +730,7 @@ fun AlbumPreviewCard(
                                                 viewModel.showMediaOverlay(
                                                     mediaType = "album",
                                                     albumId = album.id,
-                                                    selectedIndex = index,
-                                                    thumbnailBounds = thumbnailBounds?.let {
-                                                        MediaViewModel.ThumbnailBounds(
-                                                            startLeft = it.left,
-                                                            startTop = it.top,
-                                                            startWidth = it.width,
-                                                            startHeight = it.height
-                                                        )
-                                                    }
+                                                    selectedIndex = index
                                                 )
                                             }
                                         },
