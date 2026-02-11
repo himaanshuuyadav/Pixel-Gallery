@@ -699,19 +699,20 @@ fun SearchScreen(
                                         // Save search to recent searches
                                         viewModel.addRecentSearch(searchQuery)
                                         
+                                        val thumbnailBounds = bounds?.let {
+                                            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
+                                                left = it.left,
+                                                top = it.top,
+                                                width = it.width,
+                                                height = it.height
+                                            )
+                                        }
                                         viewModel.showMediaOverlay(
                                             mediaType = "search",
                                             albumId = "search_results",
                                             selectedIndex = index,
-                                            thumbnailBounds = bounds?.let {
-                                                MediaViewModel.ThumbnailBounds(
-                                                    startLeft = it.left,
-                                                    startTop = it.top,
-                                                    startWidth = it.width,
-                                                    startHeight = it.height
-                                                )
-                                            },
-                                            searchQuery = searchQuery
+                                            searchQuery = searchQuery,
+                                            thumbnailBounds = thumbnailBounds
                                         )
                                     },
                                     onLongClick = {},
