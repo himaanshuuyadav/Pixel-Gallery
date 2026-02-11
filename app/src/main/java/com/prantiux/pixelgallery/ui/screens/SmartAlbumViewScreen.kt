@@ -45,6 +45,7 @@ fun SmartAlbumViewScreen(
     val videos by viewModel.allVideosUnfiltered.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
+    val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val view = LocalView.current
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -115,6 +116,12 @@ fun SmartAlbumViewScreen(
             } else {
                 items(albumMedia.size) { index ->
                     val item = albumMedia[index]
+                    val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                        index = index,
+                        totalItems = albumMedia.size,
+                        columns = 3,
+                        cornerType = cornerType
+                    )
                     
                     SelectableMediaItem(
                         item = item,
@@ -122,7 +129,7 @@ fun SmartAlbumViewScreen(
                         selectedItems = selectedItems,
                         viewModel = viewModel,
                         view = view,
-                        shape = RoundedCornerShape(4.dp),
+                        shape = gridShape,
                         mediaType = "smartalbum",
                         albumId = albumId,
                         index = index,
