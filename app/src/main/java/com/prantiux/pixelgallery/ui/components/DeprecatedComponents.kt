@@ -162,7 +162,7 @@ fun customMediaAnimationSpec(): androidx.compose.animation.core.AnimationSpec<Fl
             "See SHARED_COMPONENTS_ARCHITECTURE.md",
     level = DeprecationLevel.ERROR,
     replaceWith = ReplaceWith(
-        "handleMediaItemClick(isSelectionMode, item, thumbnailBounds, viewModel, mediaType, albumId, index)",
+        "handleMediaItemClick(isSelectionMode, item, viewModel, mediaType, albumId, index)",
         "com.prantiux.pixelgallery.ui.components.handleMediaItemClick"
     )
 )
