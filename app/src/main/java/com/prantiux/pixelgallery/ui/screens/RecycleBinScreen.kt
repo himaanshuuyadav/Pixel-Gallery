@@ -348,22 +348,22 @@ fun RecycleBinContent(
                                         if (isSelectionMode) {
                                             viewModel.toggleTrashSelection(item)
                                         } else {
+                                            val thumbnailBounds = bounds?.let {
+                                                com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
+                                                    left = it.left,
+                                                    top = it.top,
+                                                    width = it.width,
+                                                    height = it.height
+                                                )
+                                            }
                                             viewModel.showTrashMediaOverlay(
                                                 selectedIndex = trashedItems.indexOf(item),
-                                                thumbnailBounds = bounds?.let {
-                                                    MediaViewModel.ThumbnailBounds(
-                                                        startLeft = it.left,
-                                                        startTop = it.top,
-                                                        startWidth = it.width,
-                                                        startHeight = it.height
-                                                    )
-                                                }
+                                                thumbnailBounds = thumbnailBounds
                                             )
                                         }
                                     },
                                     onLongClick = {
                                         if (!isSelectionMode) {
-                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                             viewModel.enterTrashSelectionMode(item)
                                         }
                                     },
