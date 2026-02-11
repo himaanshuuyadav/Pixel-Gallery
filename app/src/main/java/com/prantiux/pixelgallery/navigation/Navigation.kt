@@ -389,256 +389,6 @@ fun AppNavigation(
                 NavigationBarBackground()
             }
             
-            NavHost(
-                navController = navController,
-                startDestination = startDestination,
-                modifier = Modifier.fillMaxSize()
-            ) {
-            composable(
-                route = Screen.Photos.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                PhotosScreen(
-                    viewModel = viewModel,
-                    onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
-                )
-            }
-
-            composable(
-                route = Screen.Albums.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                AlbumsScreen(
-                    onNavigateToAlbum = { albumId ->
-                        navController.navigate(Screen.AlbumDetail.createRoute(albumId))
-                    },
-                    onNavigateToAllAlbums = {
-                        navController.navigate(Screen.AllAlbums.route)
-                    },
-                    onNavigateToRecycleBin = {
-                        navController.navigate(Screen.RecycleBin.route)
-                    },
-                    onNavigateToFavorites = {
-                        navController.navigate(Screen.Favorites.route)
-                    },
-                    viewModel = viewModel
-                )
-            }
-
-            composable(
-                route = Screen.AllAlbums.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                AllAlbumsScreen(
-                    onNavigateToAlbum = { albumId ->
-                        navController.navigate(Screen.AlbumDetail.createRoute(albumId))
-                    },
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.RecycleBin.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                RecycleBinScreen(
-                    viewModel = viewModel,
-                    onNavigateBack = { navController.popBackStack() },
-                    settingsDataStore = settingsDataStore,
-                    videoPositionDataStore = videoPositionDataStore
-                )
-            }
-            
-            composable(
-                route = Screen.Favorites.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                FavoritesScreen(
-                    viewModel = viewModel,
-                    onNavigateBack = { navController.popBackStack() },
-                    settingsDataStore = settingsDataStore
-                )
-            }
-
-            composable(
-                route = Screen.Search.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                SearchScreen(
-                    viewModel = viewModel, 
-                    navController = navController,
-                    settingsDataStore = settingsDataStore
-                )
-            }
-
-            composable(
-                route = Screen.Settings.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.SettingsScreen(
-                    viewModel = viewModel,
-                    onNavigateToGridType = { navController.navigate(Screen.GridTypeSetting.route) },
-                    onNavigateToGalleryView = { navController.navigate(Screen.GalleryViewSetting.route) },
-                    onNavigateToTheme = { navController.navigate(Screen.ThemeSetting.route) },
-                    onNavigateToPreviews = { navController.navigate(Screen.PreviewsSetting.route) },
-                    onNavigateToGestures = { navController.navigate(Screen.GesturesSetting.route) },
-                    onNavigateToPlayback = { navController.navigate(Screen.PlaybackSetting.route) },
-                    onNavigateToDebug = { navController.navigate(Screen.DebugSetting.route) },
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-            
-            composable(
-                route = Screen.GridTypeSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.LayoutSettingScreen(
-                    viewModel = viewModel,
-                    settingsDataStore = settingsDataStore,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.GalleryViewSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.GalleryViewSettingScreen(
-                    albumRepository = albumRepository,
-                    settingsDataStore = settingsDataStore,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.ThemeSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
-                    settingsDataStore = settingsDataStore,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.PreviewsSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.PreviewsSettingScreen(
-                    settingsDataStore = settingsDataStore,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.GesturesSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.GesturesSettingScreen(
-                    settingsDataStore = settingsDataStore,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.PlaybackSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.PlaybackSettingScreen(
-                    settingsDataStore = settingsDataStore,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-
-            composable(
-                route = Screen.DebugSetting.route,
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) {
-                com.prantiux.pixelgallery.ui.screens.settings.DebugSettingScreen(
-                    onBackClick = { navController.popBackStack() },
-                    viewModel = viewModel
-                )
-            }
-
-            composable(
-                route = Screen.AlbumDetail.route,
-                arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) { backStackEntry ->
-                val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
-                AlbumDetailScreen(
-                    viewModel = viewModel,
-                    albumId = albumId,
-                    onNavigateBack = { navController.popBackStack() },
-                    onNavigateToViewer = { },
-                    settingsDataStore = settingsDataStore
-                )
-            }
-            
-            composable(
-                route = Screen.SmartAlbumView.route,
-                arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
-                enterTransition = { enterTransition() },
-                exitTransition = { exitTransition() },
-                popEnterTransition = { popEnterTransition() },
-                popExitTransition = { popExitTransition() }
-            ) { backStackEntry ->
-                val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
-                SmartAlbumViewScreen(
-                    viewModel = viewModel,
-                    albumId = albumId,
-                    onNavigateBack = { navController.popBackStack() },
-                    onNavigateToViewer = { },
-                    settingsDataStore = settingsDataStore
-                )
-            }
-        }
-
             // Media overlay state
             val overlayState by viewModel.overlayState.collectAsState()
             val allMedia = remember(images, videos) {
@@ -714,6 +464,257 @@ fun AppNavigation(
                 }
             }
 
+            Box(modifier = Modifier.fillMaxSize()) {
+                NavHost(
+                        navController = navController,
+                        startDestination = startDestination,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                    composable(
+                        route = Screen.Photos.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        PhotosScreen(
+                            viewModel = viewModel,
+                            onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.Albums.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        AlbumsScreen(
+                            onNavigateToAlbum = { albumId ->
+                                navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                            },
+                            onNavigateToAllAlbums = {
+                                navController.navigate(Screen.AllAlbums.route)
+                            },
+                            onNavigateToRecycleBin = {
+                                navController.navigate(Screen.RecycleBin.route)
+                            },
+                            onNavigateToFavorites = {
+                                navController.navigate(Screen.Favorites.route)
+                            },
+                            viewModel = viewModel
+                        )
+                    }
+
+                    composable(
+                        route = Screen.AllAlbums.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        AllAlbumsScreen(
+                            onNavigateToAlbum = { albumId ->
+                                navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                            },
+                            onNavigateBack = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.RecycleBin.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        RecycleBinScreen(
+                            viewModel = viewModel,
+                            onNavigateBack = { navController.popBackStack() },
+                            settingsDataStore = settingsDataStore,
+                            videoPositionDataStore = videoPositionDataStore
+                        )
+                    }
+                    
+                    composable(
+                        route = Screen.Favorites.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        FavoritesScreen(
+                            viewModel = viewModel,
+                            onNavigateBack = { navController.popBackStack() },
+                            settingsDataStore = settingsDataStore
+                        )
+                    }
+
+                    composable(
+                        route = Screen.Search.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        SearchScreen(
+                            viewModel = viewModel, 
+                            navController = navController,
+                            settingsDataStore = settingsDataStore
+                        )
+                    }
+
+                    composable(
+                        route = Screen.Settings.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.SettingsScreen(
+                            viewModel = viewModel,
+                            onNavigateToGridType = { navController.navigate(Screen.GridTypeSetting.route) },
+                            onNavigateToGalleryView = { navController.navigate(Screen.GalleryViewSetting.route) },
+                            onNavigateToTheme = { navController.navigate(Screen.ThemeSetting.route) },
+                            onNavigateToPreviews = { navController.navigate(Screen.PreviewsSetting.route) },
+                            onNavigateToGestures = { navController.navigate(Screen.GesturesSetting.route) },
+                            onNavigateToPlayback = { navController.navigate(Screen.PlaybackSetting.route) },
+                            onNavigateToDebug = { navController.navigate(Screen.DebugSetting.route) },
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                    
+                    composable(
+                        route = Screen.GridTypeSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.LayoutSettingScreen(
+                            viewModel = viewModel,
+                            settingsDataStore = settingsDataStore,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.GalleryViewSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.GalleryViewSettingScreen(
+                            albumRepository = albumRepository,
+                            settingsDataStore = settingsDataStore,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.ThemeSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
+                            settingsDataStore = settingsDataStore,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.PreviewsSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.PreviewsSettingScreen(
+                            settingsDataStore = settingsDataStore,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.GesturesSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.GesturesSettingScreen(
+                            settingsDataStore = settingsDataStore,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.PlaybackSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.PlaybackSettingScreen(
+                            settingsDataStore = settingsDataStore,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable(
+                        route = Screen.DebugSetting.route,
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) {
+                        com.prantiux.pixelgallery.ui.screens.settings.DebugSettingScreen(
+                            onBackClick = { navController.popBackStack() },
+                            viewModel = viewModel
+                        )
+                    }
+
+                    composable(
+                        route = Screen.AlbumDetail.route,
+                        arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) { backStackEntry ->
+                        val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
+                        AlbumDetailScreen(
+                            viewModel = viewModel,
+                            albumId = albumId,
+                            onNavigateBack = { navController.popBackStack() },
+                            onNavigateToViewer = { },
+                            settingsDataStore = settingsDataStore
+                        )
+                    }
+                    
+                    composable(
+                        route = Screen.SmartAlbumView.route,
+                        arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
+                        enterTransition = { enterTransition() },
+                        exitTransition = { exitTransition() },
+                        popEnterTransition = { popEnterTransition() },
+                        popExitTransition = { popExitTransition() }
+                    ) { backStackEntry ->
+                        val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
+                        SmartAlbumViewScreen(
+                            viewModel = viewModel,
+                            albumId = albumId,
+                            onNavigateBack = { navController.popBackStack() },
+                            onNavigateToViewer = { },
+                            settingsDataStore = settingsDataStore
+                        )
+                    }
+                }
+            
             // Media overlay (always present, visibility controlled by state)
             // Wrapped in layout {} to prevent overlay from affecting photo grid scroll position
             // Skip if trash mode (RecycleBinScreen shows its own overlay)
@@ -739,6 +740,7 @@ fun AppNavigation(
                         placeable?.place(0, 0)
                     }
                 }
+            }
             }
 
             // Animate navbar hide/show when overlay is visible or scrollbar is being dragged
