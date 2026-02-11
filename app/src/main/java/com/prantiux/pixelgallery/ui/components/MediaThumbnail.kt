@@ -2,7 +2,6 @@
 
 package com.prantiux.pixelgallery.ui.components
 
-import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -18,12 +17,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -58,7 +55,7 @@ fun MediaThumbnail(
     isSelected: Boolean,
     isSelectionMode: Boolean,
     shape: Shape,
-    onClick: (Rect?) -> Unit,
+    onClick: (androidx.compose.ui.geometry.Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
@@ -66,13 +63,11 @@ fun MediaThumbnail(
     badgeEnabled: Boolean = true,
     thumbnailQuality: String = "Standard"
 ) {
-    // Capture thumbnail bounds for shared element animation
-    var thumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     
-    // Log selection state changes for debugging
-    LaunchedEffect(isSelected) {
-        Log.d("MediaThumbnail", "[${item.id}] Selection changed: isSelected=$isSelected")
-    }
+    // Capture thumbnail bounds for shared element animation
+    var thumbnailBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    
+    // Selection state tracking (logging removed for performance)
     
     // Different animation for selection vs deselection for better visibility
     val borderWidthRaw by animateDpAsState(
@@ -90,19 +85,13 @@ fun MediaThumbnail(
                 easing = FastOutSlowInEasing
             )
         },
-        label = "borderWidth",
-        finishedListener = { finalValue ->
-            Log.d("MediaThumbnail", "[${item.id}] Border animation finished: finalValue=$finalValue, isSelected=$isSelected")
-        }
+        label = "borderWidth"
     )
     
     // CRITICAL: Clamp to 0dp minimum to prevent negative border width
     val borderWidth = borderWidthRaw.coerceAtLeast(0.dp)
     
-    // Log current border width for debugging
-    LaunchedEffect(borderWidth) {
-        Log.d("MediaThumbnail", "[${item.id}] Border width changed: ${borderWidth.value}dp (raw=${borderWidthRaw.value}dp, target=${if (isSelected) 16 else 0}dp)")
-    }
+
     
     val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
     
@@ -162,9 +151,10 @@ fun MediaThumbnail(
                 .clip(innerShape)
                 .onGloballyPositioned { coordinates ->
                     // Capture bounds in window coordinates for animation
-                    val position = coordinates.positionInWindow()
-                    val size = coordinates.size
-                    thumbnailBounds = Rect(
+                    val layoutCoordinates = coordinates
+                    val position = layoutCoordinates.localToWindow(androidx.compose.ui.geometry.Offset.Zero)
+                    val size = layoutCoordinates.size
+                    thumbnailBounds = androidx.compose.ui.geometry.Rect(
                         left = position.x,
                         top = position.y,
                         right = position.x + size.width,
