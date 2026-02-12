@@ -1,5 +1,7 @@
 package com.prantiux.pixelgallery.ui.components
 
+import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -17,7 +19,8 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
 fun DeleteConfirmationDialog(
     itemCount: Int,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    view: View? = null
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -66,7 +69,10 @@ fun DeleteConfirmationDialog(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedButton(
-                        onClick = onDismiss,
+                        onClick = {
+                            view?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                            onDismiss()
+                        },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
@@ -75,6 +81,7 @@ fun DeleteConfirmationDialog(
                     
                     Button(
                         onClick = {
+                            view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                             onConfirm()
                             onDismiss()
                         },
