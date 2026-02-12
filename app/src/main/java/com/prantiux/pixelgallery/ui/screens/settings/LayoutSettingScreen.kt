@@ -12,6 +12,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -326,6 +328,7 @@ private fun TabOption(
     onClick: () -> Unit,
     position: SettingPosition
 ) {
+    val haptic = LocalHapticFeedback.current
     // Apply rounded corners based on position
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
@@ -338,7 +341,12 @@ private fun TabOption(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .clickable(onClick = onClick)
+            .clickable {
+                if (!isSelected) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                onClick()
+            }
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceContainerHighest
@@ -385,6 +393,7 @@ private fun GridTypeOption(
     position: SettingPosition,
     onClick: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
         SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
@@ -393,7 +402,12 @@ private fun GridTypeOption(
     }
     
     Surface(
-        onClick = onClick,
+        onClick = {
+            if (!isSelected) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            onClick()
+        },
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.fillMaxWidth()
