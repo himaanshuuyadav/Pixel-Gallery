@@ -10,6 +10,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -254,6 +256,7 @@ private fun ThemeOption(
     onClick: () -> Unit,
     position: SettingPosition
 ) {
+    val haptic = LocalHapticFeedback.current
     // Apply rounded corners based on position
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
@@ -266,7 +269,12 @@ private fun ThemeOption(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .clickable(onClick = onClick)
+            .clickable {
+                if (!isSelected) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                onClick()
+            }
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceContainerHighest
