@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowInsetsController
 import android.view.WindowManager
@@ -422,6 +423,9 @@ fun MediaOverlay(
     
     val toggleFavorite: () -> Unit = {
         mediaItems.getOrNull(currentIndex)?.let { item ->
+            // Haptic feedback
+            view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
+            
             // Toggle the favorite state
             val currentState = favoriteStates[item.id] ?: item.isFavorite
             val newState = !currentState
@@ -1531,6 +1535,7 @@ fun MediaOverlay(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         mediaItems.getOrNull(currentIndex)?.let { item ->
                             try {
                                 val deleted = context.contentResolver.delete(item.uri, null, null)
@@ -1551,7 +1556,10 @@ fun MediaOverlay(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
+                TextButton(onClick = { 
+                    view?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    showDeleteDialog = false 
+                }) {
                     Text("Cancel")
                 }
             }
