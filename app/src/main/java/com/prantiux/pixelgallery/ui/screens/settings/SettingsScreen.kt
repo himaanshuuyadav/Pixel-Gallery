@@ -12,6 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -267,15 +269,25 @@ internal fun GroupedSettingToggle(
     position: SettingPosition,
     enabled: Boolean = true
 ) {
+    val haptic = LocalHapticFeedback.current
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
         SettingPosition.MIDDLE -> RoundedCornerShape(8.dp)
         SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
         SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
     }
+
+    val handleCheckedChange: (Boolean) -> Unit = { newValue ->
+        if (enabled && newValue != checked) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        if (enabled) {
+            onCheckedChange(newValue)
+        }
+    }
     
     Surface(
-        onClick = { if (enabled) onCheckedChange(!checked) },
+        onClick = { handleCheckedChange(!checked) },
         enabled = enabled,
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -312,7 +324,7 @@ internal fun GroupedSettingToggle(
             Spacer(modifier = Modifier.width(12.dp))
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = { handleCheckedChange(it) },
                 enabled = enabled
             )
         }
