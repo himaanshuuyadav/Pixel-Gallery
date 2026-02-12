@@ -10,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,6 +32,7 @@ fun GesturesSettingScreen(
     var doubleTapZoomLevel by remember { mutableStateOf("2x") }
     var zoomLevelExpanded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     
     // Load gesture settings
     LaunchedEffect(Unit) {
@@ -230,10 +233,20 @@ fun GesturesSettingScreen(
                                 else -> 0f
                             })
                         }
+                        var lastHapticStep by remember { mutableIntStateOf(-1) }
                         
                         Slider(
                             value = sliderPosition,
                             onValueChange = { 
+                                val step = when {
+                                    it < 0.5f -> 0
+                                    it < 1.5f -> 1
+                                    else -> 2
+                                }
+                                if (step != lastHapticStep) {
+                                    lastHapticStep = step
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
                                 sliderPosition = it
                                 doubleTapZoomLevel = when {
                                     it < 0.5f -> "2x"
