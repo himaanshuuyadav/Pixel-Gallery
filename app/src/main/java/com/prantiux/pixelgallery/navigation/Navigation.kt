@@ -8,10 +8,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +33,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +46,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.prantiux.pixelgallery.ui.screens.*
 import com.prantiux.pixelgallery.ui.overlay.MediaOverlay
+import com.prantiux.pixelgallery.ui.animation.AnimatedRootContent
+import com.prantiux.pixelgallery.ui.animation.AnimatedTabContentWithMotion
+import com.prantiux.pixelgallery.ui.animation.MotionSpec
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -87,34 +88,9 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object DebugSetting : Screen("debug_setting", "Debug")
 }
 
-// Expressive transition animations for navigation (Material 3 standard)
-private fun enterTransition() = fadeIn(
-    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
-) + slideInVertically(
-    initialOffsetY = { it / 15 },
-    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
-)
-
-private fun exitTransition() = fadeOut(
-    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
-) + slideOutVertically(
-    targetOffsetY = { -it / 15 },
-    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
-)
-
-private fun popEnterTransition() = fadeIn(
-    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
-) + slideInVertically(
-    initialOffsetY = { -it / 15 },
-    animationSpec = tween(durationMillis = 400, easing = EaseInOutCubic)
-)
-
-private fun popExitTransition() = fadeOut(
-    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
-) + slideOutVertically(
-    targetOffsetY = { it / 15 },
-    animationSpec = tween(durationMillis = 300, easing = EaseInOutCubic)
-)
+// All animations now handled by Material 3 Expressive motion system:
+// - Startup: AnimatedRootContent in AppNavigation wrapper
+// - Tab switches: AnimatedTabContentWithMotion in AppNavigation wrapper
 
 /**
  * Draws a solid background behind the system navigation bar.
@@ -335,6 +311,7 @@ fun AppNavigation(
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val images by viewModel.images.collectAsState()
     val videos by viewModel.videos.collectAsState()
+    val haptic = LocalHapticFeedback.current
     
     // Determine start destination based on default tab setting
     val startDestination = remember(defaultTab, lastUsedTab) {
@@ -375,11 +352,21 @@ fun AppNavigation(
         NavItem("delete", "Delete", FontIcons.Delete),
         NavItem("more", "More", FontIcons.MoreVert)
     )
+    
+    // State variable to track current selected tab for animation
+    var currentSelectedTab by remember { mutableStateOf(startDestination) }
+    
+    androidx.compose.runtime.LaunchedEffect(currentRoute) {
+        if (currentRoute != null && currentRoute in listOf(Screen.Photos.route, Screen.Albums.route, Screen.Search.route)) {
+            currentSelectedTab = currentRoute
+        }
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { _ ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        AnimatedRootContent(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
             // Global navigation bar background - MUST be first to render behind all content
             Box(
                 modifier = Modifier
@@ -465,17 +452,17 @@ fun AppNavigation(
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
-                NavHost(
-                        navController = navController,
-                        startDestination = startDestination,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
+                AnimatedTabContentWithMotion(
+                    currentTab = currentSelectedTab,
+                    modifier = Modifier.fillMaxSize()
+                ) { selectedTab ->
+                    NavHost(
+                            navController = navController,
+                            startDestination = startDestination,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
                     composable(
-                        route = Screen.Photos.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.Photos.route
                     ) {
                         PhotosScreen(
                             viewModel = viewModel,
@@ -484,11 +471,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.Albums.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.Albums.route
                     ) {
                         AlbumsScreen(
                             onNavigateToAlbum = { albumId ->
@@ -508,26 +491,19 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.AllAlbums.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.AllAlbums.route
                     ) {
                         AllAlbumsScreen(
                             onNavigateToAlbum = { albumId ->
                                 navController.navigate(Screen.AlbumDetail.createRoute(albumId))
                             },
-                            onNavigateBack = { navController.popBackStack() }
+                            onNavigateBack = { navController.popBackStack() },
+                            viewModel = viewModel
                         )
                     }
 
                     composable(
-                        route = Screen.RecycleBin.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.RecycleBin.route
                     ) {
                         RecycleBinScreen(
                             viewModel = viewModel,
@@ -538,11 +514,7 @@ fun AppNavigation(
                     }
                     
                     composable(
-                        route = Screen.Favorites.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.Favorites.route
                     ) {
                         FavoritesScreen(
                             viewModel = viewModel,
@@ -552,11 +524,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.Search.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.Search.route
                     ) {
                         SearchScreen(
                             viewModel = viewModel, 
@@ -566,11 +534,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.Settings.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.Settings.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.SettingsScreen(
                             viewModel = viewModel,
@@ -586,11 +550,7 @@ fun AppNavigation(
                     }
                     
                     composable(
-                        route = Screen.GridTypeSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.GridTypeSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.LayoutSettingScreen(
                             viewModel = viewModel,
@@ -600,25 +560,17 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.GalleryViewSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.GalleryViewSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.GalleryViewSettingScreen(
-                            albumRepository = albumRepository,
+                            viewModel = viewModel,
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
                         )
                     }
 
                     composable(
-                        route = Screen.ThemeSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.ThemeSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
                             settingsDataStore = settingsDataStore,
@@ -627,11 +579,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.PreviewsSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.PreviewsSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.PreviewsSettingScreen(
                             settingsDataStore = settingsDataStore,
@@ -640,11 +588,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.GesturesSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.GesturesSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.GesturesSettingScreen(
                             settingsDataStore = settingsDataStore,
@@ -653,11 +597,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.PlaybackSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.PlaybackSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.PlaybackSettingScreen(
                             settingsDataStore = settingsDataStore,
@@ -666,11 +606,7 @@ fun AppNavigation(
                     }
 
                     composable(
-                        route = Screen.DebugSetting.route,
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        route = Screen.DebugSetting.route
                     ) {
                         com.prantiux.pixelgallery.ui.screens.settings.DebugSettingScreen(
                             onBackClick = { navController.popBackStack() },
@@ -680,11 +616,7 @@ fun AppNavigation(
 
                     composable(
                         route = Screen.AlbumDetail.route,
-                        arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        arguments = listOf(navArgument("albumId") { type = NavType.StringType })
                     ) { backStackEntry ->
                         val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
                         AlbumDetailScreen(
@@ -698,11 +630,7 @@ fun AppNavigation(
                     
                     composable(
                         route = Screen.SmartAlbumView.route,
-                        arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
-                        enterTransition = { enterTransition() },
-                        exitTransition = { exitTransition() },
-                        popEnterTransition = { popEnterTransition() },
-                        popExitTransition = { popExitTransition() }
+                        arguments = listOf(navArgument("albumId") { type = NavType.StringType })
                     ) { backStackEntry ->
                         val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
                         SmartAlbumViewScreen(
@@ -712,6 +640,7 @@ fun AppNavigation(
                             onNavigateToViewer = { },
                             settingsDataStore = settingsDataStore
                         )
+                    }
                     }
                 }
             
@@ -870,6 +799,9 @@ fun AppNavigation(
                             }
                         }
                         if (!isSelectionMode) {
+                            if (item.route != (currentRoute ?: Screen.Photos.route)) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
                             // Normal navigation
                             navController.navigate(item.route) {
                                 popUpTo(Screen.Photos.route) { saveState = true }
@@ -1062,6 +994,7 @@ fun AppNavigation(
                     }
                 }
             }
+        }
         }
     }
 }
