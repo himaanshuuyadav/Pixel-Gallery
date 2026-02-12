@@ -2,6 +2,8 @@
 
 package com.prantiux.pixelgallery.ui.components
 
+import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -37,7 +39,8 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
  * SelectionTopBar(
  *     isVisible = isSelectionMode,
  *     selectedCount = selectedItems.size,
- *     onCancelSelection = { viewModel.exitSelectionMode() }
+ *     onCancelSelection = { viewModel.exitSelectionMode() },
+ *     view = view
  * )
  * ```
  */
@@ -47,7 +50,8 @@ fun SelectionTopBar(
     selectedCount: Int,
     onCancelSelection: () -> Unit,
     modifier: Modifier = Modifier,
-    successMessage: String? = null
+    successMessage: String? = null,
+    view: View? = null
 ) {
     // Animated visibility with custom enter/exit transitions - slides up from bottom
     AnimatedVisibility(
@@ -74,7 +78,10 @@ fun SelectionTopBar(
     ) {
         SelectionTopBarContent(
             selectedCount = selectedCount,
-            onCancelSelection = onCancelSelection,
+            onCancelSelection = {
+                view?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                onCancelSelection()
+            },
             successMessage = successMessage
         )
     }
