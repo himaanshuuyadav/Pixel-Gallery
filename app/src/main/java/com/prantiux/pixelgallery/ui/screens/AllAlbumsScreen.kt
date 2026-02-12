@@ -32,27 +32,15 @@ import kotlinx.coroutines.launch
 fun AllAlbumsScreen(
     onNavigateToAlbum: (String) -> Unit,
     onNavigateBack: () -> Unit,
+    viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
+    val categorizedAlbums by viewModel.categorizedAlbums.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     
-    var allAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    // Load all albums on launch
-    LaunchedEffect(Unit) {
-        scope.launch {
-            try {
-                val repository = AlbumRepository(context)
-                val result = repository.loadCategorizedAlbums()
-                allAlbums = result.mainAlbums + result.otherAlbums
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                isLoading = false
-            }
-        }
+    val allAlbums = remember(categorizedAlbums) {
+        categorizedAlbums.mainAlbums + categorizedAlbums.otherAlbums
     }
     
     val navBarHeight = calculateFloatingNavBarHeight()
