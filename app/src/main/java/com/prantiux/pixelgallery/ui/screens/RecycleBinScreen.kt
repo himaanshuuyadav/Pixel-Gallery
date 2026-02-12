@@ -401,6 +401,7 @@ fun RecycleBinContent(
             selectedCount = selectedItems.size,
             onCancelSelection = { viewModel.exitTrashSelectionMode() },
             successMessage = deleteSuccessMessage ?: restoreSuccessMessage,
+            view = view,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
