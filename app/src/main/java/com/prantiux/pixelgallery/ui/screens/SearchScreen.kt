@@ -121,9 +121,9 @@ fun SearchScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.refresh(context)
-    }
+    // REFACTORED: Removed viewModel.refresh() call
+    // Data is already loaded by PhotosScreen on app startup
+    // SearchScreen now only observes StateFlows (images, videos)
     
     // Handle back gesture
     BackHandler(enabled = isSearchBarActive || searchQuery.isNotEmpty()) {
