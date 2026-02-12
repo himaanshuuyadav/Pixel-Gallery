@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -485,15 +487,23 @@ private fun BadgeTypeExpandableOption(
     onClick: () -> Unit,
     position: SettingPosition
 ) {
+    val haptic = LocalHapticFeedback.current
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
         SettingPosition.MIDDLE -> RoundedCornerShape(8.dp)
         SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
         else -> RoundedCornerShape(0.dp)
     }
+
+    val handleSelect = {
+        if (!isSelected) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        onClick()
+    }
     
     Surface(
-        onClick = onClick,
+        onClick = handleSelect,
         shape = shape,
         color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -617,14 +627,22 @@ private fun QualityOption(
     onClick: () -> Unit,
     position: SettingPosition
 ) {
+    val haptic = LocalHapticFeedback.current
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
         SettingPosition.BOTTOM -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
         else -> RoundedCornerShape(0.dp)
     }
+
+    val handleSelect = {
+        if (!isSelected) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        onClick()
+    }
     
     Surface(
-        onClick = onClick,
+        onClick = handleSelect,
         shape = shape,
         color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceContainerHighest
@@ -637,7 +655,7 @@ private fun QualityOption(
         ) {
             RadioButton(
                 selected = isSelected,
-                onClick = onClick
+                onClick = handleSelect
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
@@ -656,14 +674,22 @@ private fun CornerTypeOption(
     onClick: () -> Unit,
     position: SettingPosition
 ) {
+    val haptic = LocalHapticFeedback.current
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
         SettingPosition.BOTTOM -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
         else -> RoundedCornerShape(0.dp)
     }
+
+    val handleSelect = {
+        if (!isSelected) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        onClick()
+    }
     
     Surface(
-        onClick = onClick,
+        onClick = handleSelect,
         shape = shape,
         color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceContainerHighest
@@ -676,7 +702,7 @@ private fun CornerTypeOption(
         ) {
             RadioButton(
                 selected = isSelected,
-                onClick = onClick
+                onClick = handleSelect
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
