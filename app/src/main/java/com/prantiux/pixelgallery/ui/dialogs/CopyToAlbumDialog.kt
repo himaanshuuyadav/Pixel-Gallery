@@ -32,20 +32,17 @@ fun CopyToAlbumDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
     var isCopying by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     
-    // Load albums
-    LaunchedEffect(Unit) {
-        scope.launch {
-            isLoading = true
-            val categorized = albumRepository.loadCategorizedAlbums()
-            // Filter out albums in restricted directories (Android/)
-            val allAlbums = categorized.mainAlbums + categorized.otherAlbums
-            val restrictedAlbums = mutableListOf<String>()
-            albums = allAlbums.filter { album ->
+    // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
+    val cachedAlbums by viewModel.albums.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    
+    // Filter out albums in restricted directories (Android/)
+    val albums = remember(cachedAlbums) {
+        val restrictedAlbums = mutableListOf<String>()
+        cachedAlbums.filter { album ->
                 // Check if album has media items with paths
                 if (album.topMediaItems.isNotEmpty()) {
                     val samplePath = album.topMediaItems.first().path
@@ -59,12 +56,11 @@ fun CopyToAlbumDialog(
                     // If no sample path, allow it (shouldn't happen)
                     true
                 }
-            }
+        }.also {
             if (restrictedAlbums.isNotEmpty()) {
                 android.util.Log.d("CopyToAlbumDialog", "Filtered out ${restrictedAlbums.size} restricted albums: ${restrictedAlbums.joinToString()}")
             }
-            android.util.Log.d("CopyToAlbumDialog", "Available albums for copy: ${albums.size}")
-            isLoading = false
+            android.util.Log.d("CopyToAlbumDialog", "Available albums for copy: ${it.size}")
         }
     }
     
