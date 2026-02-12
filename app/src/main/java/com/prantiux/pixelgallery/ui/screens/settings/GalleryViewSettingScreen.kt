@@ -10,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,25 +25,21 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryViewSettingScreen(
-    albumRepository: AlbumRepository,
+    viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     settingsDataStore: SettingsDataStore,
     onBackClick: () -> Unit = {}
 ) {
-    var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
+    val categorizedAlbums by viewModel.categorizedAlbums.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    
+    val albums = remember(categorizedAlbums) {
+        categorizedAlbums.mainAlbums + categorizedAlbums.otherAlbums
+    }
+    
     var selectedAlbums by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isInitialized by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
-    
-    // Load albums once
-    LaunchedEffect(Unit) {
-        scope.launch {
-            isLoading = true
-            val categorized = albumRepository.loadCategorizedAlbums()
-            albums = categorized.mainAlbums + categorized.otherAlbums
-            isLoading = false
-        }
-    }
     
     // Categorize albums into system and user-created
     val systemAlbums = remember(albums) {
@@ -222,15 +220,23 @@ private fun AlbumCheckboxCard(
     position: SettingPosition,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     val shape = when (position) {
         SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
         SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
         SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
         SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
     }
+
+    val handleCheckedChange: (Boolean) -> Unit = { newValue ->
+        if (newValue != isChecked) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        onCheckedChange(newValue)
+    }
     
     Surface(
-        onClick = { onCheckedChange(!isChecked) },
+        onClick = { handleCheckedChange(!isChecked) },
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.fillMaxWidth()
@@ -271,7 +277,7 @@ private fun AlbumCheckboxCard(
             // Checkbox
             Checkbox(
                 checked = isChecked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = { handleCheckedChange(it) },
                 colors = CheckboxDefaults.colors(
                     checkedColor = MaterialTheme.colorScheme.primary,
                     uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
