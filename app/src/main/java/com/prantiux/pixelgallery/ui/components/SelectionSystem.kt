@@ -37,6 +37,7 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
  * @param mediaType The type of media source ("photos", "album", "favorites", etc.)
  * @param albumId The album ID (for album-specific views)
  * @param index The index of the item in the list
+ * @param view The view for haptic feedback (optional)
  */
 fun handleMediaItemClick(
     isSelectionMode: Boolean,
@@ -45,13 +46,16 @@ fun handleMediaItemClick(
     mediaType: String,
     albumId: String,
     index: Int,
-    bounds: androidx.compose.ui.geometry.Rect? = null
+    bounds: androidx.compose.ui.geometry.Rect? = null,
+    view: View? = null
 ) {
     if (isSelectionMode) {
-        // Selection mode: toggle selection
+        // Selection mode: toggle selection with haptic
+        view?.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         viewModel.toggleSelection(item)
     } else {
-        // Normal mode: open overlay with animation
+        // Normal mode: open overlay with animation and haptic
+        view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         val thumbnailBounds = bounds?.let {
             com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
                 left = it.left,
