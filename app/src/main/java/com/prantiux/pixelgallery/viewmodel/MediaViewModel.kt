@@ -6,12 +6,18 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.data.AppDatabase
 import com.prantiux.pixelgallery.data.FavoriteEntity
+import com.prantiux.pixelgallery.data.MediaEntity
 import com.prantiux.pixelgallery.data.MediaRepository
+import com.prantiux.pixelgallery.data.MediaSyncManager
 import com.prantiux.pixelgallery.data.RecentSearchesDataStore
 import com.prantiux.pixelgallery.data.SettingsDataStore
 import com.prantiux.pixelgallery.ml.ImageLabelWorker
@@ -22,6 +28,7 @@ import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.search.SearchResultFilter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +48,7 @@ class MediaViewModel : ViewModel() {
     private lateinit var recentSearchesDataStore: RecentSearchesDataStore
     private lateinit var settingsDataStore: SettingsDataStore
     private lateinit var database: AppDatabase
+    private var mediaSyncManager: MediaSyncManager? = null
 
     private val _images = MutableStateFlow<List<MediaItem>>(emptyList())
     val images: StateFlow<List<MediaItem>> = _images.asStateFlow()
@@ -68,8 +76,76 @@ class MediaViewModel : ViewModel() {
     val smartAlbumThumbnailCache: SnapshotStateMap<String, android.net.Uri?>
         get() = _smartAlbumThumbnailCache
 
-    private val _categorizedAlbums = MutableStateFlow<CategorizedAlbums?>(null)
-    val categorizedAlbums: StateFlow<CategorizedAlbums?> = _categorizedAlbums.asStateFlow()
+    // REFACTORED: Now non-nullable and always derived from cached media
+    private val _categorizedAlbums = MutableStateFlow<CategorizedAlbums>(CategorizedAlbums(emptyList(), emptyList()))
+    val categorizedAlbums: StateFlow<CategorizedAlbums> = _categorizedAlbums.asStateFlow()
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // PAGING 3: Memory-efficient scrolling for large galleries
+    // ═══════════════════════════════════════════════════════════════════
+    // These will be lazily initialized when database is ready
+    private var _mediaAllPagingFlow: kotlinx.coroutines.flow.Flow<PagingData<MediaEntity>>? = null
+    private var _allImagesPagingFlow: kotlinx.coroutines.flow.Flow<PagingData<MediaEntity>>? = null
+    private var _allVideosPagingFlow: kotlinx.coroutines.flow.Flow<PagingData<MediaEntity>>? = null
+    
+    /**
+     * PagingData<MediaEntity> for all media items
+     * Pager config: 60 items per page, 20 items prefetch
+     * Memory efficient - only keeps ~180 items loaded at once
+     */
+    fun getMediaAllPagingFlow(): kotlinx.coroutines.flow.Flow<PagingData<MediaEntity>> {
+        if (_mediaAllPagingFlow == null && ::database.isInitialized) {
+            _mediaAllPagingFlow = Pager(
+                config = PagingConfig(
+                    pageSize = 60,
+                    prefetchDistance = 20,
+                    enablePlaceholders = false,
+                    initialLoadSize = 60
+                ),
+                pagingSourceFactory = { database.mediaDao().pagingSourceAllMedia() }
+            ).flow
+                .cachedIn(viewModelScope)
+        }
+        return _mediaAllPagingFlow ?: kotlinx.coroutines.flow.emptyFlow()
+    }
+    
+    /**
+     * PagingData<MediaEntity> for images only
+     */
+    fun getAllImagesPagingFlow(): kotlinx.coroutines.flow.Flow<PagingData<MediaEntity>> {
+        if (_allImagesPagingFlow == null && ::database.isInitialized) {
+            _allImagesPagingFlow = Pager(
+                config = PagingConfig(
+                    pageSize = 60,
+                    prefetchDistance = 20,
+                    enablePlaceholders = false,
+                    initialLoadSize = 60
+                ),
+                pagingSourceFactory = { database.mediaDao().pagingSourceImages() }
+            ).flow
+                .cachedIn(viewModelScope)
+        }
+        return _allImagesPagingFlow ?: kotlinx.coroutines.flow.emptyFlow()
+    }
+    
+    /**
+     * PagingData<MediaEntity> for videos only
+     */
+    fun getAllVideosPagingFlow(): kotlinx.coroutines.flow.Flow<PagingData<MediaEntity>> {
+        if (_allVideosPagingFlow == null && ::database.isInitialized) {
+            _allVideosPagingFlow = Pager(
+                config = PagingConfig(
+                    pageSize = 60,
+                    prefetchDistance = 20,
+                    enablePlaceholders = false,
+                    initialLoadSize = 60
+                ),
+                pagingSourceFactory = { database.mediaDao().pagingSourceVideos() }
+            ).flow
+                .cachedIn(viewModelScope)
+        }
+        return _allVideosPagingFlow ?: kotlinx.coroutines.flow.emptyFlow()
+    }
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -217,6 +293,8 @@ class MediaViewModel : ViewModel() {
     private val _overlayState = MutableStateFlow(MediaOverlayState())
     val overlayState: StateFlow<MediaOverlayState> = _overlayState.asStateFlow()
 
+    // REFACTORED: Single source of truth for all media
+    // All tabs derive their data from these cached lists
     private var allImages = listOf<MediaItem>()
     private var allVideos = listOf<MediaItem>()
 
@@ -227,6 +305,18 @@ class MediaViewModel : ViewModel() {
         settingsDataStore = SettingsDataStore(context)
         database = AppDatabase.getDatabase(context)
         
+        // Initialize MediaSyncManager with callback to incremental sync
+        mediaSyncManager = MediaSyncManager(
+            context = context,
+            database = database,
+            repository = repository,
+            settingsDataStore = settingsDataStore,
+            onSyncTriggered = {
+                // When ContentObserver detects changes, perform incremental sync
+                performIncrementalSyncInBackground()
+            }
+        )
+        
         // Load favorite IDs from database
         viewModelScope.launch {
             try {
@@ -234,6 +324,47 @@ class MediaViewModel : ViewModel() {
                 _favoriteIds.value = ids.toSet()
             } catch (e: Exception) {
                 // Ignore errors
+            }
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // INSTANT STARTUP: Load from Room DB first
+        // ═══════════════════════════════════════════════════════════════════
+        viewModelScope.launch {
+            try {
+                val cachedCount = database.mediaDao().getCount()
+                if (cachedCount > 0) {
+                    // Database has cached data - load instantly (0-50ms)
+                    // NO LOADER! Just populate UI from cache
+                    android.util.Log.d("MediaViewModel", "Loading $cachedCount items from cache...")
+                    val start = System.currentTimeMillis()
+                    
+                    // CRITICAL: Don't set _isLoading to true
+                    _isLoading.value = false
+                    
+                    loadFromDatabase()
+                    
+                    val elapsed = System.currentTimeMillis() - start
+                    android.util.Log.d("MediaViewModel", "Cache loaded in ${elapsed}ms - UI ready (no loader)")
+                    
+                    // Register ContentObserver to watch for changes
+                    mediaSyncManager?.registerObserver(viewModelScope)
+                    
+                    // Start background MediaStore sync (non-blocking)
+                    viewModelScope.launch {
+                        backgroundSyncMediaStore(context)
+                    }
+                } else {
+                    // First launch - show loader and do normal MediaStore query
+                    android.util.Log.d("MediaViewModel", "Cache empty - performing initial MediaStore query with loader")
+                    _isLoading.value = true
+                    
+                    refreshInBackground(context)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MediaViewModel", "Error loading cache, falling back to MediaStore", e)
+                _isLoading.value = true
+                refreshInBackground(context)
             }
         }
         
@@ -289,6 +420,141 @@ class MediaViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Load media from Room database (instant startup - 0-50ms)
+     * 
+     * This method populates all StateFlows from cached database data without
+     * querying MediaStore. Called during app startup if database is not empty.
+     */
+    private suspend fun loadFromDatabase() {
+        try {
+            // Read all cached media from database
+            val cachedEntities = database.mediaDao().getAllMedia()
+            
+            // Convert entities to MediaItem domain models
+            val cachedMedia = cachedEntities.map { it.toMediaItem() }
+            
+            // Split into images and videos
+            allImages = cachedMedia.filter { !it.isVideo }
+            allVideos = cachedMedia.filter { it.isVideo }
+            
+            // Populate all StateFlows
+            _allImagesUnfiltered.value = allImages
+            _allVideosUnfiltered.value = allVideos
+            _allMediaCached.value = cachedMedia
+            
+            // Generate albums from cached data
+            val generatedAlbums = generateAlbumsFromCache(cachedMedia)
+            _albums.value = generatedAlbums
+            
+            // Categorize albums
+            val categorized = categorizeAlbumsFromCache(generatedAlbums)
+            _categorizedAlbums.value = categorized
+            
+            // Apply current sort/filter settings
+            applySorting()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MediaViewModel", "Error loading from database", e)
+            throw e
+        }
+    }
+    
+    /**
+     * Background MediaStore sync (non-blocking)
+     * 
+     * Compares MediaStore with database cache and performs incremental updates:
+     * 1. Query MediaStore for current media
+     * 2. Detect new items (in MediaStore but not in DB)
+     * 3. Detect deleted items (in DB but not in MediaStore)
+     * 4. Update database (insert new, delete removed)
+     * 5. Refresh UI if changes detected
+     * 
+     * This runs in background after instant UI load from database.
+     */
+    private suspend fun backgroundSyncMediaStore(context: Context) {
+        try {
+            android.util.Log.d("MediaViewModel", "Starting background MediaStore sync...")
+            val start = System.currentTimeMillis()
+            
+            // Query MediaStore for current media
+            val mediaStoreImages = repository.loadImages()
+            val mediaStoreVideos = repository.loadVideos()
+            val mediaStoreAll = mediaStoreImages + mediaStoreVideos
+            
+            // Get all cached media IDs from database
+            val cachedIds = database.mediaDao().getAllMediaIds().toSet()
+            
+            // Find new items (in MediaStore but not in DB)
+            val newItems = mediaStoreAll.filter { !cachedIds.contains(it.id) }
+            
+            // Find deleted items (in DB but not in MediaStore)
+            val mediaStoreIds = mediaStoreAll.map { it.id }.toSet()
+            val deletedIds = cachedIds - mediaStoreIds
+            
+            val hasChanges = newItems.isNotEmpty() || deletedIds.isNotEmpty()
+            
+            if (hasChanges) {
+                android.util.Log.d("MediaViewModel", "Sync: +${newItems.size} new, -${deletedIds.size} deleted")
+                
+                // Update database
+                if (newItems.isNotEmpty()) {
+                    val newEntities = newItems.map { MediaEntity.fromMediaItem(it) }
+                    database.mediaDao().upsertMedia(newEntities)
+                }
+                if (deletedIds.isNotEmpty()) {
+                    database.mediaDao().deleteByIds(deletedIds.toList())
+                }
+                
+                // Update in-memory cache and StateFlows
+                allImages = mediaStoreImages
+                allVideos = mediaStoreVideos
+                
+                _allImagesUnfiltered.value = allImages
+                _allVideosUnfiltered.value = allVideos
+                _allMediaCached.value = mediaStoreAll
+                
+                // Regenerate albums
+                val generatedAlbums = generateAlbumsFromCache(mediaStoreAll)
+                _albums.value = generatedAlbums
+                
+                val categorized = categorizeAlbumsFromCache(generatedAlbums)
+                _categorizedAlbums.value = categorized
+                
+                // Apply current sort/filter
+                applySorting()
+                
+                val elapsed = System.currentTimeMillis() - start
+                android.util.Log.d("MediaViewModel", "Background sync complete in ${elapsed}ms")
+            } else {
+                val elapsed = System.currentTimeMillis() - start
+                android.util.Log.d("MediaViewModel", "No changes detected - cache up to date (${elapsed}ms)")
+            }
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MediaViewModel", "Error in background sync", e)
+        }
+    }
+
+    /**
+     * REFACTORED: Single MediaStore query that populates ALL data structures
+     * 
+     * Flow:
+     * 1. Query MediaStore ONCE (images + videos)
+     * 2. Store raw results in allImages/allVideos (private cache)
+     * 3. Update Room database cache
+     * 4. Populate all StateFlows:
+     *    - _images (filtered/sorted for Photos tab)
+     *    - _videos (filtered/sorted for Photos tab)
+     *    - _allImagesUnfiltered (for album detail views)
+     *    - _allVideosUnfiltered (for album detail views)
+     *    - _allMediaCached (for search)
+     *    - _albums (derived from cache)
+     *    - _categorizedAlbums (derived from cache)
+     * 5. All tabs now read from StateFlows - NO additional MediaStore queries
+     * 
+     * This method is called on first launch (empty database) or manual refresh.
+     */
     fun refresh(context: Context) {
         if (!::repository.isInitialized) {
             initialize(context)
@@ -299,30 +565,108 @@ class MediaViewModel : ViewModel() {
             // Show indeterminate loading indicator for proper user feedback
             _isLoading.value = true
             try {
-                // Load all media
+                // ═══════════════════════════════════════════════════════════
+                // STEP 1: Query MediaStore ONCE
+                // ═══════════════════════════════════════════════════════════
                 allImages = repository.loadImages()
                 allVideos = repository.loadVideos()
-                val loadedAlbums = repository.loadAlbums()
+                val allMedia = allImages + allVideos
+                
+                // ═══════════════════════════════════════════════════════════
+                // STEP 2: Update Room database cache
+                // ═══════════════════════════════════════════════════════════
+                try {
+                    val mediaEntities = allMedia.map { MediaEntity.fromMediaItem(it) }
+                    database.mediaDao().replaceAll(mediaEntities)
+                    android.util.Log.d("MediaViewModel", "Database cache updated: ${mediaEntities.size} items")
+                } catch (e: Exception) {
+                    android.util.Log.e("MediaViewModel", "Error updating database cache", e)
+                    // Continue even if database update fails
+                }
+                
+                // ═══════════════════════════════════════════════════════════
+                // STEP 3: Populate all StateFlows from cached data
+                // ═══════════════════════════════════════════════════════════
                 
                 // Update unfiltered StateFlows for album detail views
                 _allImagesUnfiltered.value = allImages
                 _allVideosUnfiltered.value = allVideos
                 
-                // Load categorized albums
-                val categorized = albumRepository.loadCategorizedAlbums()
-
-                // Apply current sort
-                applySorting()
-                _albums.value = loadedAlbums
+                // Cache combined media for search (sorted once)
+                _allMediaCached.value = allMedia.sortedByDescending { it.dateAdded }
+                
+                // Derive albums from cached media (no additional MediaStore query)
+                val generatedAlbums = generateAlbumsFromCache(allMedia)
+                _albums.value = generatedAlbums
+                
+                // Categorize albums from cached data
+                val categorized = categorizeAlbumsFromCache(generatedAlbums)
                 _categorizedAlbums.value = categorized
                 
-                // Cache combined media for search (ONCE)
-                _allMediaCached.value = (allImages + allVideos).sortedByDescending { it.dateAdded }
+                // Apply current sort/filter to populate Photos tab data
+                applySorting()
+                
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
                 _isLoading.value = false
             }
+        }
+    }
+    
+    /**
+     * Internal refresh method for first-launch scenario (shows loader)
+     * Called from initialize() when cache is empty
+     * This is separate from refresh() to properly manage loading state
+     */
+    private suspend fun refreshInBackground(context: Context) {
+        try {
+            // ═══════════════════════════════════════════════════════════
+            // STEP 1: Query MediaStore ONCE (first launch - full query)
+            // ═══════════════════════════════════════════════════════════
+            allImages = repository.loadImages()
+            allVideos = repository.loadVideos()
+            val allMedia = allImages + allVideos
+            
+            // ═══════════════════════════════════════════════════════════
+            // STEP 2: Update Room database cache
+            // ═══════════════════════════════════════════════════════════
+            try {
+                val mediaEntities = allMedia.map { MediaEntity.fromMediaItem(it) }
+                database.mediaDao().replaceAll(mediaEntities)
+                android.util.Log.d("MediaViewModel", "Database cache created on first launch: ${mediaEntities.size} items")
+            } catch (e: Exception) {
+                android.util.Log.e("MediaViewModel", "Error creating database cache", e)
+                // Continue even if database update fails
+            }
+            
+            // ═══════════════════════════════════════════════════════════
+            // STEP 3: Populate all StateFlows from cached data
+            // ═══════════════════════════════════════════════════════════
+            
+            // Update unfiltered StateFlows for album detail views
+            _allImagesUnfiltered.value = allImages
+            _allVideosUnfiltered.value = allVideos
+            
+            // Cache combined media for search (sorted once)
+            _allMediaCached.value = allMedia.sortedByDescending { it.dateAdded }
+            
+            // Derive albums from cached media (no additional MediaStore query)
+            val generatedAlbums = generateAlbumsFromCache(allMedia)
+            _albums.value = generatedAlbums
+            
+            // Categorize albums from cached data
+            val categorized = categorizeAlbumsFromCache(generatedAlbums)
+            _categorizedAlbums.value = categorized
+            
+            // Apply current sort/filter to populate Photos tab data
+            applySorting()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MediaViewModel", "Error in refreshInBackground", e)
+            e.printStackTrace()
+        } finally {
+            _isLoading.value = false
         }
     }
 
@@ -1107,4 +1451,90 @@ class MediaViewModel : ViewModel() {
             }
         }
     }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // REFACTORED METHODS: Generate albums from cached media
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /**
+     * Generate albums from cached media list (no MediaStore query)
+     * 
+     * This method groups media by bucketId and creates Album objects.
+     * Used by refresh() to populate _albums StateFlow from cached data.
+     * 
+     * @param media Combined list of images and videos from cache
+     * @return List of albums sorted by item count (descending)
+     */
+    private fun generateAlbumsFromCache(media: List<MediaItem>): List<Album> {
+        if (media.isEmpty()) return emptyList()
+        
+        return media
+            .groupBy { it.bucketId }
+            .map { (bucketId, items) ->
+                Album(
+                    id = bucketId,
+                    name = items.first().bucketName,
+                    coverUri = items.firstOrNull()?.uri,
+                    itemCount = items.size,
+                    bucketDisplayName = items.first().bucketName,
+                    topMediaUris = items.take(6).map { it.uri },
+                    topMediaItems = items.take(6)
+                )
+            }
+            .sortedByDescending { it.itemCount }
+    }
+    
+    /**
+     * Categorize albums into main (top 4) and other sections
+     * 
+     * @param albums List of albums generated from cache
+     * @return CategorizedAlbums with mainAlbums and otherAlbums
+     */
+    private fun categorizeAlbumsFromCache(albums: List<Album>): CategorizedAlbums {
+        // Top 4 albums go to main section
+        val mainAlbums = albums.take(4)
+        
+        // Remaining albums go to other section
+        val otherAlbums = albums.drop(4)
+        
+        return CategorizedAlbums(
+            mainAlbums = mainAlbums,
+            otherAlbums = otherAlbums
+        )
+    }
+    
+    /**
+     * Cleanup resources when ViewModel is cleared
+     * Unregisters ContentObserver to prevent memory leaks
+     */
+    override fun onCleared() {
+        super.onCleared()
+        mediaSyncManager?.unregisterObserver()
+    }
+    
+    /**
+     * Perform incremental sync in background without blocking UI
+     * Called when ContentObserver detects media changes
+     * Uses lastSyncTimestamp to only query new items
+     */
+    private fun performIncrementalSyncInBackground() {
+        viewModelScope.launch {
+            try {
+                val lastSyncTimestamp = settingsDataStore.lastSyncTimestampFlow.collect { timestamp ->
+                    android.util.Log.d("MediaViewModel", "Performing incremental sync from timestamp: $timestamp")
+                    
+                    // Perform incremental sync (only new items)
+                    mediaSyncManager?.performIncrementalSync(timestamp)
+                    
+                    // Reload data from updated database
+                    loadFromDatabase()
+                    
+                    android.util.Log.d("MediaViewModel", "Incremental sync complete - UI updated")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MediaViewModel", "Error in performIncrementalSyncInBackground", e)
+            }
+        }
+    }
 }
+
