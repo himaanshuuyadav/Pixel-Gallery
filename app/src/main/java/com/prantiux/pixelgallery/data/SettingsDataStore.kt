@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -43,6 +44,8 @@ class SettingsDataStore(private val context: Context) {
         private val KEEP_SCREEN_ON_KEY = booleanPreferencesKey("keep_screen_on")
         private val MUTE_BY_DEFAULT_KEY = booleanPreferencesKey("mute_by_default")
         private val SHOW_CONTROLS_ON_TAP_KEY = booleanPreferencesKey("show_controls_on_tap")
+        // Media sync settings
+        private val LAST_SYNC_TIMESTAMP_KEY = longPreferencesKey("last_sync_timestamp")
     }
     
     /**
@@ -474,6 +477,25 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveShowControlsOnTap(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[SHOW_CONTROLS_ON_TAP_KEY] = enabled
+        }
+    }
+    
+    /**
+     * Get last MediaStore sync timestamp as Flow (milliseconds since epoch)
+     * Used for incremental sync - only query MediaStore items added after this timestamp
+     */
+    val lastSyncTimestampFlow: Flow<Long> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[LAST_SYNC_TIMESTAMP_KEY] ?: 0L
+        }
+    
+    /**
+     * Save last MediaStore sync timestamp
+     * Call this after successful background sync to enable incremental sync next time
+     */
+    suspend fun saveLastSyncTimestamp(timestamp: Long) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[LAST_SYNC_TIMESTAMP_KEY] = timestamp
         }
     }
 }
