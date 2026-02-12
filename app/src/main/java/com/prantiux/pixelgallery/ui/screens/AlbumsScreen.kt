@@ -77,41 +77,29 @@ fun AlbumsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    var categorizedAlbums by remember { mutableStateOf<CategorizedAlbums?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
+    // REFACTORED: Use ViewModel's cached categorized albums instead of querying MediaStore
+    // This StateFlow is populated by viewModel.refresh() in PhotosScreen
+    val categorizedAlbums by viewModel.categorizedAlbums.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
     var showReorderBottomSheet by remember { mutableStateOf(false) }
 
-    // Load albums on launch
-    LaunchedEffect(Unit) {
-        scope.launch {
-            try {
-                // Material 3 Expressive: Album categorization takes 200ms-1s (SHORT operation)
-                // Show indeterminate loading indicator for proper user feedback
-                val repository = AlbumRepository(context)
-                val result = repository.loadCategorizedAlbums()
-                categorizedAlbums = result
-                selectedMainAlbumIndex = 0
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                isLoading = false
-            }
-        }
-    }
+    // No LaunchedEffect needed - data is already loaded by ViewModel
+    // Albums are derived from cached media in viewModel.refresh()
 
     Box(modifier = modifier.fillMaxSize()) {
         // Only show "no albums" if loading is complete AND still no albums
         // This prevents showing "no albums" briefly during initial load
-        if (!isLoading && (categorizedAlbums == null || categorizedAlbums!!.mainAlbums.isEmpty())) {
+        if (!isLoading && categorizedAlbums.mainAlbums.isEmpty()) {
             Text(
                 text = "No albums found",
                 modifier = Modifier.align(Alignment.Center),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-        } else if (!isLoading && categorizedAlbums != null) {
-            val albums = categorizedAlbums!!
+        } else if (!isLoading) {
+            val albums = categorizedAlbums
             val navBarHeight = calculateFloatingNavBarHeight()
             val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
             val backgroundColor = MaterialTheme.colorScheme.surface
