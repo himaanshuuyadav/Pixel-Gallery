@@ -472,6 +472,7 @@ fun PhotosContent(
                 selectedCount = selectedItems.size,
                 onCancelSelection = { viewModel.exitSelectionMode() },
                 successMessage = copySuccessMessage ?: moveSuccessMessage ?: deleteSuccessMessage,
+                view = view,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = navBarHeight) // No gap - connects directly to nav bar
