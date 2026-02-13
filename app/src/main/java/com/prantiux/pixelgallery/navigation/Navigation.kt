@@ -88,9 +88,9 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object DebugSetting : Screen("debug_setting", "Debug")
 }
 
-// All animations now handled by Material 3 Expressive motion system:
-// - Startup: AnimatedRootContent in AppNavigation wrapper
-// - Tab switches: AnimatedTabContentWithMotion in AppNavigation wrapper
+// Tab switching and startup animations have been removed.
+// - Startup: AnimatedRootContent renders content immediately
+// - Tab switches: AnimatedTabContentWithMotion renders tabs immediately
 
 /**
  * Draws a solid background behind the system navigation bar.
