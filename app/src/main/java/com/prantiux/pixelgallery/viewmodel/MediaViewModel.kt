@@ -317,21 +317,34 @@ class MediaViewModel : ViewModel() {
      * 4. All tabs now read from StateFlows - NO additional MediaStore queries
      * 5. Optional: Start background sync for future updates
      */
+    fun isMediaEmpty(): Boolean {
+        return _allImagesUnfiltered.value.isEmpty() && _allVideosUnfiltered.value.isEmpty()
+    }
+
     fun refresh(context: Context) {
         if (!::repository.isInitialized) {
             initialize(context)
         }
         
         viewModelScope.launch {
-            // Material 3 Expressive: MediaStore queries take 200ms-2s (SHORT operation)
-            // Show indeterminate loading indicator for proper user feedback
+            // Defensive guard: Prevent overlapping loads
+            if (_isLoading.value) {
+                android.util.Log.d("MediaLoad", "Load skipped (already loading)")
+                return@launch
+            }
+            
             _isLoading.value = true
+            android.util.Log.d("MediaLoad", "Media load START")
+            
             try {
                 // ═══════════════════════════════════════════════════════════
                 // STEP 1: Query MediaStore ONCE
                 // ═══════════════════════════════════════════════════════════
                 allImages = repository.loadImages()
                 allVideos = repository.loadVideos()
+                
+                val totalItems = allImages.size + allVideos.size
+                android.util.Log.d("MediaLoad", "Media load END ($totalItems items)")
                 
                 // ═══════════════════════════════════════════════════════════
                 // STEP 2: Populate all StateFlows from cached data
@@ -361,7 +374,7 @@ class MediaViewModel : ViewModel() {
                 startBackgroundSync(context)
                 
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("MediaLoad", "Error loading media", e)
             } finally {
                 _isLoading.value = false
             }
