@@ -79,7 +79,7 @@ fun PhotosScreen(
     val permissionsState = rememberMultiplePermissionsState(permissions)
 
     LaunchedEffect(permissionsState.allPermissionsGranted) {
-        if (permissionsState.allPermissionsGranted) {
+        if (permissionsState.allPermissionsGranted && viewModel.isMediaEmpty()) {
             viewModel.refresh(context)
         }
     }
@@ -133,13 +133,7 @@ fun PhotosContent(
     var totalPanDistance by remember { mutableStateOf(0f) }
     
     // Log initial gesture state
-    LaunchedEffect(pinchGestureEnabled, isSelectionMode) {
-        Log.d("PhotosGesture", "=== Gesture State ===")
-        Log.d("PhotosGesture", "Pinch gesture enabled: $pinchGestureEnabled")
-        Log.d("PhotosGesture", "Selection mode: $isSelectionMode")
-        Log.d("PhotosGesture", "Grid type: $gridType")
-        Log.d("PhotosGesture", "Gesture will work: ${pinchGestureEnabled && !isSelectionMode}")
-    }
+    // Removed verbose gesture logs
     
     // Transformable state for pinch gesture detection
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
@@ -150,8 +144,6 @@ fun PhotosContent(
             
             cumulativeScale *= zoomChange
             gestureInProgress = true
-            
-            Log.d("PhotosGesture", "Gesture: zoom=$zoomChange, pan=$panMagnitude, totalPan=$totalPanDistance, scale=$cumulativeScale")
         }
     }
     
@@ -161,12 +153,9 @@ fun PhotosContent(
             // Only trigger if pan distance is minimal (< 100px) - meaning it's a pinch, not a scroll
             val isPinchGesture = totalPanDistance < 100f
             
-            Log.d("PhotosGesture", "Checking - scale: $cumulativeScale, pan: $totalPanDistance, isPinch: $isPinchGesture")
-            
             if (isPinchGesture) {
                 // Zoom out (scale < 0.8) on Day view -> Switch to Month view
                 if (cumulativeScale < 0.8f && gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY) {
-                    Log.d("PhotosGesture", "✓ Switching to MONTH view (zoomed out)")
                     viewModel.setGridType(com.prantiux.pixelgallery.viewmodel.GridType.MONTH)
                     cumulativeScale = 1f
                     gestureInProgress = false
@@ -174,7 +163,6 @@ fun PhotosContent(
                 }
                 // Zoom in (scale > 1.2) on Month view -> Switch to Day view
                 else if (cumulativeScale > 1.2f && gridType == com.prantiux.pixelgallery.viewmodel.GridType.MONTH) {
-                    Log.d("PhotosGesture", "✓ Switching to DAY view (zoomed in)")
                     viewModel.setGridType(com.prantiux.pixelgallery.viewmodel.GridType.DAY)
                     cumulativeScale = 1f
                     gestureInProgress = false
@@ -187,7 +175,6 @@ fun PhotosContent(
     // Reset scale when touch is released
     LaunchedEffect(transformableState.isTransformInProgress) {
         if (!transformableState.isTransformInProgress && gestureInProgress) {
-            Log.d("PhotosGesture", "Touch released - scale: $cumulativeScale, pan: $totalPanDistance")
             cumulativeScale = 1f
             gestureInProgress = false
             totalPanDistance = 0f
@@ -203,20 +190,25 @@ fun PhotosContent(
     // Track if initial load is complete - only show loader on FIRST load after permission grant
     // Initialize based on whether we already have data
     var hasLoadedOnce by remember { mutableStateOf(images.isNotEmpty() || videos.isNotEmpty()) }
+    var previousIsLoading by remember { mutableStateOf(isLoading) }
     
-    LaunchedEffect(isLoading, images, videos) {
-        Log.d("PhotosScreenLoad", "State change - isLoading: $isLoading, images: ${images.size}, videos: ${videos.size}, hasLoadedOnce: $hasLoadedOnce")
-        
-        if (images.isNotEmpty() || videos.isNotEmpty()) {
-            hasLoadedOnce = true
-            Log.d("PhotosScreenLoad", "hasLoadedOnce set to true")
+    LaunchedEffect(isLoading) {
+        // Only set hasLoadedOnce when isLoading transitions from true -> false
+        // AND we have media items
+        // AND hasLoadedOnce is still false
+        if (previousIsLoading && !isLoading && !hasLoadedOnce) {
+            val totalMediaCount = images.size + videos.size
+            if (totalMediaCount > 0) {
+                hasLoadedOnce = true
+            }
         }
+        
+        // Update previous state for next comparison
+        previousIsLoading = isLoading
     }
     
     // Show loading when: loading AND (never loaded before OR lists are empty)
     val showLoading = isLoading && (!hasLoadedOnce || (images.isEmpty() && videos.isEmpty()))
-    
-    Log.d("PhotosScreenLoad", "Final decision - showLoading: $showLoading (isLoading: $isLoading, hasLoadedOnce: $hasLoadedOnce)")
     
     // Combine images and videos
     val allMedia = remember(images, videos) {
@@ -295,21 +287,18 @@ fun PhotosContent(
             // Never show on subsequent navigations to prevent UI jank
             // Show loading FIRST, only show "no media" after loading completes
             if (showLoading) {
-                Log.d("PhotosScreenLoad", "Showing loading indicator")
                 com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
                     modifier = Modifier.align(Alignment.Center),
                     size = 48.dp
                 )
             } else if (allMedia.isEmpty()) {
                 // Only show "no media" after loading is complete (when not loading)
-                Log.d("PhotosScreenLoad", "Showing 'No media found' (loading complete, no items)")
                 Text(
                     "No media found",
                     modifier = Modifier.align(Alignment.Center),
                     style = MaterialTheme.typography.bodyLarge
                 )
             } else {
-                Log.d("PhotosScreenLoad", "Showing media grid (${allMedia.size} items)")
                 LazyVerticalGrid(
                         columns = GridCells.Fixed(columnCount),
                         state = gridState,
@@ -355,7 +344,6 @@ fun PhotosContent(
                                     if (isSelectionMode) {
                                         // Show checkbox in selection mode
                                         val allSelected = group.items.all { selectedItems.contains(it) }
-                                        Log.d("PhotosScreen", "Selection mode - checkbox for ${group.displayDate}: allSelected=$allSelected")
                                         Box(
                                             modifier = Modifier
                                                 .size(24.dp)
