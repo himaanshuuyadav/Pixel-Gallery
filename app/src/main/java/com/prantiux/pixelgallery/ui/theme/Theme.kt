@@ -97,42 +97,22 @@ fun PixelGalleryTheme(
 ) {
     val context = LocalContext.current
     
-    // Log theme parameters
-    androidx.compose.runtime.LaunchedEffect(darkTheme, dynamicColor, amoledMode) {
-        android.util.Log.d("PixelGalleryTheme", "=== THEME APPLIED ===")
-        android.util.Log.d("PixelGalleryTheme", "darkTheme: $darkTheme")
-        android.util.Log.d("PixelGalleryTheme", "dynamicColor: $dynamicColor")
-        android.util.Log.d("PixelGalleryTheme", "amoledMode: $amoledMode")
-        android.util.Log.d("PixelGalleryTheme", "Android version: ${Build.VERSION.SDK_INT}")
-    }
-    
     // Prioritize dynamic colors from Android 12+ system
     val baseColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             try {
-                val scheme = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-                android.util.Log.d("PixelGalleryTheme", "Using DYNAMIC color scheme (${if (darkTheme) "dark" else "light"})")
-                android.util.Log.d("PixelGalleryTheme", "Dynamic surface color: #${Integer.toHexString(scheme.surface.toArgb())}")
-                scheme
+                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             } catch (e: Exception) {
                 // Fallback if dynamic colors fail
-                android.util.Log.w("PixelGalleryTheme", "Dynamic colors failed, using static scheme", e)
                 if (darkTheme) DarkColorScheme else LightColorScheme
             }
         }
-        darkTheme -> {
-            android.util.Log.d("PixelGalleryTheme", "Using STATIC DARK color scheme")
-            DarkColorScheme
-        }
-        else -> {
-            android.util.Log.d("PixelGalleryTheme", "Using STATIC LIGHT color scheme")
-            LightColorScheme
-        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
     }
     
     // Apply AMOLED mode (pure black) if enabled in dark theme
     val colorScheme = if (darkTheme && amoledMode) {
-        android.util.Log.d("PixelGalleryTheme", "Applying AMOLED mode (pure black)")
         baseColorScheme.copy(
             background = Color.Black,
             surface = Color.Black,
@@ -144,8 +124,6 @@ fun PixelGalleryTheme(
             surfaceContainerHighest = Color(0xFF2A2A2A)
         )
     } else {
-        android.util.Log.d("PixelGalleryTheme", "Using base color scheme (surface: #${Integer.toHexString(baseColorScheme.surface.toArgb())})")
-        android.util.Log.d("PixelGalleryTheme", "====================")
         baseColorScheme
     }
     
