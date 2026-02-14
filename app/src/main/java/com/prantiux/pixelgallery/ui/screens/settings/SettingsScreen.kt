@@ -87,6 +87,9 @@ fun SettingsScreen(
         
         // Interaction Section
         item {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        item {
             CategoryHeader("Interaction")
         }
         item {
@@ -117,6 +120,9 @@ fun SettingsScreen(
         
         // Storage and Privacy Section
         item {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        item {
             CategoryHeader("Storage and Privacy")
         }
         item {
@@ -146,6 +152,9 @@ fun SettingsScreen(
         }
         
         // Support Section
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         item {
             CategoryHeader("Support")
         }
