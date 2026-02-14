@@ -71,13 +71,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        Log.d(TAG, "=== SYSTEM BARS SETUP START ===")
-        Log.d(TAG, "Android SDK: ${Build.VERSION.SDK_INT}")
-        
         // We need edge-to-edge for proper content padding with statusBarsPadding()
         // BUT we want solid bar colors, not transparent
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        Log.d(TAG, "setDecorFitsSystemWindows = false (edge-to-edge enabled)")
         
         // CRITICAL: For solid system bar colors on Android 10+, we must set them AFTER edge-to-edge
         // and ensure contrast enforcement is disabled
@@ -93,14 +89,10 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         window.navigationBarColor = navBarColor
         
-        Log.d(TAG, "navigationBarColor set to: #${Integer.toHexString(navBarColor)} (BLACK)")
-        Log.d(TAG, "statusBarColor set to: #${Integer.toHexString(statusBarColor)} (BLACK)")
-        
         // Disable navigation bar contrast enforcement on Android Q+
         // This is CRITICAL - contrast enforcement can override our solid color with scrim
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
-            Log.d(TAG, "isNavigationBarContrastEnforced = false")
         }
         
         // IMPORTANT: Also clear any window flags that might cause transparency
@@ -112,19 +104,12 @@ class MainActivity : ComponentActivity() {
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
             @Suppress("DEPRECATION")
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
-            Log.d(TAG, "Cleared translucent flags, added FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS")
         }
         
         // Set light/dark status bar icons based on status bar color
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
         insetsController.isAppearanceLightStatusBars = false // Light icons for dark status bar
         insetsController.isAppearanceLightNavigationBars = false // Light icons for dark nav bar
-        Log.d(TAG, "isAppearanceLightStatusBars = false, isAppearanceLightNavigationBars = false")
-        
-        // Log final values to verify
-        Log.d(TAG, "FINAL statusBarColor: BLACK")
-        Log.d(TAG, "FINAL navigationBarColor: BLACK")
-        Log.d(TAG, "=== SYSTEM BARS SETUP END ===")
         
         // Configure Coil ImageLoader with aggressive caching for high-resolution images
         val imageLoader = ImageLoader.Builder(this)
@@ -276,28 +261,11 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemDark
             }
             
-            // Log theme state for debugging
-            LaunchedEffect(appTheme, isSystemDark, darkTheme) {
-                android.util.Log.d(TAG, "=== THEME STATE ===")
-                android.util.Log.d(TAG, "appTheme setting: $appTheme")
-                android.util.Log.d(TAG, "isSystemInDarkTheme: $isSystemDark")
-                android.util.Log.d(TAG, "Computed darkTheme: $darkTheme")
-                android.util.Log.d(TAG, "==================")
-            }
-            
             // Update navigation bar color based on theme
             // Use SideEffect to ensure it runs on every recomposition
             SideEffect {
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                 val navBarColor = if (darkTheme) android.graphics.Color.BLACK else android.graphics.Color.WHITE
-                
-                android.util.Log.d(TAG, "=== NAVIGATION BAR UPDATE ===")
-                android.util.Log.d(TAG, "darkTheme: $darkTheme")
-                android.util.Log.d(TAG, "appTheme: $appTheme")
-                android.util.Log.d(TAG, "isSystemDark: $isSystemDark")
-                android.util.Log.d(TAG, "Target color: ${if (darkTheme) "BLACK (#000000)" else "WHITE (#FFFFFF)"}")
-                @Suppress("DEPRECATION")
-                android.util.Log.d(TAG, "Current window.navigationBarColor BEFORE: #${Integer.toHexString(window.navigationBarColor)}")
                 
                 // On Android 15+, window.navigationBarColor may be ignored in edge-to-edge
                 // The actual color comes from NavigationBarBackground composable
@@ -308,15 +276,9 @@ class MainActivity : ComponentActivity() {
                 // CRITICAL: Set the appearance (light/dark icons) for proper contrast
                 insetsController.isAppearanceLightNavigationBars = !darkTheme
                 
-                @Suppress("DEPRECATION")
-                android.util.Log.d(TAG, "Current window.navigationBarColor AFTER: #${Integer.toHexString(window.navigationBarColor)}")
-                android.util.Log.d(TAG, "isAppearanceLightNavigationBars: ${!darkTheme}")
-                android.util.Log.d(TAG, "NOTE: On Android 15+, actual nav bar color comes from NavigationBarBackground composable")
-                
                 // Disable contrast enforcement to ensure solid color
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     window.isNavigationBarContrastEnforced = false
-                    android.util.Log.d(TAG, "isNavigationBarContrastEnforced: false")
                 }
                 android.util.Log.d(TAG, "===========================")
             }
