@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,8 +48,6 @@ import androidx.navigation.navArgument
 import com.prantiux.pixelgallery.ui.screens.*
 import com.prantiux.pixelgallery.ui.overlay.MediaOverlay
 import com.prantiux.pixelgallery.ui.animation.AnimatedRootContent
-import com.prantiux.pixelgallery.ui.animation.AnimatedTabContentWithMotion
-import com.prantiux.pixelgallery.ui.animation.MotionSpec
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -87,10 +86,8 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object PlaybackSetting : Screen("playback_setting", "Playback")
     object DebugSetting : Screen("debug_setting", "Debug")
 }
-
 // Tab switching and startup animations have been removed.
 // - Startup: AnimatedRootContent renders content immediately
-// - Tab switches: AnimatedTabContentWithMotion renders tabs immediately
 
 /**
  * Draws a solid background behind the system navigation bar.
@@ -111,20 +108,6 @@ fun NavigationBarBackground() {
     val backgroundColor = MaterialTheme.colorScheme.surface
     val density = LocalDensity.current
     val navBarHeight = WindowInsets.navigationBars.getBottom(density)
-    
-    // Log for debugging
-    androidx.compose.runtime.LaunchedEffect(navBarHeight, backgroundColor) {
-        Log.d("NavigationBarBackground", "=== NAV BAR BACKGROUND ===")
-        Log.d("NavigationBarBackground", "Height: ${navBarHeight}px")
-        Log.d("NavigationBarBackground", "MaterialTheme.colorScheme.surface: #${Integer.toHexString(backgroundColor.toArgb())}")
-        Log.d("NavigationBarBackground", "Color RGB: R=${backgroundColor.red}, G=${backgroundColor.green}, B=${backgroundColor.blue}")
-        if (navBarHeight == 0) {
-            Log.w("NavigationBarBackground", "⚠ Navigation bar height is 0 - background will not be visible")
-        } else {
-            Log.i("NavigationBarBackground", "✓ Background drawable created: ${navBarHeight}px tall")
-        }
-        Log.d("NavigationBarBackground", "========================")
-    }
     
     Spacer(
         modifier = Modifier
@@ -328,9 +311,23 @@ fun AppNavigation(
             else -> Screen.Photos.route
         }
     }
+
+    val activeRoute = currentRoute ?: startDestination
+    val isTabRoute = activeRoute in listOf(
+        Screen.Photos.route,
+        Screen.Albums.route,
+        Screen.Search.route
+    )
+
+    var previousRoute by remember { mutableStateOf<String?>(null) }
     
     // Track current tab changes
     androidx.compose.runtime.LaunchedEffect(currentRoute) {
+        if (currentRoute == previousRoute) return@LaunchedEffect
+        if (currentRoute != null) {
+            android.util.Log.d("TabSwitch", "$previousRoute → $currentRoute")
+            previousRoute = currentRoute
+        }
         when (currentRoute) {
             Screen.Photos.route -> onTabChanged("Photos")
             Screen.Albums.route -> onTabChanged("Albums")
@@ -352,15 +349,6 @@ fun AppNavigation(
         NavItem("delete", "Delete", FontIcons.Delete),
         NavItem("more", "More", FontIcons.MoreVert)
     )
-    
-    // State variable to track current selected tab for animation
-    var currentSelectedTab by remember { mutableStateOf(startDestination) }
-    
-    androidx.compose.runtime.LaunchedEffect(currentRoute) {
-        if (currentRoute != null && currentRoute in listOf(Screen.Photos.route, Screen.Albums.route, Screen.Search.route)) {
-            currentSelectedTab = currentRoute
-        }
-    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -452,17 +440,16 @@ fun AppNavigation(
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
-                AnimatedTabContentWithMotion(
-                    currentTab = currentSelectedTab,
-                    modifier = Modifier.fillMaxSize()
-                ) { selectedTab ->
-                    NavHost(
-                            navController = navController,
-                            startDestination = startDestination,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                    composable(
-                        route = Screen.Photos.route
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (activeRoute == Screen.Photos.route) 1f else 0f)
+                            .zIndex(if (activeRoute == Screen.Photos.route) 1f else 0f)
                     ) {
                         PhotosScreen(
                             viewModel = viewModel,
@@ -470,8 +457,11 @@ fun AppNavigation(
                         )
                     }
 
-                    composable(
-                        route = Screen.Albums.route
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (activeRoute == Screen.Albums.route) 1f else 0f)
+                            .zIndex(if (activeRoute == Screen.Albums.route) 1f else 0f)
                     ) {
                         AlbumsScreen(
                             onNavigateToAlbum = { albumId ->
@@ -490,17 +480,59 @@ fun AppNavigation(
                         )
                     }
 
-                    composable(
-                        route = Screen.AllAlbums.route
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (activeRoute == Screen.Search.route) 1f else 0f)
+                            .zIndex(if (activeRoute == Screen.Search.route) 1f else 0f)
                     ) {
-                        AllAlbumsScreen(
-                            onNavigateToAlbum = { albumId ->
-                                navController.navigate(Screen.AlbumDetail.createRoute(albumId))
-                            },
-                            onNavigateBack = { navController.popBackStack() },
-                            viewModel = viewModel
+                        SearchScreen(
+                            viewModel = viewModel,
+                            navController = navController,
+                            settingsDataStore = settingsDataStore
                         )
                     }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(if (isTabRoute) 0f else 2f)
+                ) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = startDestination,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        composable(
+                            route = Screen.Photos.route
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize())
+                        }
+
+                        composable(
+                            route = Screen.Albums.route
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize())
+                        }
+
+                        composable(
+                            route = Screen.Search.route
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize())
+                        }
+
+                        composable(
+                            route = Screen.AllAlbums.route
+                        ) {
+                            AllAlbumsScreen(
+                                onNavigateToAlbum = { albumId ->
+                                    navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                                },
+                                onNavigateBack = { navController.popBackStack() },
+                                viewModel = viewModel
+                            )
+                        }
 
                     composable(
                         route = Screen.RecycleBin.route
@@ -513,25 +545,15 @@ fun AppNavigation(
                         )
                     }
                     
-                    composable(
-                        route = Screen.Favorites.route
-                    ) {
-                        FavoritesScreen(
-                            viewModel = viewModel,
-                            onNavigateBack = { navController.popBackStack() },
-                            settingsDataStore = settingsDataStore
-                        )
-                    }
-
-                    composable(
-                        route = Screen.Search.route
-                    ) {
-                        SearchScreen(
-                            viewModel = viewModel, 
-                            navController = navController,
-                            settingsDataStore = settingsDataStore
-                        )
-                    }
+                        composable(
+                            route = Screen.Favorites.route
+                        ) {
+                            FavoritesScreen(
+                                viewModel = viewModel,
+                                onNavigateBack = { navController.popBackStack() },
+                                settingsDataStore = settingsDataStore
+                            )
+                        }
 
                     composable(
                         route = Screen.Settings.route
@@ -628,21 +650,22 @@ fun AppNavigation(
                         )
                     }
                     
-                    composable(
-                        route = Screen.SmartAlbumView.route,
-                        arguments = listOf(navArgument("albumId") { type = NavType.StringType })
-                    ) { backStackEntry ->
-                        val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
-                        SmartAlbumViewScreen(
-                            viewModel = viewModel,
-                            albumId = albumId,
-                            onNavigateBack = { navController.popBackStack() },
-                            onNavigateToViewer = { },
-                            settingsDataStore = settingsDataStore
-                        )
-                    }
+                        composable(
+                            route = Screen.SmartAlbumView.route,
+                            arguments = listOf(navArgument("albumId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
+                            SmartAlbumViewScreen(
+                                viewModel = viewModel,
+                                albumId = albumId,
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToViewer = { },
+                                settingsDataStore = settingsDataStore
+                            )
+                        }
                     }
                 }
+            }
             
             // Media overlay (always present, visibility controlled by state)
             // Wrapped in layout {} to prevent overlay from affecting photo grid scroll position
@@ -669,7 +692,6 @@ fun AppNavigation(
                         placeable?.place(0, 0)
                     }
                 }
-            }
             }
 
             // Animate navbar hide/show when overlay is visible or scrollbar is being dragged
@@ -779,7 +801,7 @@ fun AppNavigation(
                     } else {
                         bottomNavItems
                     },
-                    selectedRoute = currentRoute ?: Screen.Photos.route,
+                    selectedRoute = activeRoute,
                     onItemSelected = { item ->
                         if (isSelectionMode || item.route == "more") {
                             // Handle selection mode actions for any screen
@@ -799,14 +821,37 @@ fun AppNavigation(
                             }
                         }
                         if (!isSelectionMode) {
-                            if (item.route != (currentRoute ?: Screen.Photos.route)) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            }
-                            // Normal navigation
-                            navController.navigate(item.route) {
-                                popUpTo(Screen.Photos.route) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+                            when (item.route) {
+                                Screen.Photos.route -> {
+                                    if (activeRoute != Screen.Photos.route) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        navController.navigate(Screen.Photos.route) {
+                                            launchSingleTop = true
+                                            restoreState = true
+                                            popUpTo(startDestination) { saveState = true }
+                                        }
+                                    }
+                                }
+                                Screen.Albums.route -> {
+                                    if (activeRoute != Screen.Albums.route) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        navController.navigate(Screen.Albums.route) {
+                                            launchSingleTop = true
+                                            restoreState = true
+                                            popUpTo(startDestination) { saveState = true }
+                                        }
+                                    }
+                                }
+                                Screen.Search.route -> {
+                                    if (activeRoute != Screen.Search.route) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        navController.navigate(Screen.Search.route) {
+                                            launchSingleTop = true
+                                            restoreState = true
+                                            popUpTo(startDestination) { saveState = true }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -995,6 +1040,9 @@ fun AppNavigation(
                 }
             }
         }
-        }
     }
 }
+}
+
+
+
