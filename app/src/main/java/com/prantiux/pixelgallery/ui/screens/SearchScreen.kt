@@ -486,18 +486,49 @@ fun SearchScreen(
                     }
                     
                     val smartAlbumRows = smartAlbums.chunked(2)
+                    val isLoadingSmartAlbums = images.isNotEmpty() || videos.isNotEmpty() && smartAlbums.isEmpty()
 
                     LazyColumn(
                         state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
                     ) {
-                        // Smart Albums section (2-column grid)
-                        if (smartAlbums.isNotEmpty()) {
-                            item {
-                                SectionLabel("Suggested")
+                        // Smart Albums section (2-column grid) - Always show heading
+                        item {
+                            SectionLabel("Suggested")
+                        }
+                        
+                        // Show loading state or actual albums
+                        if (isLoadingSmartAlbums) {
+                            // Loading placeholders - 2 rows of 2 cards
+                            items(2) { rowIndex ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    repeat(2) {
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(32.dp),
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                    }
+                                }
+                                if (rowIndex == 0) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                }
                             }
-                            
+                        } else if (smartAlbums.isNotEmpty()) {
                             items(smartAlbumRows.size) { rowIndex ->
                                 val row = smartAlbumRows[rowIndex]
                                 Column {
@@ -533,10 +564,10 @@ fun SearchScreen(
                                     }
                                 }
                             }
-                            
-                            item {
-                                Spacer(modifier = Modifier.height(16.dp))
-                            }
+                        }
+                        
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
                         }
                         
                     }
