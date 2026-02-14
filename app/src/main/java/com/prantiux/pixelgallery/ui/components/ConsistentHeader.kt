@@ -38,14 +38,10 @@ fun SetStatusBarColor(color: Color) {
             // Set status bar color to match header
             @Suppress("DEPRECATION")
             window.statusBarColor = colorArgb
-            Log.d(TAG, "SetStatusBarColor: #${Integer.toHexString(colorArgb)}")
             
             // Calculate luminance to determine if icons should be light or dark
             val isLightStatusBar = ColorUtils.calculateLuminance(colorArgb) > 0.55
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = isLightStatusBar
-            Log.d(TAG, "isAppearanceLightStatusBars = $isLightStatusBar")
-        } else {
-            Log.w(TAG, "SetStatusBarColor: window is null, cannot set status bar color")
         }
     }
 }
