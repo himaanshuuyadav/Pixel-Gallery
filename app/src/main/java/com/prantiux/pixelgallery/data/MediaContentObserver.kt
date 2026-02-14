@@ -48,14 +48,12 @@ class MediaContentObserver(
             contentObserver = object : ContentObserver(handler) {
                 override fun onChange(selfChange: Boolean, uri: Uri?) {
                     super.onChange(selfChange, uri)
-                    Log.d(TAG, "MediaStore change detected: $uri")
                     
                     // Debounce: cancel previous job and schedule new one
                     // This prevents rapid-fire refresh calls when multiple files change
                     debounceJob?.cancel()
                     debounceJob = coroutineScope.launch {
                         delay(DEBOUNCE_MS)
-                        Log.d(TAG, "Calling onMediaChanged after debounce")
                         onMediaChanged()
                     }
                 }
@@ -89,7 +87,6 @@ class MediaContentObserver(
             if (contentObserver != null) {
                 context.contentResolver.unregisterContentObserver(contentObserver!!)
                 contentObserver = null
-                Log.d(TAG, "MediaStore observer unregistered")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering MediaStore observer", e)
