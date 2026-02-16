@@ -26,7 +26,8 @@ fun FavoritesScreen(
     onNavigateBack: () -> Unit,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
-    val favoriteItems by viewModel.favoriteItems.collectAsState()
+    // ROOM-FIRST: Use Room-based favorites flow
+    val favoriteItems by viewModel.favoritesFlow.collectAsState()
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
