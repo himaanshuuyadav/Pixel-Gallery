@@ -77,9 +77,9 @@ fun AlbumsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // REFACTORED: Use ViewModel's cached categorized albums instead of querying MediaStore
-    // This StateFlow is populated by viewModel.refresh() in PhotosScreen
-    val categorizedAlbums by viewModel.categorizedAlbums.collectAsState()
+    // ROOM-FIRST: Use Room-derived categorizedAlbumsFlow instead of MediaStore-derived categorizedAlbums
+    // This flow automatically updates when Room data changes (via MediaStore sync)
+    val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
