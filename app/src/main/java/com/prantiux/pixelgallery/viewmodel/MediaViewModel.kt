@@ -2,6 +2,8 @@ package com.prantiux.pixelgallery.viewmodel
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
+import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.ViewModel
@@ -12,21 +14,37 @@ import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.data.AppDatabase
 import com.prantiux.pixelgallery.data.FavoriteEntity
 import com.prantiux.pixelgallery.data.MediaContentObserver
+import com.prantiux.pixelgallery.data.MediaEntity
 import com.prantiux.pixelgallery.data.MediaRepository
 import com.prantiux.pixelgallery.data.RecentSearchesDataStore
 import com.prantiux.pixelgallery.data.SettingsDataStore
+import com.prantiux.pixelgallery.data.toMediaItem
+import com.prantiux.pixelgallery.data.toMediaItems
+import com.prantiux.pixelgallery.BuildConfig
 import com.prantiux.pixelgallery.ml.ImageLabelWorker
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
+import com.prantiux.pixelgallery.model.MediaGroup
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.search.SearchResultFilter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.SharingStarted
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 enum class SortMode {
     DATE_DESC, DATE_ASC, NAME_ASC, NAME_DESC, SIZE_DESC, SIZE_ASC
@@ -36,7 +54,24 @@ enum class GridType {
     DAY, MONTH
 }
 
+/**
+ * Holds computed media state after heavy processing
+ * Used to defer StateFlow updates until Main thread
+ */
+private data class ComputedMediaState(
+    val images: List<MediaItem>,
+    val videos: List<MediaItem>,
+    val combined: List<MediaItem>,
+    val albums: List<Album>,
+    val groupedMedia: List<MediaGroup>,
+    val groupingDurationMs: Long
+)
+
 class MediaViewModel : ViewModel() {
+    init {
+        Log.d("VM_INIT", "ViewModel constructor: Starting property initialization")
+    }
+    
     private lateinit var repository: MediaRepository
     private lateinit var albumRepository: AlbumRepository
     private lateinit var recentSearchesDataStore: RecentSearchesDataStore
@@ -44,23 +79,49 @@ class MediaViewModel : ViewModel() {
     private lateinit var database: AppDatabase
     private var mediaContentObserver: MediaContentObserver? = null
 
+    // ═════════════════════════════════════════════════════════════════════════════════
+    // DEPRECATED StateFlows: MediaStore-first architecture (DO NOT USE)
+    // ═════════════════════════════════════════════════════════════════════════════════
+    // Use Room-first flows instead (mediaFlow, imagesFlow, videosFlow, etc.)
+    // These are kept for backward compatibility during migration but will be removed.
+    // ═════════════════════════════════════════════════════════════════════════════════
+    
+    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
     private val _images = MutableStateFlow<List<MediaItem>>(emptyList())
+    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
     val images: StateFlow<List<MediaItem>> = _images.asStateFlow()
 
+    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
     private val _videos = MutableStateFlow<List<MediaItem>>(emptyList())
+    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
     val videos: StateFlow<List<MediaItem>> = _videos.asStateFlow()
     
-    // Unfiltered media for album detail views (not affected by gallery view settings)
+    @Deprecated("Use mediaFlow instead - Room-first architecture", ReplaceWith("mediaFlow"))
+    private val _sortedMedia = MutableStateFlow<List<MediaItem>>(emptyList())
+    @Deprecated("Use mediaFlow instead - Room-first architecture", ReplaceWith("mediaFlow"))
+    val sortedMedia: StateFlow<List<MediaItem>> = _sortedMedia.asStateFlow()
+
+    @Deprecated("Use groupedMediaFlow instead - Room-first architecture", ReplaceWith("groupedMediaFlow"))
+    private val _groupedMedia = MutableStateFlow<List<MediaGroup>>(emptyList())
+    @Deprecated("Use groupedMediaFlow instead - Room-first architecture", ReplaceWith("groupedMediaFlow"))
+    val groupedMedia: StateFlow<List<MediaGroup>> = _groupedMedia.asStateFlow()
+    
+    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
     private val _allImagesUnfiltered = MutableStateFlow<List<MediaItem>>(emptyList())
+    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
     val allImagesUnfiltered: StateFlow<List<MediaItem>> = _allImagesUnfiltered.asStateFlow()
     
+    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
     private val _allVideosUnfiltered = MutableStateFlow<List<MediaItem>>(emptyList())
+    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
     val allVideosUnfiltered: StateFlow<List<MediaItem>> = _allVideosUnfiltered.asStateFlow()
     
     private val _favoriteIds = MutableStateFlow<Set<Long>>(emptySet())
     val favoriteIds: StateFlow<Set<Long>> = _favoriteIds.asStateFlow()
     
+    @Deprecated("Use favoritesFlow instead - Room-first architecture", ReplaceWith("favoritesFlow"))
     private val _favoriteItems = MutableStateFlow<List<MediaItem>>(emptyList())
+    @Deprecated("Use favoritesFlow instead - Room-first architecture", ReplaceWith("favoritesFlow"))
     val favoriteItems: StateFlow<List<MediaItem>> = _favoriteItems.asStateFlow()
 
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
@@ -70,8 +131,9 @@ class MediaViewModel : ViewModel() {
     val smartAlbumThumbnailCache: SnapshotStateMap<String, android.net.Uri?>
         get() = _smartAlbumThumbnailCache
 
-    // REFACTORED: Now non-nullable and always derived from cached media
+    @Deprecated("Use categorizedAlbumsFlow instead - Room-first architecture", ReplaceWith("categorizedAlbumsFlow"))
     private val _categorizedAlbums = MutableStateFlow<CategorizedAlbums>(CategorizedAlbums(emptyList(), emptyList()))
+    @Deprecated("Use categorizedAlbumsFlow instead - Room-first architecture", ReplaceWith("categorizedAlbumsFlow"))
     val categorizedAlbums: StateFlow<CategorizedAlbums> = _categorizedAlbums.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -193,9 +255,11 @@ class MediaViewModel : ViewModel() {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    @Deprecated("Use searchMediaFlow(query) instead - Room-first architecture", ReplaceWith("searchMediaFlow(searchQuery.value)"))
     private val _searchResults = MutableStateFlow<SearchEngine.SearchResult>(
         SearchEngine.SearchResult(emptyList(), emptyList(), "")
     )
+    @Deprecated("Use searchMediaFlow(query) instead - Room-first architecture", ReplaceWith("searchMediaFlow(searchQuery.value)"))
     val searchResults: StateFlow<SearchEngine.SearchResult> = _searchResults.asStateFlow()
 
     private var searchJob: Job? = null
@@ -220,20 +284,238 @@ class MediaViewModel : ViewModel() {
     private val _overlayState = MutableStateFlow(MediaOverlayState())
     val overlayState: StateFlow<MediaOverlayState> = _overlayState.asStateFlow()
 
-    // REFACTORED: Single source of truth for all media
-    // All tabs derive their data from these cached lists
-    private var allImages = listOf<MediaItem>()
-    private var allVideos = listOf<MediaItem>()
+    // ═════════════════════════════════════════════════════════════════════════════════
+    // ROOM AS SINGLE SOURCE OF TRUTH (Phase 3 - ROOM FIRST CLEAN CUT)
+    // All media data flows from Room; MediaStore is for syncing only
+    // ═════════════════════════════════════════════════════════════════════════════════
+    
+    // Database ready state - triggers reactive reconnection of flows
+    private val _databaseReady = MutableStateFlow(false)
+    
+    // ─────────────────────────────────────────────────────────────────────────────────
+    // PRIMARY FLOW: Media from Room (sorted by user preference)
+    // ─────────────────────────────────────────────────────────────────────────────────
+    private val mediaEntitiesFlow: StateFlow<List<MediaEntity>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                Log.d("VM_FLOW", "Database not ready yet")
+                flowOf(emptyList())
+            } else {
+                Log.d("VM_FLOW", "Database ready — connecting DAO")
+                _sortMode.flatMapLatest { sortMode ->
+                    when (sortMode) {
+                        SortMode.DATE_DESC -> database.mediaDao().getMediaByDateDesc()
+                        SortMode.DATE_ASC -> database.mediaDao().getMediaByDateAsc()
+                        SortMode.NAME_ASC -> database.mediaDao().getMediaByNameAsc()
+                        SortMode.NAME_DESC -> database.mediaDao().getMediaByNameDesc()
+                        SortMode.SIZE_DESC -> database.mediaDao().getMediaBySizeDesc()
+                        SortMode.SIZE_ASC -> database.mediaDao().getMediaBySizeAsc()
+                    }
+                }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    
+    /**
+     * PRIMARY UI FLOW: All media as MediaItem (Room-first)
+     *  
+     * UI screens should observe this instead of sortedMedia.
+     * Automatically updates when:
+     * - Sort mode changes
+     * - MediaStore sync adds/removes media
+     * - Database is updated
+     */
+    val mediaFlow: StateFlow<List<MediaItem>> = mediaEntitiesFlow
+        .combine(_favoriteIds) { entities, favIds ->
+            android.util.Log.d("ROOM_FLOW", "Room emitted ${entities.size} items")
+            entities.toMediaItems(favIds)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    
+    /**
+     * ALBUMS FLOW: Album list from Room (Room-first)
+     * 
+     * Groups media by bucketId directly from Room.
+     * UI should observe this instead of categorizedAlbums.
+     */
+    val albumsFlow: StateFlow<List<Album>> = mediaEntitiesFlow
+        .map { entities ->
+            if (entities.isEmpty()) {
+                emptyList()
+            } else {
+                val mediaItems = entities.toMediaItems(_favoriteIds.value)
+                android.util.Log.d("ROOM_FLOW", "Albums: Generated ${mediaItems.groupBy { it.bucketId }.size} albums")
+                mediaItems
+                    .groupBy { it.bucketId }
+                    .map { (bucketId, items) ->
+                        Album(
+                            id = bucketId,
+                            name = items.first().bucketName,
+                            coverUri = items.firstOrNull()?.uri,
+                            itemCount = items.size,
+                            bucketDisplayName = items.first().bucketName,
+                            topMediaUris = items.take(6).map { it.uri },
+                            topMediaItems = items.take(6)
+                        )
+                    }
+                    .sortedByDescending { it.itemCount }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    
+    /**
+     * CATEGORIZED ALBUMS FLOW: Albums categorized into main/other (Room-first)
+     * 
+     * Derived from albumsFlow, splits albums into:
+     * - mainAlbums: First 4 albums (top albums by item count)
+     * - otherAlbums: Remaining albums
+     */
+    val categorizedAlbumsFlow: StateFlow<CategorizedAlbums> = albumsFlow
+        .map { albums ->
+            android.util.Log.d("ROOM_FLOW", "Categorized Albums: ${albums.size} total (${albums.take(4).size} main, ${albums.drop(4).size} other)")
+            CategorizedAlbums(
+                mainAlbums = albums.take(4),
+                otherAlbums = albums.drop(4)
+            )
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = CategorizedAlbums(emptyList(), emptyList())
+        )
+    
+    /**
+     * SEARCH FLOW: Search results from Room (Room-first)
+     * 
+     * Searches directly in Room database.
+     * Updates automatically as search query changes.
+     */
+    fun searchMediaFlow(query: String): kotlinx.coroutines.flow.Flow<List<MediaItem>> {
+        return if (query.isBlank()) {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        } else {
+            database.mediaDao().searchMedia(query)
+                .map { entities ->
+                    android.util.Log.d("ROOM_FLOW", "Search: Found ${entities.size} results for '$query'")
+                    entities.toMediaItems(_favoriteIds.value)
+                }
+        }
+    }
+    
+    /**
+     * FAVORITES FLOW: Favorite media from Room (Room-first)
+     * 
+     * Gets favorites via JOIN query with favorites table.
+     * Updates automatically when favorites change.
+     */
+    val favoritesFlow: StateFlow<List<MediaItem>> = kotlinx.coroutines.flow.combine(
+        if (::database.isInitialized) database.mediaDao().getFavoriteMedia() else kotlinx.coroutines.flow.flowOf(emptyList()),
+        _favoriteIds
+    ) { entities, favIds ->
+        android.util.Log.d("ROOM_FLOW", "Favorites: ${entities.size} items")
+        entities.toMediaItems(favIds)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+    
+    /**
+     * IMAGES ONLY FLOW: Images from Room (Room-first)
+     */
+    val imagesFlow: StateFlow<List<MediaItem>> = if (::database.isInitialized) {
+        database.mediaDao().getAllImages()
+            .combine(_favoriteIds) { entities, favIds ->
+                entities.toMediaItems(favIds)
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+    } else {
+        MutableStateFlow(emptyList())
+    }
+    
+    /**
+     * VIDEOS ONLY FLOW: Videos from Room (Room-first)
+     */
+    val videosFlow: StateFlow<List<MediaItem>> = if (::database.isInitialized) {
+        database.mediaDao().getAllVideos()
+            .combine(_favoriteIds) { entities, favIds ->
+                entities.toMediaItems(favIds)
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
+    } else {
+        MutableStateFlow(emptyList())
+    }
+    
+    /**
+     * GROUPED MEDIA FLOW: Media grouped by date/month (Room-first)
+     * 
+     * Dynamically groups media based on current grid type (DAY or MONTH).
+     * Updates automatically when mediaFlow or gridType changes.
+     */
+    val groupedMediaFlow: StateFlow<List<MediaGroup>> = mediaFlow
+        .combine(_gridType) { media, gridType ->
+            android.util.Log.d("ROOM_FLOW", "Grouped Media: ${media.size} items grouped by $gridType")
+            groupMediaForGrid(media, gridType)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    
+    // ─────────────────────────────────────────────────────────────────────────────────
+    // LOADER STATE: Controlled by first Room emission
+    // ─────────────────────────────────────────────────────────────────────────────────
+    init {
+        Log.d("VM_INIT", "init block: Properties initialized, starting mediaFlow collection")
+        viewModelScope.launch {
+            mediaFlow.collect { media ->
+                Log.d("VM_INIT", "init block: mediaFlow collected ${media.size} items")
+                if (media.isNotEmpty() && _isLoading.value) {
+                    android.util.Log.d("PERF", "First Room emission received (${media.size} items)")
+                    _isLoading.value = false
+                }
+            }
+        }
+    }
     
     // Background sync job for periodic updates (non-blocking)
     private var backgroundSyncJob: Job? = null
 
     fun initialize(context: Context) {
+        if (::database.isInitialized) return
+        
+        Log.d("VM_INITIALIZE", "initialize(): Called, about to initialize database and repositories")
         repository = MediaRepository(context)
         albumRepository = AlbumRepository(context)
         recentSearchesDataStore = RecentSearchesDataStore(context)
         settingsDataStore = SettingsDataStore(context)
         database = AppDatabase.getDatabase(context)
+        
+        // Trigger reactive reconnection of flows
+        _databaseReady.value = true
+        Log.d("VM_INITIALIZE", "Database initialized")
+        Log.d("VM_INITIALIZE", "initialize(): Database initialized, database.isInitialized=${::database.isInitialized}")
         
         // Load favorite IDs from database
         viewModelScope.launch {
@@ -275,10 +557,7 @@ class MediaViewModel : ViewModel() {
             try {
                 settingsDataStore.selectedAlbumsFlow.collect { albums ->
                     _selectedAlbums.value = albums
-                    // Re-apply sorting to filter images whenever selection changes
-                    if (::repository.isInitialized && allImages.isNotEmpty()) {
-                        applySorting()
-                    }
+                    // Room mediaFlow automatically handles filtering via SQL (no applySorting() needed)
                 }
             } catch (e: Exception) {
                 // Ignore cancellation exceptions
@@ -300,28 +579,12 @@ class MediaViewModel : ViewModel() {
         startObserving(context)
     }
 
-    /**
-     * REFACTORED: Single MediaStore query that populates ALL data structures
-     * 
-     * Flow:
-     * 1. Query MediaStore ONCE (images + videos)
-     * 2. Store raw results in allImages/allVideos (private cache)
-     * 3. Populate all StateFlows:
-     *    - _images (filtered/sorted for Photos tab)
-     *    - _videos (filtered/sorted for Photos tab)
-     *    - _allImagesUnfiltered (for album detail views)
-     *    - _allVideosUnfiltered (for album detail views)
-     *    - _allMediaCached (for search)
-     *    - _albums (derived from cache)
-     *    - _categorizedAlbums (derived from cache)
-     * 4. All tabs now read from StateFlows - NO additional MediaStore queries
-     * 5. Optional: Start background sync for future updates
-     */
     fun isMediaEmpty(): Boolean {
-        return _allImagesUnfiltered.value.isEmpty() && _allVideosUnfiltered.value.isEmpty()
+        return mediaFlow.value.isEmpty()
     }
 
     fun refresh(context: Context) {
+        Log.d("SYNC_ENGINE", "refresh() START: Checking repository initialization")
         if (!::repository.isInitialized) {
             initialize(context)
         }
@@ -329,53 +592,95 @@ class MediaViewModel : ViewModel() {
         viewModelScope.launch {
             // Defensive guard: Prevent overlapping loads
             if (_isLoading.value) {
-                android.util.Log.d("MediaLoad", "Load skipped (already loading)")
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d("SYNC_ENGINE", "Sync skipped (already syncing)")
+                }
                 return@launch
             }
             
             _isLoading.value = true
-            android.util.Log.d("MediaLoad", "Media load START")
+            
+            val loadStart = SystemClock.elapsedRealtime()
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d("SYNC_ENGINE", "MediaStore sync START")
+            }
+            Log.d("SYNC_ENGINE", "refresh(): Starting MediaStore → Room sync")
             
             try {
-                // ═══════════════════════════════════════════════════════════
-                // STEP 1: Query MediaStore ONCE
-                // ═══════════════════════════════════════════════════════════
-                allImages = repository.loadImages()
-                allVideos = repository.loadVideos()
+                // ═════════════════════════════════════════════════════════════
+                // ROOM-FIRST ARCHITECTURE: SYNC-ONLY OPERATION
+                // ═════════════════════════════════════════════════════════════
+                // MediaStore → Room sync only
+                // UI updates automatically via Room flows (mediaFlow, albumsFlow, etc.)
+                // NO direct UI StateFlow updates
+                // ═════════════════════════════════════════════════════════════
                 
-                val totalItems = allImages.size + allVideos.size
-                android.util.Log.d("MediaLoad", "Media load END ($totalItems items)")
+                // STEP 1: Query MediaStore for latest media (sync source)
+                val images = repository.loadImages()
+                val videos = repository.loadVideos()
+                val combined = (images + videos)
                 
-                // ═══════════════════════════════════════════════════════════
-                // STEP 2: Populate all StateFlows from cached data
-                // ═══════════════════════════════════════════════════════════
+                if (BuildConfig.DEBUG) {
+                    val queryDuration = SystemClock.elapsedRealtime() - loadStart
+                    android.util.Log.d("SYNC_ENGINE", "MediaStore query completed: ${queryDuration}ms (${combined.size} items)")
+                }
                 
-                // Update unfiltered StateFlows for album detail views
-                _allImagesUnfiltered.value = allImages
-                _allVideosUnfiltered.value = allVideos
+                // STEP 2: Sync to Room database (single source of truth)
+                withContext(Dispatchers.IO) {
+                    try {
+                        val upsertStart = SystemClock.elapsedRealtime()
+                        
+                        // Convert MediaItem → MediaEntity
+                        val mediaEntities = combined.map { item ->
+                            MediaEntity(
+                                id = item.id,
+                                uri = item.uri.toString(),
+                                displayName = item.displayName,
+                                dateAdded = item.dateAdded,
+                                bucketId = item.bucketId,
+                                bucketName = item.bucketName,
+                                mimeType = item.mimeType,
+                                width = item.width,
+                                height = item.height,
+                                size = item.size,
+                                duration = if (item.isVideo) item.duration else null,
+                                isVideo = item.isVideo,
+                                path = item.path
+                            )
+                        }
+                        
+                        // UPSERT: Insert or replace if exists (Room handles deduplication)
+                        Log.d("SYNC_ENGINE", "refresh(): Upserting ${mediaEntities.size} entities to Room")
+                        database.mediaDao().upsertAll(mediaEntities)
+                        Log.d("SYNC_ENGINE", "Upserted ${mediaEntities.size} items into Room")
+                        
+                        if (BuildConfig.DEBUG) {
+                            val upsertDuration = SystemClock.elapsedRealtime() - upsertStart
+                            android.util.Log.d("SYNC_ENGINE", "Room sync completed: ${upsertDuration}ms (${mediaEntities.size} items synced)")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("SYNC_ENGINE", "Error syncing to Room", e)
+                    }
+                }
                 
-                // Cache combined media for search (sorted once)
-                _allMediaCached.value = (allImages + allVideos).sortedByDescending { it.dateAdded }
+                // STEP 3: Room flows auto-emit → UI updates automatically
+                // - mediaFlow emits sorted media
+                // - albumsFlow emits grouped albums
+                // - imagesFlow/videosFlow emit filtered media
+                // - No manual StateFlow updates needed!
                 
-                // Derive albums from cached media (no additional MediaStore query)
-                val generatedAlbums = generateAlbumsFromCache(allImages + allVideos)
-                _albums.value = generatedAlbums
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d("SYNC_ENGINE", "Sync complete. Room flows will update UI automatically.")
+                }
                 
-                // Categorize albums from cached data
-                val categorized = categorizeAlbumsFromCache(generatedAlbums)
-                _categorizedAlbums.value = categorized
-                
-                // Apply current sort/filter to populate Photos tab data
-                applySorting()
-                
-                // ═══════════════════════════════════════════════════════════
-                // STEP 3: Start background sync (optional, non-blocking)
-                // ═══════════════════════════════════════════════════════════
-                startBackgroundSync(context)
+                // Schedule deferred ML labeling if needed
+                scheduleDeferredLabelingIfNeeded(context)
                 
             } catch (e: Exception) {
-                android.util.Log.e("MediaLoad", "Error loading media", e)
+                android.util.Log.e("SYNC_ENGINE", "Error in refresh()", e)
             } finally {
+                // Note: loader is now controlled by Room flow emissions (see init block)
+                // Set to false here as fallback in case of errors
                 _isLoading.value = false
             }
         }
@@ -383,66 +688,15 @@ class MediaViewModel : ViewModel() {
 
     fun setSortMode(mode: SortMode) {
         _sortMode.value = mode
-        applySorting()
+        // mediaFlow automatically updates via flatMapLatest
+        // No applySorting() call needed!
     }
 
-    private fun applySorting() {
-        val favoriteIdSet = _favoriteIds.value
-        val selectedAlbumIds = _selectedAlbums.value
-        
-        // Filter images by selected albums - if selection was explicitly made and is empty, show nothing
-        val filteredImages = if (selectedAlbumIds.isEmpty()) {
-            // Show nothing when explicitly unselected all albums
-            emptyList()
-        } else {
-            allImages.filter { selectedAlbumIds.contains(it.bucketId) }
-        }
-        
-        // Filter videos by selected albums - if selection was explicitly made and is empty, show nothing
-        val filteredVideos = if (selectedAlbumIds.isEmpty()) {
-            // Show nothing when explicitly unselected all albums
-            emptyList()
-        } else {
-            allVideos.filter { selectedAlbumIds.contains(it.bucketId) }
-        }
-        
-        _images.value = when (_sortMode.value) {
-            SortMode.DATE_DESC -> filteredImages.sortedByDescending { it.dateAdded }
-            SortMode.DATE_ASC -> filteredImages.sortedBy { it.dateAdded }
-            SortMode.NAME_ASC -> filteredImages.sortedBy { it.displayName.lowercase() }
-            SortMode.NAME_DESC -> filteredImages.sortedByDescending { it.displayName.lowercase() }
-            SortMode.SIZE_DESC -> filteredImages.sortedByDescending { it.size }
-            SortMode.SIZE_ASC -> filteredImages.sortedBy { it.size }
-        }.map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
-
-        _videos.value = when (_sortMode.value) {
-            SortMode.DATE_DESC -> filteredVideos.sortedByDescending { it.dateAdded }
-            SortMode.DATE_ASC -> filteredVideos.sortedBy { it.dateAdded }
-            SortMode.NAME_ASC -> filteredVideos.sortedBy { it.displayName.lowercase() }
-            SortMode.NAME_DESC -> filteredVideos.sortedByDescending { it.displayName.lowercase() }
-            SortMode.SIZE_DESC -> filteredVideos.sortedByDescending { it.size }
-            SortMode.SIZE_ASC -> filteredVideos.sortedBy { it.size }
-        }.map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
-        
-        // Update favorite items list with only items from selected albums
-        updateFavoritesList(selectedAlbumIds)
-    }
-    
-    private fun updateFavoritesList(selectedAlbumIds: Set<String>) {
-        val favoriteIdSet = _favoriteIds.value
-        
-        // Filter favorites by selected albums
-        val filteredMedia = if (selectedAlbumIds.isEmpty()) {
-            allImages + allVideos
-        } else {
-            (allImages + allVideos).filter { selectedAlbumIds.contains(it.bucketId) }
-        }
-        
-        _favoriteItems.value = filteredMedia
-            .map { it.copy(isFavorite = favoriteIdSet.contains(it.id)) }
-            .filter { it.isFavorite }
-            .sortedByDescending { it.dateAdded }
-    }
+    // ═════════════════════════════════════════════════════════════════════
+    // ═════════════════════════════════════════════════════════════════════
+    // DEPRECATED: applySorting() removed
+    // Room now handles sorting via SQL ORDER BY (mediaFlow flatMapLatest)
+    // ═════════════════════════════════════════════════════════════════════
 
     fun delete(item: MediaItem, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch {
@@ -781,7 +1035,8 @@ class MediaViewModel : ViewModel() {
     }
     
     fun getAllMedia(): List<MediaItem> {
-        return allImages + allVideos
+        // Room is now the single source of truth - return current mediaFlow value
+        return mediaFlow.value
     }
     
     // Recycle Bin functions
@@ -957,8 +1212,7 @@ class MediaViewModel : ViewModel() {
                     database.favoriteDao().removeFavorite(mediaId)
                     _favoriteIds.value = _favoriteIds.value - mediaId
                 }
-                // Reapply sorting to update isFavorite flags
-                applySorting()
+                // Room mediaFlow automatically reflects favorite state (no applySorting() needed)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -1151,6 +1405,16 @@ class MediaViewModel : ViewModel() {
     // Grid type functions
     fun setGridType(type: GridType) {
         _gridType.value = type
+        viewModelScope.launch {
+            val start = SystemClock.elapsedRealtime()
+            val grouped = withContext(Dispatchers.Default) {
+                groupMediaForGrid(_sortedMedia.value, type)
+            }
+            _groupedMedia.value = grouped
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d("Perf", "Grouping took ${SystemClock.elapsedRealtime() - start} ms")
+            }
+        }
         // Save to DataStore
         viewModelScope.launch {
             if (::settingsDataStore.isInitialized) {
@@ -1249,13 +1513,44 @@ class MediaViewModel : ViewModel() {
     fun startObserving(context: Context) {
         if (mediaContentObserver == null) {
             mediaContentObserver = MediaContentObserver(context) {
-                // When media changes, refresh the gallery
+                // ROOM-FIRST: ContentObserver triggers MediaStore → Room sync
+                // Room flows auto-emit → UI updates automatically
+                android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, triggering sync")
                 refresh(context)
+                // Schedule deferred ML labeling after refresh completes
+                scheduleDeferredLabelingIfNeeded(context)
             }
             mediaContentObserver?.register(viewModelScope)
         }
     }
 
+    /**
+     * Schedule deferred ML labeling only if unlabeled images exist
+     * 
+     * Called after refresh() completes to ensure allImages is populated.
+     * Checks if any images need labeling before scheduling worker.
+     * 
+     * @param context Context for WorkManager scheduling
+     */
+    fun scheduleDeferredLabelingIfNeeded(context: Context) {
+        viewModelScope.launch {
+            try {
+                // Query DB to check if any media is unlabeled
+                val processedIds = database.mediaLabelDao().getAllProcessedIds().toSet()
+                val unlabeledCount = mediaFlow.value.count { it.id !in processedIds }
+                
+                if (unlabeledCount > 0) {
+                    android.util.Log.d("MediaViewModel", "ML: Deferred labeling scheduled ($unlabeledCount unlabeled)")
+                    com.prantiux.pixelgallery.ml.ImageLabelScheduler.scheduleDeferredLabeling(context)
+                } else {
+                    android.util.Log.d("MediaViewModel", "ML: No labeling needed (all media labeled)")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MediaViewModel", "Error checking labeling status", e)
+            }
+        }
+    }
+    
     /**
      * Stop observing MediaStore changes
      * 
@@ -1275,4 +1570,93 @@ class MediaViewModel : ViewModel() {
         stopObserving()
         super.onCleared()
     }
+
+    private fun groupMediaForGrid(media: List<MediaItem>, gridType: GridType): List<MediaGroup> {
+    return when (gridType) {
+        GridType.DAY -> groupMediaByDate(media)
+        GridType.MONTH -> groupMediaByMonth(media)
+    }
+}
+
+private fun groupMediaByDate(media: List<MediaItem>): List<MediaGroup> {
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val calendar = Calendar.getInstance()
+    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+
+    return media.groupBy { item ->
+        calendar.timeInMillis = item.dateAdded * 1000
+        dateFormat.format(calendar.time)
+    }.map { (date, items) ->
+        calendar.timeInMillis = items.first().dateAdded * 1000
+        val itemYear = calendar.get(Calendar.YEAR)
+
+        val displayDate = when {
+            isToday(calendar) -> "Today"
+            isYesterday(calendar) -> "Yesterday"
+            itemYear == currentYear -> {
+                // Same year: "12 Dec"
+                SimpleDateFormat("d MMM", Locale.getDefault()).format(calendar.time)
+            }
+            else -> {
+                // Different year: "28 Jan 2024"
+                SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(calendar.time)
+            }
+        }
+
+        // Find most common location for this date
+        val mostCommonLocation = items
+            .mapNotNull { it.location }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        MediaGroup(date, displayDate, items, mostCommonLocation)
+    }.sortedByDescending { it.date }
+}
+
+private fun groupMediaByMonth(media: List<MediaItem>): List<MediaGroup> {
+    val monthFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
+    val calendar = Calendar.getInstance()
+    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+
+    return media.groupBy { item ->
+        calendar.timeInMillis = item.dateAdded * 1000
+        monthFormat.format(calendar.time)
+    }.map { (month, items) ->
+        calendar.timeInMillis = items.first().dateAdded * 1000
+        val itemYear = calendar.get(Calendar.YEAR)
+
+        val displayDate = if (itemYear == currentYear) {
+            // Current year: "January"
+            SimpleDateFormat("MMMM", Locale.getDefault()).format(calendar.time)
+        } else {
+            // Different year: "December 2025"
+            SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calendar.time)
+        }
+
+        // Find most common location for this month
+        val mostCommonLocation = items
+            .mapNotNull { it.location }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        MediaGroup(month, displayDate, items, mostCommonLocation)
+    }.sortedByDescending { it.date }
+}
+
+private fun isToday(calendar: Calendar): Boolean {
+    val today = Calendar.getInstance()
+    return calendar.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+            calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+}
+
+private fun isYesterday(calendar: Calendar): Boolean {
+    val yesterday = Calendar.getInstance()
+    yesterday.add(Calendar.DAY_OF_YEAR, -1)
+    return calendar.get(Calendar.YEAR) == yesterday.get(Calendar.YEAR) &&
+            calendar.get(Calendar.DAY_OF_YEAR) == yesterday.get(Calendar.DAY_OF_YEAR)
+}
 }
