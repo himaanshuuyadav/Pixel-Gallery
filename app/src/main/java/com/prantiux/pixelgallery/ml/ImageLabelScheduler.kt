@@ -63,6 +63,22 @@ object ImageLabelScheduler {
     }
     
     /**
+     * Schedule deferred one-time labeling (only if needed)
+     * Uses KEEP policy to prevent duplicate workers
+     */
+    fun scheduleDeferredLabeling(context: Context) {
+        val oneTimeWork = OneTimeWorkRequestBuilder<ImageLabelWorker>()
+            .addTag(LABEL_WORK_TAG)
+            .build()
+        
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "image_labeling",
+            ExistingWorkPolicy.KEEP,
+            oneTimeWork
+        )
+    }
+    
+    /**
      * Check if device is currently charging
      */
     fun isCharging(context: Context): Boolean {
