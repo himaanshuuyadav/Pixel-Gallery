@@ -52,6 +52,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = false
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.15"
