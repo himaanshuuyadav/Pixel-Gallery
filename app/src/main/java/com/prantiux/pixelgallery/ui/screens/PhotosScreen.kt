@@ -2,6 +2,7 @@ package com.prantiux.pixelgallery.ui.screens
 
 import android.Manifest
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +35,7 @@ import coil.compose.AsyncImage
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.prantiux.pixelgallery.R
+import com.prantiux.pixelgallery.BuildConfig
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.viewmodel.SortMode
@@ -43,17 +46,8 @@ import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
-import java.text.SimpleDateFormat
-import java.util.*
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
-
-data class MediaGroup(
-    val date: String,
-    val displayDate: String,
-    val items: List<MediaItem>,
-    val mostCommonLocation: String? = null
-)
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -62,8 +56,9 @@ fun PhotosScreen(
     onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val images by viewModel.images.collectAsState()
-    val videos by viewModel.videos.collectAsState()
+    // ROOM-FIRST: Observe Room flows instead of MediaStore-derived StateFlows
+    val images by viewModel.imagesFlow.collectAsState()
+    val videos by viewModel.videosFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
 
@@ -78,7 +73,14 @@ fun PhotosScreen(
 
     val permissionsState = rememberMultiplePermissionsState(permissions)
 
-    LaunchedEffect(permissionsState.allPermissionsGranted) {
+    LaunchedEffect(Unit) {
+        val start = SystemClock.elapsedRealtime()
+        withFrameNanos { }
+        if (BuildConfig.DEBUG) {
+            Log.d("Perf", "First frame rendered in ${SystemClock.elapsedRealtime() - start} ms")
+        }
+        // ROOM-FIRST: No manual refresh needed - Room flows are reactive
+        // ContentObserver will trigger MediaStore sync automatically when media changes
         if (permissionsState.allPermissionsGranted && viewModel.isMediaEmpty()) {
             viewModel.refresh(context)
         }
@@ -210,23 +212,19 @@ fun PhotosContent(
     // Show loading when: loading AND (never loaded before OR lists are empty)
     val showLoading = isLoading && (!hasLoadedOnce || (images.isEmpty() && videos.isEmpty()))
     
-    // Combine images and videos
-    val allMedia = remember(images, videos) {
-        (images + videos).sortedByDescending { it.dateAdded }
+    // ROOM-FIRST: Use Room flows (single source of truth, computed once on IO/Default thread)
+    val sortedMediaList by viewModel.mediaFlow.collectAsState()
+    val groupedMedia by viewModel.groupedMediaFlow.collectAsState()
+    
+    // Create index map for O(1) lookups instead of O(n) indexOf()
+    val indexMap = remember(sortedMediaList) {
+        sortedMediaList.mapIndexed { i, item -> item.id to i }.toMap()
     }
     
     // Determine column count based on grid type
     val columnCount = when (gridType) {
         com.prantiux.pixelgallery.viewmodel.GridType.DAY -> 3
         com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> 5
-    }
-    
-    // Group by date or month based on grid type
-    val groupedMedia = remember(allMedia, gridType) {
-        when (gridType) {
-            com.prantiux.pixelgallery.viewmodel.GridType.DAY -> groupMediaByDate(allMedia)
-            com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> groupMediaByMonth(allMedia)
-        }
     }
     
     // Remember scroll state to preserve position
@@ -291,7 +289,7 @@ fun PhotosContent(
                     modifier = Modifier.align(Alignment.Center),
                     size = 48.dp
                 )
-            } else if (allMedia.isEmpty()) {
+            } else if (sortedMediaList.isEmpty()) {
                 // Only show "no media" after loading is complete (when not loading)
                 Text(
                     "No media found",
@@ -380,10 +378,13 @@ fun PhotosContent(
                             }
                         }
                         
-                        // Media items for this date
-                        items(group.items.size) { index ->
+                        // Media items for this date - with stable keys for optimal recomposition
+                        items(
+                            count = group.items.size,
+                            key = { index -> group.items[index].id }  // CRITICAL: Stable key prevents unnecessary recomposition
+                        ) { index ->
                             val item = group.items[index]
-                            val globalIndex = allMedia.indexOf(item)
+                            val globalIndex = indexMap[item.id] ?: 0  // O(1) lookup instead of O(n) indexOf
                             val isSelected = selectedItems.contains(item)
                             val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                 index = index,
@@ -469,87 +470,6 @@ fun PhotosContent(
     }
 }
 
-fun groupMediaByDate(media: List<MediaItem>): List<MediaGroup> {
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val calendar = Calendar.getInstance()
-    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-    
-    return media.groupBy { item ->
-        calendar.timeInMillis = item.dateAdded * 1000
-        dateFormat.format(calendar.time)
-    }.map { (date, items) ->
-        calendar.timeInMillis = items.first().dateAdded * 1000
-        val itemYear = calendar.get(Calendar.YEAR)
-        
-        val displayDate = when {
-            isToday(calendar) -> "Today"
-            isYesterday(calendar) -> "Yesterday"
-            itemYear == currentYear -> {
-                // Same year: "12 Dec"
-                SimpleDateFormat("d MMM", Locale.getDefault()).format(calendar.time)
-            }
-            else -> {
-                // Different year: "28 Jan 2024"
-                SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(calendar.time)
-            }
-        }
-        
-        // Find most common location for this date
-        val mostCommonLocation = items
-            .mapNotNull { it.location }
-            .groupingBy { it }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-        
-        MediaGroup(date, displayDate, items, mostCommonLocation)
-    }.sortedByDescending { it.date }
-}
-
-fun groupMediaByMonth(media: List<MediaItem>): List<MediaGroup> {
-    val monthFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
-    val calendar = Calendar.getInstance()
-    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-    
-    return media.groupBy { item ->
-        calendar.timeInMillis = item.dateAdded * 1000
-        monthFormat.format(calendar.time)
-    }.map { (month, items) ->
-        calendar.timeInMillis = items.first().dateAdded * 1000
-        val itemYear = calendar.get(Calendar.YEAR)
-        
-        val displayDate = if (itemYear == currentYear) {
-            // Current year: "January"
-            SimpleDateFormat("MMMM", Locale.getDefault()).format(calendar.time)
-        } else {
-            // Different year: "December 2025"
-            SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calendar.time)
-        }
-        
-        // Find most common location for this month
-        val mostCommonLocation = items
-            .mapNotNull { it.location }
-            .groupingBy { it }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-        
-        MediaGroup(month, displayDate, items, mostCommonLocation)
-    }.sortedByDescending { it.date }
-}
-
-fun isToday(calendar: Calendar): Boolean {
-    val today = Calendar.getInstance()
-    return calendar.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-            calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
-}
-
-fun isYesterday(calendar: Calendar): Boolean {
-    val yesterday = Calendar.getInstance()
-    yesterday.add(Calendar.DAY_OF_YEAR, -1)
-    return calendar.get(Calendar.YEAR) == yesterday.get(Calendar.YEAR) &&
-            calendar.get(Calendar.DAY_OF_YEAR) == yesterday.get(Calendar.DAY_OF_YEAR)
-}
 
 @Composable
 fun SortMenuItem(text: String, selected: Boolean, onClick: () -> Unit) {
