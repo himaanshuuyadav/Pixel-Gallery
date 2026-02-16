@@ -30,7 +30,8 @@ fun GalleryViewSettingScreen(
     onBackClick: () -> Unit = {}
 ) {
     // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
-    val categorizedAlbums by viewModel.categorizedAlbums.collectAsState()
+    // ROOM-FIRST: Use Room-derived categorized albums flow
+    val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     
     val albums = remember(categorizedAlbums) {
