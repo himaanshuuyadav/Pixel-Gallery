@@ -66,11 +66,34 @@ fun SearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
-    val images by viewModel.images.collectAsState()
-    val videos by viewModel.videos.collectAsState()
+    // ROOM-FIRST: Use Room flows for base media lists
+    val images by viewModel.imagesFlow.collectAsState()
+    val videos by viewModel.videosFlow.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val searchResults by viewModel.searchResults.collectAsState()
+    // ROOM-FIRST: Use Room-based search flow instead of in-memory search
+    val searchResultsRaw by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
     val isSearching by viewModel.isSearching.collectAsState()
+    
+    // ROOM-FIRST: Compute search result structure from raw media list
+    val searchResults = remember(searchResultsRaw) {
+        val matchedAlbums = searchResultsRaw
+            .groupBy { it.bucketName }
+            .filter { it.key.isNotEmpty() }
+            .map { (albumName, items) ->
+                SearchEngine.AlbumMatch(
+                    albumName = albumName,
+                    items = items,
+                    matchPriority = 1
+                )
+            }
+            .sortedByDescending { it.items.size }
+        
+        SearchEngine.SearchResult(
+            matchedAlbums = matchedAlbums,
+            matchedMedia = searchResultsRaw,
+            query = searchQuery
+        )
+    }
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
