@@ -292,8 +292,6 @@ fun AppNavigation(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
-    val images by viewModel.images.collectAsState()
-    val videos by viewModel.videos.collectAsState()
     val haptic = LocalHapticFeedback.current
     
     // Determine start destination based on default tab setting
@@ -366,22 +364,23 @@ fun AppNavigation(
             
             // Media overlay state
             val overlayState by viewModel.overlayState.collectAsState()
-            val allMedia = remember(images, videos) {
-                (images + videos).sortedByDescending { it.dateAdded }
-            }
             
-            // Get unfiltered media for album overlay (to show albums even if unchecked in gallery view)
-            val allImagesUnfiltered by viewModel.allImagesUnfiltered.collectAsState()
-            val allVideosUnfiltered by viewModel.allVideosUnfiltered.collectAsState()
+            // ROOM-FIRST: Use Room flows for overlay media (single source of truth)
+            val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
+            
+            // ROOM-FIRST: Use Room flows for unfiltered album media
+            val allImagesUnfiltered by viewModel.imagesFlow.collectAsState()
+            val allVideosUnfiltered by viewModel.videosFlow.collectAsState()
             val allMediaUnfiltered = remember(allImagesUnfiltered, allVideosUnfiltered) {
                 (allImagesUnfiltered + allVideosUnfiltered).sortedByDescending { it.dateAdded }
             }
             
-            // Get search results for overlay
-            val searchResults by viewModel.searchResults.collectAsState()
+            // ROOM-FIRST: Use Room-based search flow for overlay
+            val searchQuery = overlayState.searchQuery ?: ""
+            val searchResults by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
             
-            // Get favorite items for overlay
-            val favoriteItems by viewModel.favoriteItems.collectAsState()
+            // ROOM-FIRST: Use Room-based favorites flow for overlay
+            val favoriteItems by viewModel.favoritesFlow.collectAsState()
             
             // Get context for smart album loading
             val context = androidx.compose.ui.platform.LocalContext.current
@@ -390,7 +389,7 @@ fun AppNavigation(
             val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
 
             // Filter media based on overlay state (album or all media)
-            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, allMedia, allMediaUnfiltered, searchResults, favoriteItems) {
+            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, sortedMediaForOverlay, allMediaUnfiltered, searchResults, favoriteItems) {
                 when (overlayState.mediaType) {
                     "album", "smartalbum" -> {
                         if (isSmartAlbumOverlay) {
@@ -404,11 +403,11 @@ fun AppNavigation(
                         }
                     }
                     "search" -> {
-                        // Use actual search results from SearchEngine, not simple filter
-                        searchResults?.matchedMedia ?: emptyList()
+                        // ROOM-FIRST: searchResults is now a simple List<MediaItem> from Room
+                        searchResults
                     }
                     "favorites" -> favoriteItems
-                    else -> allMedia
+                    else -> sortedMediaForOverlay  // Use ViewModel's sorted media for photos overlay
                 }
             }
             
@@ -439,6 +438,46 @@ fun AppNavigation(
                 }
             }
 
+            // Material Fade Through tab animation (150ms, FastOutSlowInEasing)
+            val tabAnimationSpec = tween<Float>(durationMillis = 150, easing = FastOutSlowInEasing)
+            val density = LocalDensity.current
+            
+            // Photos tab animation
+            val photosAlpha by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Photos.route) 1f else 0f,
+                animationSpec = tabAnimationSpec,
+                label = "photosAlpha"
+            )
+            val photosTranslationY by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Photos.route) 0f else 18f,
+                animationSpec = tabAnimationSpec,
+                label = "photosTranslationY"
+            )
+            
+            // Albums tab animation
+            val albumsAlpha by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Albums.route) 1f else 0f,
+                animationSpec = tabAnimationSpec,
+                label = "albumsAlpha"
+            )
+            val albumsTranslationY by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Albums.route) 0f else 18f,
+                animationSpec = tabAnimationSpec,
+                label = "albumsTranslationY"
+            )
+            
+            // Search tab animation
+            val searchAlpha by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Search.route) 1f else 0f,
+                animationSpec = tabAnimationSpec,
+                label = "searchAlpha"
+            )
+            val searchTranslationY by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Search.route) 0f else 18f,
+                animationSpec = tabAnimationSpec,
+                label = "searchTranslationY"
+            )
+
             Box(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
@@ -448,7 +487,10 @@ fun AppNavigation(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(if (activeRoute == Screen.Photos.route) 1f else 0f)
+                            .alpha(photosAlpha)
+                            .graphicsLayer {
+                                translationY = photosTranslationY * density.density
+                            }
                             .zIndex(if (activeRoute == Screen.Photos.route) 1f else 0f)
                     ) {
                         PhotosScreen(
@@ -460,7 +502,10 @@ fun AppNavigation(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(if (activeRoute == Screen.Albums.route) 1f else 0f)
+                            .alpha(albumsAlpha)
+                            .graphicsLayer {
+                                translationY = albumsTranslationY * density.density
+                            }
                             .zIndex(if (activeRoute == Screen.Albums.route) 1f else 0f)
                     ) {
                         AlbumsScreen(
@@ -483,7 +528,10 @@ fun AppNavigation(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(if (activeRoute == Screen.Search.route) 1f else 0f)
+                            .alpha(searchAlpha)
+                            .graphicsLayer {
+                                translationY = searchTranslationY * density.density
+                            }
                             .zIndex(if (activeRoute == Screen.Search.route) 1f else 0f)
                     ) {
                         SearchScreen(
