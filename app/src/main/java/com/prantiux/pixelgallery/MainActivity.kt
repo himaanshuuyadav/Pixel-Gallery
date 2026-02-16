@@ -11,7 +11,9 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
+import androidx.compose.runtime.withFrameNanos
 import androidx.core.view.WindowCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
@@ -28,6 +30,7 @@ private const val TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MediaViewModel by viewModels()
+    private var keepSplash = true
     
     // Activity result launcher for trash request (Android 11+)
     private val trashRequestLauncher = registerForActivityResult(
@@ -69,6 +72,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { keepSplash }
         super.onCreate(savedInstanceState)
         
         // We need edge-to-edge for proper content padding with statusBarsPadding()
@@ -146,8 +151,7 @@ class MainActivity : ComponentActivity() {
             // Schedule periodic work (runs when charging)
             com.prantiux.pixelgallery.ml.ImageLabelScheduler.schedulePeriodicLabeling(this@MainActivity)
             
-            // Trigger immediate labeling if device is charging
-            com.prantiux.pixelgallery.ml.ImageLabelScheduler.triggerImmediateLabelingIfCharging(this@MainActivity)
+            // Deferred labeling is now handled by MediaViewModel after app stabilizes
         }
         
         // Observe labeling work progress (updates UI state)
@@ -205,6 +209,11 @@ class MainActivity : ComponentActivity() {
         }
         
         setContent {
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                keepSplash = false
+            }
+
             val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(this) }
             var appTheme by remember { mutableStateOf("System Default") }
             var dynamicColor by remember { mutableStateOf(true) }
