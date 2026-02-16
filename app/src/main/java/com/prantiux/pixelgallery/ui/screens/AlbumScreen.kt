@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.prantiux.pixelgallery.model.MediaGroup
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
@@ -63,8 +64,9 @@ fun AlbumDetailScreen(
     onNavigateToViewer: (Int) -> Unit,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
-    val images by viewModel.allImagesUnfiltered.collectAsState()
-    val videos by viewModel.allVideosUnfiltered.collectAsState()
+    // ROOM-FIRST: Use Room flows for unfiltered media
+    val images by viewModel.imagesFlow.collectAsState()
+    val videos by viewModel.videosFlow.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
