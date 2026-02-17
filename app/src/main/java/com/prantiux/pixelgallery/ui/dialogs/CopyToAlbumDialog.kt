@@ -35,9 +35,12 @@ fun CopyToAlbumDialog(
     var isCopying by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     
-    // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
-    val cachedAlbums by viewModel.albums.collectAsState()
+    // REFACTORED: Use ViewModel's Room-backed albums flow
+    val cachedAlbums by viewModel.albumsFlow.collectAsState(initial = emptyList())
     val isLoading by viewModel.isLoading.collectAsState()
+    
+    // Debug log for album loading
+    android.util.Log.d("DIALOG_DEBUG", "Albums loaded in CopyToAlbumDialog: ${cachedAlbums.size}")
     
     // Filter out albums in restricted directories (Android/)
     val albums = remember(cachedAlbums) {
