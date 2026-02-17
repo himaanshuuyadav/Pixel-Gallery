@@ -67,6 +67,8 @@ fun AlbumDetailScreen(
     // ROOM-FIRST: Use Room flows for unfiltered media
     val images by viewModel.imagesFlow.collectAsState()
     val videos by viewModel.videosFlow.collectAsState()
+    // ROOM-FIRST: Album media from pure DAO query (no in-memory filtering)
+    val albumMediaFromFlow by viewModel.albumMediaFlow(albumId).collectAsState(initial = emptyList())
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
@@ -108,15 +110,14 @@ fun AlbumDetailScreen(
         }
     }
     
-    // Combine images and videos for this album
-    val albumMedia = remember(images, videos, albumId, smartAlbumMedia) {
+    // Combine images and videos for this album (ROOM-FIRST: pure DAO)
+    val albumMedia = remember(albumMediaFromFlow, albumId, smartAlbumMedia) {
         if (isSmartAlbum) {
             // Use smart album results
             smartAlbumMedia?.sortedByDescending { it.dateAdded } ?: emptyList()
         } else {
-            // Regular album - filter by bucketId
-            (images + videos)
-                .filter { it.bucketId == albumId }
+            // Regular album - use Room DAO query (no in-memory filtering!)
+            albumMediaFromFlow
                 .sortedByDescending { it.dateAdded }
         }
     }
