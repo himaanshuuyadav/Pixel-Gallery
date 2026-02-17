@@ -11,6 +11,13 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorites ORDER BY timestamp DESC")
     fun getAllFavorites(): Flow<List<FavoriteEntity>>
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // REACTIVE FAVORITE IDS FLOW (Room-first)
+    // Replaces suspend getAllFavoriteIds() for real-time favorite updates
+    // ═══════════════════════════════════════════════════════════════════════════
+    @Query("SELECT mediaId FROM favorites")
+    fun getAllFavoriteIdsFlow(): Flow<List<Long>>
+    
     @Query("SELECT mediaId FROM favorites")
     suspend fun getAllFavoriteIds(): List<Long>
     
