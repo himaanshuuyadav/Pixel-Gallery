@@ -28,6 +28,10 @@ fun FavoritesScreen(
 ) {
     // ROOM-FIRST: Use Room-based favorites flow
     val favoriteItems by viewModel.favoritesFlow.collectAsState()
+    
+    // CALLING TAB LOG
+    android.util.Log.d("SCREEN_TAB", "FavoritesScreen collected ${favoriteItems.size} favorites")
+    
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
