@@ -52,14 +52,60 @@ interface MediaDao {
     fun getAllVideos(): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
-    // SEARCH QUERY (Room-based search)
+    // SEARCH QUERY (Room-based search - displayName + bucketName)
     // ═════════════════════════════════════════════════════════════════════
     @Query("""
         SELECT * FROM media
         WHERE displayName LIKE '%' || :query || '%'
+        OR bucketName LIKE '%' || :query || '%'
         ORDER BY dateAdded DESC
     """)
     fun searchMedia(query: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - ML LABELS (Future implementation when labels table ready)
+    // Search by ML-generated labels (e.g., "dog", "sunset", "mountain")
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT DISTINCT m.* FROM media m
+        LEFT JOIN media_labels ml ON m.id = ml.mediaId
+        WHERE ml.label LIKE '%' || :query || '%'
+        ORDER BY m.dateAdded DESC
+    """)
+    fun searchMediaByLabel(query: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - DATE RANGE
+    // Find media within a specific date range
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE dateAdded BETWEEN :startDate AND :endDate
+        ORDER BY dateAdded DESC
+    """)
+    fun searchMediaByDateRange(startDate: Long, endDate: Long): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - SIZE RANGE
+    // Find media within a specific file size range (in bytes)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE size BETWEEN :minSize AND :maxSize
+        ORDER BY dateAdded DESC
+    """)
+    fun searchMediaBySize(minSize: Long, maxSize: Long): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // SMART ALBUMS - SCREENSHOTS
+    // Find all screenshots (path contains "Screenshots")
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE path LIKE '%Screenshot%'
+        ORDER BY dateAdded DESC
+    """)
+    fun getScreenshots(): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
     // ALBUMS QUERY (Group by bucket)
