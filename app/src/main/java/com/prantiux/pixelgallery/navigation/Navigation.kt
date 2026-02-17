@@ -368,12 +368,8 @@ fun AppNavigation(
             // ROOM-FIRST: Use Room flows for overlay media (single source of truth)
             val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
             
-            // ROOM-FIRST: Use Room flows for unfiltered album media
-            val allImagesUnfiltered by viewModel.imagesFlow.collectAsState()
-            val allVideosUnfiltered by viewModel.videosFlow.collectAsState()
-            val allMediaUnfiltered = remember(allImagesUnfiltered, allVideosUnfiltered) {
-                (allImagesUnfiltered + allVideosUnfiltered).sortedByDescending { it.dateAdded }
-            }
+            // ROOM-FIRST: Album media from pure DAO for overlay (no in-memory filtering!)
+            val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
             
             // ROOM-FIRST: Use Room-based search flow for overlay
             val searchQuery = overlayState.searchQuery ?: ""
@@ -389,7 +385,7 @@ fun AppNavigation(
             val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
 
             // Filter media based on overlay state (album or all media)
-            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, sortedMediaForOverlay, allMediaUnfiltered, searchResults, favoriteItems) {
+            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, sortedMediaForOverlay, albumMediaForOverlay, searchResults, favoriteItems) {
                 when (overlayState.mediaType) {
                     "album", "smartalbum" -> {
                         if (isSmartAlbumOverlay) {
@@ -397,8 +393,8 @@ fun AppNavigation(
                             // Will be populated by LaunchedEffect below
                             emptyList()
                         } else {
-                            // Regular album - filter by bucketId
-                            allMediaUnfiltered.filter { it.bucketId == overlayState.albumId }
+                            // Regular album - use Room DAO query (no in-memory filtering!)
+                            albumMediaForOverlay
                                 .sortedByDescending { it.dateAdded }
                         }
                     }
@@ -416,13 +412,13 @@ fun AppNavigation(
             val coroutineScope = rememberCoroutineScope()
             
             // Load smart album media if overlay is showing a smart album
-            androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, allMediaUnfiltered) {
+            androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, sortedMediaForOverlay) {
                 if (isSmartAlbumOverlay) {
                     coroutineScope.launch {
                         val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(
                             context,
                             overlayState.albumId,
-                            allMediaUnfiltered
+                            sortedMediaForOverlay
                         )
                         smartAlbumOverlayMedia = smartMedia.sortedByDescending { it.dateAdded }
                     }
