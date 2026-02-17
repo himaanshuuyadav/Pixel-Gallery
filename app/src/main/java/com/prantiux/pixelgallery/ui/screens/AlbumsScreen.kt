@@ -82,6 +82,9 @@ fun AlbumsScreen(
     val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     
+    // CALLING TAB LOG
+    android.util.Log.d("SCREEN_TAB", "AlbumsScreen collected ${categorizedAlbums.mainAlbums.size + categorizedAlbums.otherAlbums.size} albums")
+    
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
     var showReorderBottomSheet by remember { mutableStateOf(false) }
 
