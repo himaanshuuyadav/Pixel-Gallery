@@ -67,6 +67,7 @@ private data class ComputedMediaState(
     val groupingDurationMs: Long
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MediaViewModel : ViewModel() {
     init {
         Log.d("VM_INIT", "ViewModel constructor: Starting property initialization")
@@ -321,18 +322,51 @@ class MediaViewModel : ViewModel() {
         )
     
     /**
-     * PRIMARY UI FLOW: All media as MediaItem (Room-first)
+     * PRIMARY UI FLOW: All media as MediaItem (Room-first - fully reactive)
      *  
      * UI screens should observe this instead of sortedMedia.
      * Automatically updates when:
      * - Sort mode changes
      * - MediaStore sync adds/removes media
+     * - Favorite status changes
      * - Database is updated
      */
-    val mediaFlow: StateFlow<List<MediaItem>> = mediaEntitiesFlow
-        .combine(_favoriteIds) { entities, favIds ->
-            android.util.Log.d("ROOM_FLOW", "Room emitted ${entities.size} items")
-            entities.toMediaItems(favIds)
+    val mediaFlow: StateFlow<List<MediaItem>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                flowOf(emptyList())
+            } else {
+                mediaEntitiesFlow.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                    android.util.Log.d("ROOM_FLOW", "Room emitted ${entities.size} items")
+                    entities.toMediaItems(favIds.toSet())
+                }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    
+    /**
+     * FILTERED MEDIA FLOW: Apply hidden album filtering (Room-first)
+     * 
+     * Filters mediaFlow based on selectedAlbums (hidden albums).
+     * If selectedAlbums is empty, returns all media (no filtering).
+     * Otherwise, filters to only show items from visible albums.
+     * 
+     * UI screens should observe this instead of mediaFlow for accurate album visibility.
+     */
+    val filteredMediaFlow: StateFlow<List<MediaItem>> = mediaFlow
+        .combine(_selectedAlbums) { media, visibleAlbums ->
+            if (visibleAlbums.isEmpty()) {
+                android.util.Log.d("HIDDEN_DEBUG", "No album filter: showing all ${media.size} items")
+                media
+            } else {
+                val filtered = media.filter { it.bucketId in visibleAlbums }
+                android.util.Log.d("HIDDEN_DEBUG", "Filtered ${media.size} → ${filtered.size} items (${visibleAlbums.size} visible albums)")
+                filtered
+            }
         }
         .stateIn(
             scope = viewModelScope,
@@ -346,24 +380,29 @@ class MediaViewModel : ViewModel() {
      * Groups media by bucketId directly from Room.
      * UI should observe this instead of categorizedAlbums.
      */
-    val albumsFlow: StateFlow<List<Album>> = mediaEntitiesFlow
-        .map { entities ->
-            if (entities.isEmpty()) {
+    /**
+     * ALBUMS FLOW: Album list from Room (Room-first - derived from mediaFlow)
+     * 
+     * Groups media by bucketId directly from mediaFlow.
+     * UI should observe this instead of categorizedAlbums.
+     */
+    val albumsFlow: StateFlow<List<Album>> = mediaFlow
+        .map { items ->
+            if (items.isEmpty()) {
                 emptyList()
             } else {
-                val mediaItems = entities.toMediaItems(_favoriteIds.value)
-                android.util.Log.d("ROOM_FLOW", "Albums: Generated ${mediaItems.groupBy { it.bucketId }.size} albums")
-                mediaItems
+                android.util.Log.d("ROOM_FLOW", "Albums: Generated ${items.groupBy { it.bucketId }.size} albums")
+                items
                     .groupBy { it.bucketId }
-                    .map { (bucketId, items) ->
+                    .map { (bucketId, groupItems) ->
                         Album(
                             id = bucketId,
-                            name = items.first().bucketName,
-                            coverUri = items.firstOrNull()?.uri,
-                            itemCount = items.size,
-                            bucketDisplayName = items.first().bucketName,
-                            topMediaUris = items.take(6).map { it.uri },
-                            topMediaItems = items.take(6)
+                            name = groupItems.first().bucketName,
+                            coverUri = groupItems.firstOrNull()?.uri,
+                            itemCount = groupItems.size,
+                            bucketDisplayName = groupItems.first().bucketName,
+                            topMediaUris = groupItems.take(6).map { it.uri },
+                            topMediaItems = groupItems.take(6)
                         )
                     }
                     .sortedByDescending { it.itemCount }
@@ -403,14 +442,44 @@ class MediaViewModel : ViewModel() {
      * Updates automatically as search query changes.
      */
     fun searchMediaFlow(query: String): kotlinx.coroutines.flow.Flow<List<MediaItem>> {
+        android.util.Log.d("SEARCH_DEBUG", "Search query='$query'")
         return if (query.isBlank()) {
             kotlinx.coroutines.flow.flowOf(emptyList())
         } else {
-            database.mediaDao().searchMedia(query)
-                .map { entities ->
-                    android.util.Log.d("ROOM_FLOW", "Search: Found ${entities.size} results for '$query'")
-                    entities.toMediaItems(_favoriteIds.value)
-                }
+            android.util.Log.d("SEARCH_DEBUG", "Using Room search flow")
+            kotlinx.coroutines.flow.combine(
+                database.mediaDao().searchMedia(query),
+                database.favoriteDao().getAllFavoriteIdsFlow()
+            ) { entities, favIds ->
+                android.util.Log.d("SEARCH_FLOW", "Query '$query' returned ${entities.size} items")
+                entities.toMediaItems(favIds.toSet())
+            }
+        }
+    }
+    
+    /**
+     * ALBUM MEDIA FLOW: Media from specific album (Room-first, pure DAO)
+     * 
+     * Returns only media from the specified bucketId.
+     * Updates automatically when album media changes.
+     * 
+     * Special case: "all" returns all media via mediaFlow.
+     */
+    fun albumMediaFlow(bucketId: String): kotlinx.coroutines.flow.Flow<List<MediaItem>> {
+        android.util.Log.d("ALBUM_FLOW_DEBUG", "albumMediaFlow called for id=$bucketId")
+        
+        // Special case: "all" means all media, not a specific bucket
+        if (bucketId == "all") {
+            android.util.Log.d("ALBUM_FLOW", "Using mediaFlow for 'all'")
+            return mediaFlow
+        }
+        
+        return kotlinx.coroutines.flow.combine(
+            database.mediaDao().getMediaByBucket(bucketId),
+            database.favoriteDao().getAllFavoriteIdsFlow()
+        ) { entities, favIds ->
+            android.util.Log.d("ALBUM_FLOW", "Album '$bucketId' emitted ${entities.size} items")
+            entities.toMediaItems(favIds.toSet())
         }
     }
     
@@ -418,14 +487,17 @@ class MediaViewModel : ViewModel() {
      * FAVORITES FLOW: Favorite media from Room (Room-first)
      * 
      * Gets favorites via JOIN query with favorites table.
-     * Updates automatically when favorites change.
+     * Updates automatically when favorites change (fully reactive).
      */
     val favoritesFlow: StateFlow<List<MediaItem>> = kotlinx.coroutines.flow.combine(
         if (::database.isInitialized) database.mediaDao().getFavoriteMedia() else kotlinx.coroutines.flow.flowOf(emptyList()),
-        _favoriteIds
+        if (::database.isInitialized) database.favoriteDao().getAllFavoriteIdsFlow() else kotlinx.coroutines.flow.flowOf(emptyList())
     ) { entities, favIds ->
-        android.util.Log.d("ROOM_FLOW", "Favorites: ${entities.size} items")
-        entities.toMediaItems(favIds)
+        android.util.Log.d("FAVORITES_DEBUG", "Entities=${entities.size}, FavIds=${favIds.size}")
+        val mapped = entities.toMediaItems(favIds.toSet())
+        android.util.Log.d("FAVORITES_DEBUG", "Mapped favorites count=${mapped.size}")
+        android.util.Log.d("FAVORITES_FLOW", "Favorites emitted ${mapped.size} items")
+        mapped
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -435,44 +507,54 @@ class MediaViewModel : ViewModel() {
     /**
      * IMAGES ONLY FLOW: Images from Room (Room-first)
      */
-    val imagesFlow: StateFlow<List<MediaItem>> = if (::database.isInitialized) {
-        database.mediaDao().getAllImages()
-            .combine(_favoriteIds) { entities, favIds ->
-                entities.toMediaItems(favIds)
+    /**
+     * IMAGES ONLY FLOW: Images from Room (Room-first - fully reactive)
+     */
+    val imagesFlow: StateFlow<List<MediaItem>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                flowOf(emptyList())
+            } else {
+                database.mediaDao().getAllImages()
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        entities.toMediaItems(favIds.toSet())
+                    }
             }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000),
-                initialValue = emptyList()
-            )
-    } else {
-        MutableStateFlow(emptyList())
-    }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
     
     /**
-     * VIDEOS ONLY FLOW: Videos from Room (Room-first)
+     * VIDEOS ONLY FLOW: Videos from Room (Room-first - fully reactive)
      */
-    val videosFlow: StateFlow<List<MediaItem>> = if (::database.isInitialized) {
-        database.mediaDao().getAllVideos()
-            .combine(_favoriteIds) { entities, favIds ->
-                entities.toMediaItems(favIds)
+    val videosFlow: StateFlow<List<MediaItem>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                flowOf(emptyList())
+            } else {
+                database.mediaDao().getAllVideos()
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        entities.toMediaItems(favIds.toSet())
+                    }
             }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000),
-                initialValue = emptyList()
-            )
-    } else {
-        MutableStateFlow(emptyList())
-    }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
     
     /**
      * GROUPED MEDIA FLOW: Media grouped by date/month (Room-first)
      * 
      * Dynamically groups media based on current grid type (DAY or MONTH).
-     * Updates automatically when mediaFlow or gridType changes.
+     * Uses filteredMediaFlow to apply hidden album filtering.
+     * Updates automatically when filteredMediaFlow or gridType changes.
      */
-    val groupedMediaFlow: StateFlow<List<MediaGroup>> = mediaFlow
+    val groupedMediaFlow: StateFlow<List<MediaGroup>> = filteredMediaFlow
         .combine(_gridType) { media, gridType ->
             android.util.Log.d("ROOM_FLOW", "Grouped Media: ${media.size} items grouped by $gridType")
             groupMediaForGrid(media, gridType)
@@ -556,6 +638,7 @@ class MediaViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 settingsDataStore.selectedAlbumsFlow.collect { albums ->
+                    android.util.Log.d("HIDDEN_DEBUG", "Selected albums count=${albums.size}, ids=${albums.joinToString()}")
                     _selectedAlbums.value = albums
                     // Room mediaFlow automatically handles filtering via SQL (no applySorting() needed)
                 }
@@ -1208,12 +1291,16 @@ class MediaViewModel : ViewModel() {
                 if (newState) {
                     database.favoriteDao().addFavorite(FavoriteEntity(mediaId))
                     _favoriteIds.value = _favoriteIds.value + mediaId
+                    android.util.Log.d("FAVORITES_TOGGLE", "Added favorite: $mediaId")
                 } else {
                     database.favoriteDao().removeFavorite(mediaId)
                     _favoriteIds.value = _favoriteIds.value - mediaId
+                    android.util.Log.d("FAVORITES_TOGGLE", "Removed favorite: $mediaId")
                 }
                 // Room mediaFlow automatically reflects favorite state (no applySorting() needed)
+                // favoritesFlow will automatically emit updated list via getAllFavoriteIdsFlow()
             } catch (e: Exception) {
+                android.util.Log.e("FAVORITES_TOGGLE", "Error toggling favorite", e)
                 e.printStackTrace()
             }
         }
