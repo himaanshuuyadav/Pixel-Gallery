@@ -74,6 +74,9 @@ fun SearchScreen(
     val searchResultsRaw by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
     val isSearching by viewModel.isSearching.collectAsState()
     
+    // CALLING TAB LOG
+    android.util.Log.d("SCREEN_TAB", "SearchScreen collected ${searchResultsRaw.size} results for query='$searchQuery'")
+    
     // ROOM-FIRST: Compute search result structure from raw media list
     val searchResults = remember(searchResultsRaw) {
         val matchedAlbums = searchResultsRaw
