@@ -43,6 +43,9 @@ Thumbs.db
 bin/
 gen/
 output.json
+**/BuildConfig.kt
+app/src/debug/
+app/src/release/
 
 # Kotlin
 .kotlin/
