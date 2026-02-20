@@ -213,12 +213,8 @@ fun PhotosContent(
     val showLoading = isLoading && (!hasLoadedOnce || (images.isEmpty() && videos.isEmpty()))
     
     // ROOM-FIRST: Use Room flows (single source of truth, computed once on IO/Default thread)
-    // Use filteredMediaFlow to apply hidden album filtering
-    val sortedMediaList by viewModel.filteredMediaFlow.collectAsState()
+    val sortedMediaList by viewModel.mediaFlow.collectAsState()
     val groupedMedia by viewModel.groupedMediaFlow.collectAsState()
-    
-    // CALLING TAB LOG
-    android.util.Log.d("SCREEN_TAB", "PhotosScreen collected ${sortedMediaList.size} items from filtered media")
     
     // Create index map for O(1) lookups instead of O(n) indexOf()
     val indexMap = remember(sortedMediaList) {
