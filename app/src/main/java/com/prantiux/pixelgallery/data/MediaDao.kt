@@ -63,51 +63,6 @@ interface MediaDao {
     fun searchMedia(query: String): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
-    // ADVANCED SEARCH - ML LABELS (Future implementation when labels table ready)
-    // Search by ML-generated labels (e.g., "dog", "sunset", "mountain")
-    // ═════════════════════════════════════════════════════════════════════
-    @Query("""
-        SELECT DISTINCT m.* FROM media m
-        LEFT JOIN media_labels ml ON m.id = ml.mediaId
-        WHERE ml.label LIKE '%' || :query || '%'
-        ORDER BY m.dateAdded DESC
-    """)
-    fun searchMediaByLabel(query: String): Flow<List<MediaEntity>>
-
-    // ═════════════════════════════════════════════════════════════════════
-    // ADVANCED SEARCH - DATE RANGE
-    // Find media within a specific date range
-    // ═════════════════════════════════════════════════════════════════════
-    @Query("""
-        SELECT * FROM media
-        WHERE dateAdded BETWEEN :startDate AND :endDate
-        ORDER BY dateAdded DESC
-    """)
-    fun searchMediaByDateRange(startDate: Long, endDate: Long): Flow<List<MediaEntity>>
-
-    // ═════════════════════════════════════════════════════════════════════
-    // ADVANCED SEARCH - SIZE RANGE
-    // Find media within a specific file size range (in bytes)
-    // ═════════════════════════════════════════════════════════════════════
-    @Query("""
-        SELECT * FROM media
-        WHERE size BETWEEN :minSize AND :maxSize
-        ORDER BY dateAdded DESC
-    """)
-    fun searchMediaBySize(minSize: Long, maxSize: Long): Flow<List<MediaEntity>>
-
-    // ═════════════════════════════════════════════════════════════════════
-    // SMART ALBUMS - SCREENSHOTS
-    // Find all screenshots (path contains "Screenshots")
-    // ═════════════════════════════════════════════════════════════════════
-    @Query("""
-        SELECT * FROM media
-        WHERE path LIKE '%Screenshot%'
-        ORDER BY dateAdded DESC
-    """)
-    fun getScreenshots(): Flow<List<MediaEntity>>
-
-    // ═════════════════════════════════════════════════════════════════════
     // ALBUMS QUERY (Group by bucket)
     // ═════════════════════════════════════════════════════════════════════
     @Query("""
@@ -153,6 +108,132 @@ interface MediaDao {
         ORDER BY f.timestamp DESC
     """)
     fun getFavoriteMedia(): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - DATE FILTERING (with name search)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND dateAdded >= :startMs AND dateAdded <= :endMs
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByDateRange(query: String, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - MEDIA TYPE FILTERING (photo/video with name search)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND isVideo = :isVideo
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByMediaType(query: String, isVideo: Boolean): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - SIZE FILTERING (with name search)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND size BETWEEN :minSize AND :maxSize
+        ORDER BY dateAdded DESC
+    """)
+    fun searchBySize(query: String, minSize: Long, maxSize: Long): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - GIF FILTERING (mimeType)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND mimeType LIKE '%gif%'
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByGif(query: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - SCREENSHOT FILTERING (special case)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' 
+              OR bucketName LIKE '%' || :query || '%'
+              OR bucketName LIKE '%screenshot%'
+              OR displayName LIKE '%screenshot%')
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByScreenshots(query: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - CAMERA FILTERING (special case)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' 
+              OR bucketName LIKE '%' || :query || '%'
+              OR bucketName LIKE '%camera%'
+              OR bucketName LIKE '%dcim%')
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByCamera(query: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ADVANCED SEARCH - ML LABEL FILTERING (with JOIN to media_labels)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT DISTINCT m.* FROM media m
+        INNER JOIN media_labels ml ON m.id = ml.mediaId
+        WHERE ml.labels LIKE '%' || :label || '%'
+        ORDER BY m.dateAdded DESC
+    """)
+    fun searchByLabel(label: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // COMPOSITE SEARCHES - MULTIPLE FILTERS
+    // ═════════════════════════════════════════════════════════════════════
+    
+    // Type + Date
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND isVideo = :isVideo
+        AND dateAdded >= :startMs AND dateAdded <= :endMs
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByTypeAndDate(query: String, isVideo: Boolean, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
+
+    // Type + Size
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND isVideo = :isVideo
+        AND size BETWEEN :minSize AND :maxSize
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByTypeAndSize(query: String, isVideo: Boolean, minSize: Long, maxSize: Long): Flow<List<MediaEntity>>
+
+    // Size + Date
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND size BETWEEN :minSize AND :maxSize
+        AND dateAdded >= :startMs AND dateAdded <= :endMs
+        ORDER BY dateAdded DESC
+    """)
+    fun searchBySizeAndDate(query: String, minSize: Long, maxSize: Long, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
+
+    // Type + Size + Date
+    @Query("""
+        SELECT * FROM media
+        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
+        AND isVideo = :isVideo
+        AND size BETWEEN :minSize AND :maxSize
+        AND dateAdded >= :startMs AND dateAdded <= :endMs
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByTypeAndSizeAndDate(query: String, isVideo: Boolean, minSize: Long, maxSize: Long, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
     // UTILITY QUERIES
