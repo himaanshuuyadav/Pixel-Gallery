@@ -190,7 +190,11 @@ fun MediaOverlay(
     
     // Favorite states - track which items are favorited
     val favoriteStates = remember { mutableStateMapOf<Long, Boolean>().apply {
-        mediaItems.forEach { item -> put(item.id, item.isFavorite) }
+        mediaItems.forEach { item -> 
+            put(item.id, item.isFavorite)
+            android.util.Log.d("OVERLAY_FAVORITE_INIT", "Initialized: [${item.id}] ${item.displayName} = isFavorite=${item.isFavorite}")
+        }
+        android.util.Log.d("OVERLAY_FAVORITE_INIT", "Total favorites initialized: ${this.size}")
     } }
     
     // Favorite message pill state
@@ -423,6 +427,14 @@ fun MediaOverlay(
     
     val toggleFavorite: () -> Unit = {
         mediaItems.getOrNull(currentIndex)?.let { item ->
+            // DETAILED LOGGING
+            val toggleTime = System.currentTimeMillis()
+            val beforeState = favoriteStates[item.id] ?: item.isFavorite
+            
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "User tapped star icon at index=$currentIndex")
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Item: [${item.id}] ${item.displayName}")
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Before: favoriteStates[${item.id}]=$beforeState, item.isFavorite=${item.isFavorite}")
+            
             // Haptic feedback
             view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
             
@@ -431,12 +443,19 @@ fun MediaOverlay(
             val newState = !currentState
             favoriteStates[item.id] = newState
             
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  New state: $beforeState → $newState")
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Calling viewModel.toggleFavorite(${item.id}, $newState)...")
+            
             // Persist to database via ViewModel
             viewModel.toggleFavorite(item.id, newState)
+            
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  ✓ ViewModel.toggleFavorite() completed in ${System.currentTimeMillis() - toggleTime}ms")
             
             // Show pill message
             favoriteMessage = if (newState) "Added to favourites" else "Removed from favourites"
             showFavoritePill = true
+            
+            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Message: $favoriteMessage")
         }
     }
     
@@ -1141,6 +1160,15 @@ fun MediaOverlay(
                     // Right side: Favorite button (replaces three-dot menu)
                     if (!isTrashMode) {
                         val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
+                        
+                        // DEBUG LOG: Star icon state
+                        currentItem?.let { item ->
+                            android.util.Log.v("OVERLAY_STAR_ICON", "Star icon state for [${item.id}] ${item.displayName}")
+                            android.util.Log.v("OVERLAY_STAR_ICON", "  favoriteStates[${item.id}]=${favoriteStates[item.id]}")
+                            android.util.Log.v("OVERLAY_STAR_ICON", "  item.isFavorite=${item.isFavorite}")
+                            android.util.Log.v("OVERLAY_STAR_ICON", "  Final display: isFavorited=$isFavorited")
+                        }
+                        
                         IconButton(onClick = toggleFavorite) {
                             FontIcon(
                                 unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
