@@ -117,8 +117,8 @@ class MediaViewModel : ViewModel() {
     @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
     val allVideosUnfiltered: StateFlow<List<MediaItem>> = _allVideosUnfiltered.asStateFlow()
     
-    private val _favoriteIds = MutableStateFlow<Set<Long>>(emptySet())
-    val favoriteIds: StateFlow<Set<Long>> = _favoriteIds.asStateFlow()
+    // DEPRECATED: _favoriteIds removed - was redundant manual cache causing sync issues
+    // Room's getAllFavoriteIdsFlow() is now the single source of truth
     
     @Deprecated("Use favoritesFlow instead - Room-first architecture", ReplaceWith("favoritesFlow"))
     private val _favoriteItems = MutableStateFlow<List<MediaItem>>(emptyList())
@@ -349,32 +349,6 @@ class MediaViewModel : ViewModel() {
         )
     
     /**
-     * FILTERED MEDIA FLOW: Apply hidden album filtering (Room-first)
-     * 
-     * Filters mediaFlow based on selectedAlbums (hidden albums).
-     * If selectedAlbums is empty, returns all media (no filtering).
-     * Otherwise, filters to only show items from visible albums.
-     * 
-     * UI screens should observe this instead of mediaFlow for accurate album visibility.
-     */
-    val filteredMediaFlow: StateFlow<List<MediaItem>> = mediaFlow
-        .combine(_selectedAlbums) { media, visibleAlbums ->
-            if (visibleAlbums.isEmpty()) {
-                android.util.Log.d("HIDDEN_DEBUG", "No album filter: showing all ${media.size} items")
-                media
-            } else {
-                val filtered = media.filter { it.bucketId in visibleAlbums }
-                android.util.Log.d("HIDDEN_DEBUG", "Filtered ${media.size} → ${filtered.size} items (${visibleAlbums.size} visible albums)")
-                filtered
-            }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    
-    /**
      * ALBUMS FLOW: Album list from Room (Room-first)
      * 
      * Groups media by bucketId directly from Room.
@@ -442,17 +416,373 @@ class MediaViewModel : ViewModel() {
      * Updates automatically as search query changes.
      */
     fun searchMediaFlow(query: String): kotlinx.coroutines.flow.Flow<List<MediaItem>> {
-        android.util.Log.d("SEARCH_DEBUG", "Search query='$query'")
-        return if (query.isBlank()) {
-            kotlinx.coroutines.flow.flowOf(emptyList())
-        } else {
-            android.util.Log.d("SEARCH_DEBUG", "Using Room search flow")
-            kotlinx.coroutines.flow.combine(
-                database.mediaDao().searchMedia(query),
-                database.favoriteDao().getAllFavoriteIdsFlow()
-            ) { entities, favIds ->
-                android.util.Log.d("SEARCH_FLOW", "Query '$query' returned ${entities.size} items")
-                entities.toMediaItems(favIds.toSet())
+        android.util.Log.d("SEARCH_ROOM", "═══════════════════════════════════════════════════════════")
+        android.util.Log.d("SEARCH_ROOM", "🔍 searchMediaFlow() called with query='$query'")
+        
+        if (query.isBlank()) {
+            android.util.Log.d("SEARCH_ROOM", "  → Empty query, returning emptyList")
+            return kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+        
+        val normalizedQuery = query.lowercase(java.util.Locale.getDefault()).trim()
+        android.util.Log.d("SEARCH_ROOM", "  Normalized: '$normalizedQuery'")
+        
+        // DETECT FILTERS using SearchEngine's logic
+        val dateFilter = detectSearchDateFilter(normalizedQuery)
+        val typeFilter = detectSearchMediaTypeFilter(normalizedQuery)
+        val sizeFilter = detectSearchSizeFilter(normalizedQuery)
+        val cleanQuery = removeKeywords(normalizedQuery)
+        
+        android.util.Log.d("SEARCH_ROOM", "  Detected filters:")
+        android.util.Log.d("SEARCH_ROOM", "    - Date: ${dateFilter?.toString() ?: "none"}")
+        android.util.Log.d("SEARCH_ROOM", "    - Type: ${typeFilter?.toString() ?: "none"}")
+        android.util.Log.d("SEARCH_ROOM", "    - Size: ${sizeFilter?.toString() ?: "none"}")
+        android.util.Log.d("SEARCH_ROOM", "    - Clean query: '$cleanQuery'")
+        
+        // SELECT APPROPRIATE DAO QUERY based on detected filters
+        val daoQuery: kotlinx.coroutines.flow.Flow<List<MediaEntity>> = when {
+            // ML LABEL SEARCH (if query matches a label-like pattern)
+            cleanQuery.isNotEmpty() && typeFilter == null && dateFilter == null && sizeFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByLabel() for potential ML search")
+                database.mediaDao().searchByLabel(cleanQuery)
+            }
+            
+            // SCREENSHOT (special case)
+            normalizedQuery.contains("screenshot") -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByScreenshots()")
+                database.mediaDao().searchByScreenshots(cleanQuery)
+            }
+            
+            // CAMERA (special case)
+            normalizedQuery.contains("camera") || normalizedQuery.contains("dcim") -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByCamera()")
+                database.mediaDao().searchByCamera(cleanQuery)
+            }
+            
+            // GIF (special case)
+            normalizedQuery.contains("gif") -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByGif()")
+                database.mediaDao().searchByGif(cleanQuery)
+            }
+            
+            // ALL THREE FILTERS (Type + Size + Date)
+            typeFilter != null && sizeFilter != null && dateFilter != null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByTypeAndSizeAndDate() combo")
+                val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
+                val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
+                val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
+                
+                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName, Size: $sizeName, Date: $dateName")
+                database.mediaDao().searchByTypeAndSizeAndDate(
+                    query = cleanQuery,
+                    isVideo = isVideo,
+                    minSize = minSize,
+                    maxSize = maxSize,
+                    startMs = startMs,
+                    endMs = endMs
+                )
+            }
+            
+            // TYPE + DATE
+            typeFilter != null && dateFilter != null && sizeFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByTypeAndDate() combo")
+                val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
+                val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
+                
+                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName, Date: $dateName")
+                database.mediaDao().searchByTypeAndDate(
+                    query = cleanQuery,
+                    isVideo = isVideo,
+                    startMs = startMs,
+                    endMs = endMs
+                )
+            }
+            
+            // TYPE + SIZE
+            typeFilter != null && sizeFilter != null && dateFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByTypeAndSize() combo")
+                val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
+                val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
+                
+                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName, Size: $sizeName")
+                database.mediaDao().searchByTypeAndSize(
+                    query = cleanQuery,
+                    isVideo = isVideo,
+                    minSize = minSize,
+                    maxSize = maxSize
+                )
+            }
+            
+            // SIZE + DATE
+            sizeFilter != null && dateFilter != null && typeFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchBySizeAndDate() combo")
+                val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
+                val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
+                
+                android.util.Log.d("SEARCH_ROOM", "    Size: $sizeName, Date: $dateName")
+                database.mediaDao().searchBySizeAndDate(
+                    query = cleanQuery,
+                    minSize = minSize,
+                    maxSize = maxSize,
+                    startMs = startMs,
+                    endMs = endMs
+                )
+            }
+            
+            // ONLY TYPE
+            typeFilter != null && dateFilter == null && sizeFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByMediaType()")
+                val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
+                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName")
+                database.mediaDao().searchByMediaType(query = cleanQuery, isVideo = isVideo)
+            }
+            
+            // ONLY SIZE
+            sizeFilter != null && typeFilter == null && dateFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchBySize()")
+                val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
+                android.util.Log.d("SEARCH_ROOM", "    Size: $sizeName")
+                database.mediaDao().searchBySize(query = cleanQuery, minSize = minSize, maxSize = maxSize)
+            }
+            
+            // ONLY DATE
+            dateFilter != null && typeFilter == null && sizeFilter == null -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using searchByDateRange()")
+                val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
+                android.util.Log.d("SEARCH_ROOM", "    Date: $dateName")
+                database.mediaDao().searchByDateRange(query = cleanQuery, startMs = startMs, endMs = endMs)
+            }
+            
+            // DEFAULT: Just name search
+            else -> {
+                android.util.Log.d("SEARCH_ROOM", "  → Using basic searchMedia()")
+                database.mediaDao().searchMedia(cleanQuery)
+            }
+        }
+        
+        // COMBINE with favorite IDs and map to MediaItems
+        return kotlinx.coroutines.flow.combine(
+            daoQuery,
+            database.favoriteDao().getAllFavoriteIdsFlow()
+        ) { entities, favIds ->
+            val resultTime = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS"))
+            android.util.Log.d("SEARCH_ROOM", "  [$resultTime] Room query returned ${entities.size} items")
+            
+            val mapped = entities.toMediaItems(favIds.toSet())
+            android.util.Log.d("SEARCH_ROOM", "  ✓ Mapped to MediaItems: ${mapped.size} items with isFavorite set")
+            
+            mapped
+        }
+    }
+    
+    // ─────────────────────────────────────────────────────────────────────
+    // HELPER FUNCTIONS FOR SEARCH FILTER DETECTION & PARSING
+    // ─────────────────────────────────────────────────────────────────────
+    
+    private fun detectSearchDateFilter(query: String): SearchEngine.DateFilter? {
+        return when {
+            query.contains("today") -> SearchEngine.DateFilter.Today
+            query.contains("yesterday") -> SearchEngine.DateFilter.Yesterday
+            query.contains("this week") -> SearchEngine.DateFilter.ThisWeek
+            query.contains("last week") -> SearchEngine.DateFilter.LastWeek
+            query.contains("this month") -> SearchEngine.DateFilter.ThisMonth
+            query.contains("last month") -> SearchEngine.DateFilter.LastMonth
+            query.matches(Regex(".*\\b(202[0-9]|201[0-9])\\b.*")) -> {
+                val year = Regex("\\b(202[0-9]|201[0-9])\\b").find(query)?.value?.toInt()
+                if (year != null) SearchEngine.DateFilter.Year(year) else null
+            }
+            query.contains("january") || query.contains("jan") -> SearchEngine.DateFilter.Month(java.util.Calendar.JANUARY)
+            query.contains("february") || query.contains("feb") -> SearchEngine.DateFilter.Month(java.util.Calendar.FEBRUARY)
+            query.contains("march") || query.contains("mar") -> SearchEngine.DateFilter.Month(java.util.Calendar.MARCH)
+            query.contains("april") || query.contains("apr") -> SearchEngine.DateFilter.Month(java.util.Calendar.APRIL)
+            query.contains("may") -> SearchEngine.DateFilter.Month(java.util.Calendar.MAY)
+            query.contains("june") || query.contains("jun") -> SearchEngine.DateFilter.Month(java.util.Calendar.JUNE)
+            query.contains("july") || query.contains("jul") -> SearchEngine.DateFilter.Month(java.util.Calendar.JULY)
+            query.contains("august") || query.contains("aug") -> SearchEngine.DateFilter.Month(java.util.Calendar.AUGUST)
+            query.contains("september") || query.contains("sep") -> SearchEngine.DateFilter.Month(java.util.Calendar.SEPTEMBER)
+            query.contains("october") || query.contains("oct") -> SearchEngine.DateFilter.Month(java.util.Calendar.OCTOBER)
+            query.contains("november") || query.contains("nov") -> SearchEngine.DateFilter.Month(java.util.Calendar.NOVEMBER)
+            query.contains("december") || query.contains("dec") -> SearchEngine.DateFilter.Month(java.util.Calendar.DECEMBER)
+            else -> null
+        }
+    }
+    
+    private fun detectSearchMediaTypeFilter(query: String): SearchEngine.MediaTypeFilter? {
+        return when {
+            query.contains("video") -> SearchEngine.MediaTypeFilter.Videos
+            query.contains("photo") || query.contains("image") -> SearchEngine.MediaTypeFilter.Photos
+            query.contains("gif") -> SearchEngine.MediaTypeFilter.Gifs
+            query.contains("screenshot") -> SearchEngine.MediaTypeFilter.Screenshots
+            query.contains("camera") -> SearchEngine.MediaTypeFilter.Camera
+            else -> null
+        }
+    }
+    
+    private fun detectSearchSizeFilter(query: String): SearchEngine.SizeFilter? {
+        return when {
+            query.contains("small") -> SearchEngine.SizeFilter.Small
+            query.contains("medium") -> SearchEngine.SizeFilter.Medium
+            query.contains("large") -> SearchEngine.SizeFilter.Large
+            else -> null
+        }
+    }
+    
+    private fun removeKeywords(query: String): String {
+        var cleaned = query
+        
+        val dateKeywords = listOf(
+            "today", "yesterday", "this week", "last week", "this month", "last month",
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december",
+            "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"
+        )
+        dateKeywords.forEach { cleaned = cleaned.replace(it, "") }
+        
+        cleaned = cleaned.replace(Regex("\\b(202[0-9]|201[0-9])\\b"), "")
+        
+        val typeKeywords = listOf("photo", "photos", "image", "images", "video", "videos", "gif", "gifs", "screenshot", "camera", "dcim")
+        typeKeywords.forEach { cleaned = cleaned.replace(it, "") }
+        
+        val sizeKeywords = listOf("small", "medium", "large")
+        sizeKeywords.forEach { cleaned = cleaned.replace(it, "") }
+        
+        val commonWords = listOf("from", "in", "on", "the", "a", "an")
+        commonWords.forEach { cleaned = cleaned.replace(Regex("\\b$it\\b"), "") }
+        
+        return cleaned.trim().replace(Regex("\\s+"), " ")
+    }
+    
+    private fun parseMediaTypeFilter(filter: SearchEngine.MediaTypeFilter): Pair<Boolean, String> {
+        return when (filter) {
+            SearchEngine.MediaTypeFilter.Photos -> Pair(false, "Photos")
+            SearchEngine.MediaTypeFilter.Videos -> Pair(true, "Videos")
+            SearchEngine.MediaTypeFilter.Gifs -> Pair(false, "GIFs")
+            SearchEngine.MediaTypeFilter.Screenshots -> Pair(false, "Screenshots")
+            SearchEngine.MediaTypeFilter.Camera -> Pair(false, "Camera Roll")
+        }
+    }
+    
+    private fun parseSizeFilter(filter: SearchEngine.SizeFilter): Triple<Long, Long, String> {
+        val fiveMB = 5 * 1024 * 1024L
+        val hundredMB = 100 * 1024 * 1024L
+        
+        return when (filter) {
+            SearchEngine.SizeFilter.Small -> Triple(0L, fiveMB, "Small (<5MB)")
+            SearchEngine.SizeFilter.Medium -> Triple(fiveMB, hundredMB, "Medium (5-100MB)")
+            SearchEngine.SizeFilter.Large -> Triple(hundredMB, Long.MAX_VALUE, "Large (>100MB)")
+        }
+    }
+    
+    private fun parseDateFilter(filter: SearchEngine.DateFilter): Triple<Long, Long, String> {
+        val cal = java.util.Calendar.getInstance()
+        val now = System.currentTimeMillis()
+        
+        return when (filter) {
+            SearchEngine.DateFilter.Today -> {
+                cal.apply {
+                    timeInMillis = now
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                val endMs = startMs + (24 * 60 * 60 * 1000L)
+                Triple(startMs, endMs, "Today")
+            }
+            SearchEngine.DateFilter.Yesterday -> {
+                cal.apply {
+                    timeInMillis = now
+                    add(java.util.Calendar.DAY_OF_YEAR, -1)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                val endMs = startMs + (24 * 60 * 60 * 1000L)
+                Triple(startMs, endMs, "Yesterday")
+            }
+            SearchEngine.DateFilter.ThisWeek -> {
+                cal.apply {
+                    timeInMillis = now
+                    set(java.util.Calendar.DAY_OF_WEEK, firstDayOfWeek)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                val endMs = now
+                Triple(startMs, endMs, "This Week")
+            }
+            SearchEngine.DateFilter.LastWeek -> {
+                cal.apply {
+                    timeInMillis = now
+                    add(java.util.Calendar.WEEK_OF_YEAR, -1)
+                    set(java.util.Calendar.DAY_OF_WEEK, firstDayOfWeek)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                val endMs = startMs + (7 * 24 * 60 * 60 * 1000L)
+                Triple(startMs, endMs, "Last Week")
+            }
+            SearchEngine.DateFilter.ThisMonth -> {
+                cal.apply {
+                    timeInMillis = now
+                    set(java.util.Calendar.DAY_OF_MONTH, 1)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                val endMs = now
+                Triple(startMs, endMs, "This Month")
+            }
+            SearchEngine.DateFilter.LastMonth -> {
+                cal.apply {
+                    timeInMillis = now
+                    add(java.util.Calendar.MONTH, -1)
+                    set(java.util.Calendar.DAY_OF_MONTH, 1)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                cal.add(java.util.Calendar.MONTH, 1)
+                cal.add(java.util.Calendar.MILLISECOND, -1)
+                val endMs = cal.timeInMillis
+                Triple(startMs, endMs, "Last Month")
+            }
+            is SearchEngine.DateFilter.Year -> {
+                cal.apply {
+                    timeInMillis = now
+                    set(java.util.Calendar.YEAR, filter.year)
+                    set(java.util.Calendar.DAY_OF_YEAR, 1)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                cal.add(java.util.Calendar.YEAR, 1)
+                cal.add(java.util.Calendar.MILLISECOND, -1)
+                val endMs = cal.timeInMillis
+                Triple(startMs, endMs, "${filter.year}")
+            }
+            is SearchEngine.DateFilter.Month -> {
+                cal.apply {
+                    timeInMillis = now
+                    set(java.util.Calendar.MONTH, filter.month)
+                    set(java.util.Calendar.DAY_OF_MONTH, 1)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                val startMs = cal.timeInMillis
+                cal.add(java.util.Calendar.MONTH, 1)
+                cal.add(java.util.Calendar.MILLISECOND, -1)
+                val endMs = cal.timeInMillis
+                val monthName = java.text.SimpleDateFormat("MMMM", java.util.Locale.getDefault()).format(cal.time)
+                Triple(startMs, endMs, monthName)
             }
         }
     }
@@ -486,23 +816,48 @@ class MediaViewModel : ViewModel() {
     /**
      * FAVORITES FLOW: Favorite media from Room (Room-first)
      * 
-     * Gets favorites via JOIN query with favorites table.
+     * Waits for database readiness, then filters all media by favorite IDs.
+     * Avoids problematic INNER JOIN - uses simple List filtering instead.
      * Updates automatically when favorites change (fully reactive).
      */
-    val favoritesFlow: StateFlow<List<MediaItem>> = kotlinx.coroutines.flow.combine(
-        if (::database.isInitialized) database.mediaDao().getFavoriteMedia() else kotlinx.coroutines.flow.flowOf(emptyList()),
-        if (::database.isInitialized) database.favoriteDao().getAllFavoriteIdsFlow() else kotlinx.coroutines.flow.flowOf(emptyList())
-    ) { entities, favIds ->
-        android.util.Log.d("FAVORITES_DEBUG", "Entities=${entities.size}, FavIds=${favIds.size}")
-        val mapped = entities.toMediaItems(favIds.toSet())
-        android.util.Log.d("FAVORITES_DEBUG", "Mapped favorites count=${mapped.size}")
-        android.util.Log.d("FAVORITES_FLOW", "Favorites emitted ${mapped.size} items")
-        mapped
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
+    val favoritesFlow: StateFlow<List<MediaItem>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                flowOf(emptyList())
+            } else {
+                database.mediaDao().getAllMedia()
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { allMedia, favIds ->
+                        val flowEmitTime = try {
+                            java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS"))
+                        } catch (e: Exception) {
+                            "??:??:??.???"
+                        }
+                        
+                        // LOG SOURCE DETAILS
+                        android.util.Log.d("FAVORITES_FLOW", "[$flowEmitTime] combine emitted:")
+                        android.util.Log.d("FAVORITES_FLOW", "  - All media: ${allMedia.size} items")
+                        android.util.Log.d("FAVORITES_FLOW", "  - Favorite IDs: ${favIds.size} IDs = [${favIds.take(5).joinToString(",")}${if(favIds.size > 5) "..." else ""}]")
+                        
+                        // FILTER: Get media items where ID is in favorite IDs
+                        val favIdSet = favIds.toSet()
+                        val filtered = allMedia.filter { it.id in favIdSet }
+                        
+                        android.util.Log.d("FAVORITES_FLOW", "  - Filtered result: ${filtered.size} items")
+                        
+                        // MAP: MediaEntity → MediaItem (set isFavorite=true for all filtered items)
+                        val mapped = filtered.toMediaItems(favIdSet)
+                        
+                        android.util.Log.d("FAVORITES_FLOW", "  - Mapped result: ${mapped.size} items (all with isFavorite=true)")
+                        
+                        mapped
+                    }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
     
     /**
      * IMAGES ONLY FLOW: Images from Room (Room-first)
@@ -551,10 +906,9 @@ class MediaViewModel : ViewModel() {
      * GROUPED MEDIA FLOW: Media grouped by date/month (Room-first)
      * 
      * Dynamically groups media based on current grid type (DAY or MONTH).
-     * Uses filteredMediaFlow to apply hidden album filtering.
-     * Updates automatically when filteredMediaFlow or gridType changes.
+     * Updates automatically when mediaFlow or gridType changes.
      */
-    val groupedMediaFlow: StateFlow<List<MediaGroup>> = filteredMediaFlow
+    val groupedMediaFlow: StateFlow<List<MediaGroup>> = mediaFlow
         .combine(_gridType) { media, gridType ->
             android.util.Log.d("ROOM_FLOW", "Grouped Media: ${media.size} items grouped by $gridType")
             groupMediaForGrid(media, gridType)
@@ -599,13 +953,25 @@ class MediaViewModel : ViewModel() {
         Log.d("VM_INITIALIZE", "Database initialized")
         Log.d("VM_INITIALIZE", "initialize(): Database initialized, database.isInitialized=${::database.isInitialized}")
         
-        // Load favorite IDs from database
+        // FAVORITES INITIALIZATION: Reactive Flow collection
+        // Continuously observes getAllFavoriteIdsFlow() - not a one-time blocking load
+        android.util.Log.d("FAVORITES_INIT", "initialize(): Setting up reactive favorite IDs observation...")
         viewModelScope.launch {
             try {
-                val ids = database.favoriteDao().getAllFavoriteIds()
-                _favoriteIds.value = ids.toSet()
+                database.favoriteDao().getAllFavoriteIdsFlow().collect { ids ->
+                    val initTime = try { 
+                        java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")) 
+                    } catch (e: Exception) { 
+                        "??:??:??.???" 
+                    }
+                    android.util.Log.d("FAVORITES_INIT", "[$initTime] getAllFavoriteIdsFlow emitted: ${ids.size} favorite IDs")
+                    if (ids.isNotEmpty()) {
+                        android.util.Log.d("FAVORITES_INIT", "  IDs: [${ids.take(5).joinToString(",")}${if(ids.size > 5) ",..." else ""}]")
+                    }
+                }
             } catch (e: Exception) {
-                // Ignore errors
+                android.util.Log.e("FAVORITES_INIT", "ERROR: Failed to observe favorite IDs", e)
+                e.printStackTrace()
             }
         }
         
@@ -1284,23 +1650,41 @@ class MediaViewModel : ViewModel() {
         )
     }
     
-    // Favorites functions
+    // Favorites functions - ROOM-FIRST: Only write to database, let Flow streams re-emit
     fun toggleFavorite(mediaId: Long, newState: Boolean) {
+        val toggleStart = System.currentTimeMillis()
+        val toggleTime = try { 
+            java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")) 
+        } catch (e: Exception) { 
+            "??:??:??.???" 
+        }
+        
+        android.util.Log.d("FAVORITES_TOGGLE", "[$toggleTime] toggleFavorite called: mediaId=$mediaId, newState=$newState")
+        
         viewModelScope.launch {
             try {
                 if (newState) {
+                    // ADD TO FAVORITES
+                    android.util.Log.d("FAVORITES_TOGGLE", "  → Inserting into favorites table...")
                     database.favoriteDao().addFavorite(FavoriteEntity(mediaId))
-                    _favoriteIds.value = _favoriteIds.value + mediaId
-                    android.util.Log.d("FAVORITES_TOGGLE", "Added favorite: $mediaId")
+                    val addDuration = System.currentTimeMillis() - toggleStart
+                    
+                    android.util.Log.d("FAVORITES_TOGGLE", "✓ Added favorite id=$mediaId to DB in ${addDuration}ms")
+                    android.util.Log.d("FAVORITES_TOGGLE", "  → Room will emit new favorite IDs from getAllFavoriteIdsFlow()")
+                    android.util.Log.d("FAVORITES_TOGGLE", "  → favoritesFlow will recompute and re-emit")
                 } else {
+                    // REMOVE FROM FAVORITES
+                    android.util.Log.d("FAVORITES_TOGGLE", "  → Deleting from favorites table...")
                     database.favoriteDao().removeFavorite(mediaId)
-                    _favoriteIds.value = _favoriteIds.value - mediaId
-                    android.util.Log.d("FAVORITES_TOGGLE", "Removed favorite: $mediaId")
+                    val removeDuration = System.currentTimeMillis() - toggleStart
+                    
+                    android.util.Log.d("FAVORITES_TOGGLE", "✓ Removed favorite id=$mediaId from DB in ${removeDuration}ms")
+                    android.util.Log.d("FAVORITES_TOGGLE", "  → Room will emit new favorite IDs from getAllFavoriteIdsFlow()")
+                    android.util.Log.d("FAVORITES_TOGGLE", "  → favoritesFlow will recompute and re-emit")
                 }
-                // Room mediaFlow automatically reflects favorite state (no applySorting() needed)
-                // favoritesFlow will automatically emit updated list via getAllFavoriteIdsFlow()
             } catch (e: Exception) {
-                android.util.Log.e("FAVORITES_TOGGLE", "Error toggling favorite", e)
+                val errorDuration = System.currentTimeMillis() - toggleStart
+                android.util.Log.e("FAVORITES_TOGGLE", "✗ DATABASE ERROR after ${errorDuration}ms: ${e.message}", e)
                 e.printStackTrace()
             }
         }
