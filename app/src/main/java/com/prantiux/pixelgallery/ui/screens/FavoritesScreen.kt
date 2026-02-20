@@ -29,8 +29,20 @@ fun FavoritesScreen(
     // ROOM-FIRST: Use Room-based favorites flow
     val favoriteItems by viewModel.favoritesFlow.collectAsState()
     
-    // CALLING TAB LOG
-    android.util.Log.d("SCREEN_TAB", "FavoritesScreen collected ${favoriteItems.size} favorites")
+    // DETAILED LOGGING FOR DEBUGGING
+    val collectionTime = try {
+        java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS"))
+    } catch (e: Exception) {
+        "??:??:??.???"
+    }
+    
+    android.util.Log.d("SCREEN_TAB", "[$collectionTime] FavoritesScreen collected ${favoriteItems.size} favorites from favoritesFlow")
+    if (favoriteItems.isNotEmpty()) {
+        android.util.Log.d("SCREEN_TAB", "  Items: ${favoriteItems.take(3).map { "${it.id}: ${it.displayName}" }.joinToString(", ")}${if (favoriteItems.size > 3) ", ..." else ""}")
+        favoriteItems.forEach { item ->
+            android.util.Log.d("SCREEN_TAB", "  - [${item.id}] ${item.displayName} (isFavorite=${item.isFavorite})")
+        }
+    }
     
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
