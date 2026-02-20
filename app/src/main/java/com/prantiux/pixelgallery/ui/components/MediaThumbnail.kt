@@ -181,11 +181,17 @@ fun MediaThumbnail(
         
         // Favorite star badge (canonical implementation)
         if (item.isFavorite && showFavorite && !isSelectionMode) {
+            // DEBUG LOG: Favorite badge displayed
+            android.util.Log.v("THUMBNAIL_FAVORITE_BADGE", "Displaying favorite badge for [${item.id}] ${item.displayName}")
+            
             FavoriteStarBadge(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
             )
+        } else if (item.isFavorite && !showFavorite) {
+            // Favorite but badge not shown (rare - debug)
+            android.util.Log.w("THUMBNAIL_FAVORITE_BADGE", "⚠️  Item [${item.id}] is favorite but showFavorite=false")
         }
         
         // Selection indicator (canonical implementation)
