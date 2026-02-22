@@ -29,6 +29,9 @@ interface FavoriteDao {
     
     @Query("DELETE FROM favorites WHERE mediaId = :mediaId")
     suspend fun removeFavorite(mediaId: Long)
+
+    @Query("DELETE FROM favorites WHERE mediaId IN (:mediaIds)")
+    suspend fun removeFavorites(mediaIds: List<Long>)
     
     @Query("DELETE FROM favorites")
     suspend fun clearAllFavorites()
