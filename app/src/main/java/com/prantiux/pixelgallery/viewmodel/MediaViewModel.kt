@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,63 +80,16 @@ class MediaViewModel : ViewModel() {
     private lateinit var settingsDataStore: SettingsDataStore
     private lateinit var database: AppDatabase
     private var mediaContentObserver: MediaContentObserver? = null
+    private var isSyncing = false
+    private var pendingRefresh = false
 
-    // ═════════════════════════════════════════════════════════════════════════════════
-    // DEPRECATED StateFlows: MediaStore-first architecture (DO NOT USE)
-    // ═════════════════════════════════════════════════════════════════════════════════
-    // Use Room-first flows instead (mediaFlow, imagesFlow, videosFlow, etc.)
-    // These are kept for backward compatibility during migration but will be removed.
-    // ═════════════════════════════════════════════════════════════════════════════════
-    
-    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
-    private val _images = MutableStateFlow<List<MediaItem>>(emptyList())
-    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
-    val images: StateFlow<List<MediaItem>> = _images.asStateFlow()
-
-    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
-    private val _videos = MutableStateFlow<List<MediaItem>>(emptyList())
-    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
-    val videos: StateFlow<List<MediaItem>> = _videos.asStateFlow()
-    
-    @Deprecated("Use mediaFlow instead - Room-first architecture", ReplaceWith("mediaFlow"))
-    private val _sortedMedia = MutableStateFlow<List<MediaItem>>(emptyList())
-    @Deprecated("Use mediaFlow instead - Room-first architecture", ReplaceWith("mediaFlow"))
-    val sortedMedia: StateFlow<List<MediaItem>> = _sortedMedia.asStateFlow()
-
-    @Deprecated("Use groupedMediaFlow instead - Room-first architecture", ReplaceWith("groupedMediaFlow"))
-    private val _groupedMedia = MutableStateFlow<List<MediaGroup>>(emptyList())
-    @Deprecated("Use groupedMediaFlow instead - Room-first architecture", ReplaceWith("groupedMediaFlow"))
-    val groupedMedia: StateFlow<List<MediaGroup>> = _groupedMedia.asStateFlow()
-    
-    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
-    private val _allImagesUnfiltered = MutableStateFlow<List<MediaItem>>(emptyList())
-    @Deprecated("Use imagesFlow instead - Room-first architecture", ReplaceWith("imagesFlow"))
-    val allImagesUnfiltered: StateFlow<List<MediaItem>> = _allImagesUnfiltered.asStateFlow()
-    
-    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
-    private val _allVideosUnfiltered = MutableStateFlow<List<MediaItem>>(emptyList())
-    @Deprecated("Use videosFlow instead - Room-first architecture", ReplaceWith("videosFlow"))
-    val allVideosUnfiltered: StateFlow<List<MediaItem>> = _allVideosUnfiltered.asStateFlow()
-    
-    // DEPRECATED: _favoriteIds removed - was redundant manual cache causing sync issues
-    // Room's getAllFavoriteIdsFlow() is now the single source of truth
-    
-    @Deprecated("Use favoritesFlow instead - Room-first architecture", ReplaceWith("favoritesFlow"))
-    private val _favoriteItems = MutableStateFlow<List<MediaItem>>(emptyList())
-    @Deprecated("Use favoritesFlow instead - Room-first architecture", ReplaceWith("favoritesFlow"))
-    val favoriteItems: StateFlow<List<MediaItem>> = _favoriteItems.asStateFlow()
-
+    // Active Album management for smart albums only
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
     private val _smartAlbumThumbnailCache = mutableStateMapOf<String, android.net.Uri?>()
     val smartAlbumThumbnailCache: SnapshotStateMap<String, android.net.Uri?>
         get() = _smartAlbumThumbnailCache
-
-    @Deprecated("Use categorizedAlbumsFlow instead - Room-first architecture", ReplaceWith("categorizedAlbumsFlow"))
-    private val _categorizedAlbums = MutableStateFlow<CategorizedAlbums>(CategorizedAlbums(emptyList(), emptyList()))
-    @Deprecated("Use categorizedAlbumsFlow instead - Room-first architecture", ReplaceWith("categorizedAlbumsFlow"))
-    val categorizedAlbums: StateFlow<CategorizedAlbums> = _categorizedAlbums.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -227,6 +181,8 @@ class MediaViewModel : ViewModel() {
     // Store URIs being processed
     private var pendingRestoreUris: List<android.net.Uri> = emptyList()
     private var pendingDeleteUris: List<android.net.Uri> = emptyList()
+    private var pendingDeleteIds: List<Long> = emptyList()
+    private var suppressObserverUntilMs: Long = 0L
     
     fun setTrashRequestLauncher(launcher: (android.app.PendingIntent) -> Unit) {
         trashRequestLauncher = launcher
@@ -256,17 +212,10 @@ class MediaViewModel : ViewModel() {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    @Deprecated("Use searchMediaFlow(query) instead - Room-first architecture", ReplaceWith("searchMediaFlow(searchQuery.value)"))
-    private val _searchResults = MutableStateFlow<SearchEngine.SearchResult>(
-        SearchEngine.SearchResult(emptyList(), emptyList(), "")
-    )
-    @Deprecated("Use searchMediaFlow(query) instead - Room-first architecture", ReplaceWith("searchMediaFlow(searchQuery.value)"))
-    val searchResults: StateFlow<SearchEngine.SearchResult> = _searchResults.asStateFlow()
+    // Avoid logging the same search query repeatedly
+    private var lastSearchLogQuery: String? = null
 
-    private var searchJob: Job? = null
-    
-    // Cached all media for search (queried once)
-    private val _allMediaCached = MutableStateFlow<List<MediaItem>>(emptyList())
+    private var searchDebounceJob: Job? = null
     
     // Recent searches from DataStore
     private val _recentSearches = MutableStateFlow<List<String>>(emptyList())
@@ -342,6 +291,7 @@ class MediaViewModel : ViewModel() {
                 }
             }
         }
+        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -365,23 +315,25 @@ class MediaViewModel : ViewModel() {
             if (items.isEmpty()) {
                 emptyList()
             } else {
-                android.util.Log.d("ROOM_FLOW", "Albums: Generated ${items.groupBy { it.bucketId }.size} albums")
+                android.util.Log.d("ROOM_FLOW", "Albums: Grouping ${items.size} items into albums")
                 items
                     .groupBy { it.bucketId }
                     .map { (bucketId, groupItems) ->
+                        val topSix = groupItems.take(6)
                         Album(
                             id = bucketId,
                             name = groupItems.first().bucketName,
                             coverUri = groupItems.firstOrNull()?.uri,
                             itemCount = groupItems.size,
                             bucketDisplayName = groupItems.first().bucketName,
-                            topMediaUris = groupItems.take(6).map { it.uri },
-                            topMediaItems = groupItems.take(6)
+                            topMediaUris = topSix.map { it.uri },
+                            topMediaItems = topSix
                         )
                     }
                     .sortedByDescending { it.itemCount }
             }
         }
+        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -403,6 +355,7 @@ class MediaViewModel : ViewModel() {
                 otherAlbums = albums.drop(4)
             )
         }
+        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -416,16 +369,23 @@ class MediaViewModel : ViewModel() {
      * Updates automatically as search query changes.
      */
     fun searchMediaFlow(query: String): kotlinx.coroutines.flow.Flow<List<MediaItem>> {
-        android.util.Log.d("SEARCH_ROOM", "═══════════════════════════════════════════════════════════")
-        android.util.Log.d("SEARCH_ROOM", "🔍 searchMediaFlow() called with query='$query'")
-        
         if (query.isBlank()) {
-            android.util.Log.d("SEARCH_ROOM", "  → Empty query, returning emptyList")
             return kotlinx.coroutines.flow.flowOf(emptyList())
         }
         
         val normalizedQuery = query.lowercase(java.util.Locale.getDefault()).trim()
-        android.util.Log.d("SEARCH_ROOM", "  Normalized: '$normalizedQuery'")
+        val shouldLog = if (normalizedQuery != lastSearchLogQuery) {
+            lastSearchLogQuery = normalizedQuery
+            true
+        } else {
+            false
+        }
+        
+        if (shouldLog) {
+            android.util.Log.d("SEARCH_ROOM", "═══════════════════════════════════════════════════════════")
+            android.util.Log.d("SEARCH_ROOM", "🔍 searchMediaFlow() called with query='$query'")
+            android.util.Log.d("SEARCH_ROOM", "  Normalized: '$normalizedQuery'")
+        }
         
         // DETECT FILTERS using SearchEngine's logic
         val dateFilter = detectSearchDateFilter(normalizedQuery)
@@ -433,36 +393,50 @@ class MediaViewModel : ViewModel() {
         val sizeFilter = detectSearchSizeFilter(normalizedQuery)
         val cleanQuery = removeKeywords(normalizedQuery)
         
-        android.util.Log.d("SEARCH_ROOM", "  Detected filters:")
-        android.util.Log.d("SEARCH_ROOM", "    - Date: ${dateFilter?.toString() ?: "none"}")
-        android.util.Log.d("SEARCH_ROOM", "    - Type: ${typeFilter?.toString() ?: "none"}")
-        android.util.Log.d("SEARCH_ROOM", "    - Size: ${sizeFilter?.toString() ?: "none"}")
-        android.util.Log.d("SEARCH_ROOM", "    - Clean query: '$cleanQuery'")
+        if (shouldLog) {
+            android.util.Log.d("SEARCH_ROOM", "  Detected filters:")
+            android.util.Log.d("SEARCH_ROOM", "    - Date: ${dateFilter?.toString() ?: "none"}")
+            android.util.Log.d("SEARCH_ROOM", "    - Type: ${typeFilter?.toString() ?: "none"}")
+            android.util.Log.d("SEARCH_ROOM", "    - Size: ${sizeFilter?.toString() ?: "none"}")
+            android.util.Log.d("SEARCH_ROOM", "    - Clean query: '$cleanQuery'")
+        }
         
         // SELECT APPROPRIATE DAO QUERY based on detected filters
         val daoQuery: kotlinx.coroutines.flow.Flow<List<MediaEntity>> = when {
-            // ML LABEL SEARCH (if query matches a label-like pattern)
-            cleanQuery.isNotEmpty() && typeFilter == null && dateFilter == null && sizeFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByLabel() for potential ML search")
-                database.mediaDao().searchByLabel(cleanQuery)
-            }
-            
             // SCREENSHOT (special case)
-            normalizedQuery.contains("screenshot") -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByScreenshots()")
-                database.mediaDao().searchByScreenshots(cleanQuery)
+            normalizedQuery.contains("screenshot") || normalizedQuery.contains("screenshots") -> {
+                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using screenshot search")
+                if (cleanQuery.isBlank()) {
+                    database.mediaDao().searchScreenshotsOnly()
+                } else {
+                    database.mediaDao().searchByScreenshots(cleanQuery)
+                }
             }
             
             // CAMERA (special case)
             normalizedQuery.contains("camera") || normalizedQuery.contains("dcim") -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByCamera()")
-                database.mediaDao().searchByCamera(cleanQuery)
+                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using camera search")
+                if (cleanQuery.isBlank()) {
+                    database.mediaDao().searchByCameraOnly()
+                } else {
+                    database.mediaDao().searchByCamera(cleanQuery)
+                }
             }
             
             // GIF (special case)
             normalizedQuery.contains("gif") -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByGif()")
-                database.mediaDao().searchByGif(cleanQuery)
+                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using GIF search")
+                if (cleanQuery.isBlank()) {
+                    database.mediaDao().searchByGifOnly()
+                } else {
+                    database.mediaDao().searchByGif(cleanQuery)
+                }
+            }
+            
+            // ML LABEL SEARCH (if query looks like a label-only search)
+            cleanQuery.isNotEmpty() && typeFilter == null && dateFilter == null && sizeFilter == null -> {
+                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using searchByLabel() for potential ML search")
+                database.mediaDao().searchByLabel(cleanQuery)
             }
             
             // ALL THREE FILTERS (Type + Size + Date)
@@ -640,7 +614,10 @@ class MediaViewModel : ViewModel() {
         
         cleaned = cleaned.replace(Regex("\\b(202[0-9]|201[0-9])\\b"), "")
         
-        val typeKeywords = listOf("photo", "photos", "image", "images", "video", "videos", "gif", "gifs", "screenshot", "camera", "dcim")
+        val typeKeywords = listOf(
+            "photo", "photos", "image", "images", "video", "videos",
+            "gif", "gifs", "screenshot", "screenshots", "camera", "dcim"
+        )
         typeKeywords.forEach { cleaned = cleaned.replace(it, "") }
         
         val sizeKeywords = listOf("small", "medium", "large")
@@ -676,6 +653,7 @@ class MediaViewModel : ViewModel() {
     private fun parseDateFilter(filter: SearchEngine.DateFilter): Triple<Long, Long, String> {
         val cal = java.util.Calendar.getInstance()
         val now = System.currentTimeMillis()
+        val toSeconds: (Long) -> Long = { ms -> ms / 1000L }
         
         return when (filter) {
             SearchEngine.DateFilter.Today -> {
@@ -686,8 +664,8 @@ class MediaViewModel : ViewModel() {
                     set(java.util.Calendar.SECOND, 0)
                 }
                 val startMs = cal.timeInMillis
-                val endMs = startMs + (24 * 60 * 60 * 1000L)
-                Triple(startMs, endMs, "Today")
+                val endMs = startMs + (24 * 60 * 60 * 1000L) - 1
+                Triple(toSeconds(startMs), toSeconds(endMs), "Today")
             }
             SearchEngine.DateFilter.Yesterday -> {
                 cal.apply {
@@ -698,8 +676,8 @@ class MediaViewModel : ViewModel() {
                     set(java.util.Calendar.SECOND, 0)
                 }
                 val startMs = cal.timeInMillis
-                val endMs = startMs + (24 * 60 * 60 * 1000L)
-                Triple(startMs, endMs, "Yesterday")
+                val endMs = startMs + (24 * 60 * 60 * 1000L) - 1
+                Triple(toSeconds(startMs), toSeconds(endMs), "Yesterday")
             }
             SearchEngine.DateFilter.ThisWeek -> {
                 cal.apply {
@@ -711,7 +689,7 @@ class MediaViewModel : ViewModel() {
                 }
                 val startMs = cal.timeInMillis
                 val endMs = now
-                Triple(startMs, endMs, "This Week")
+                Triple(toSeconds(startMs), toSeconds(endMs), "This Week")
             }
             SearchEngine.DateFilter.LastWeek -> {
                 cal.apply {
@@ -723,8 +701,8 @@ class MediaViewModel : ViewModel() {
                     set(java.util.Calendar.SECOND, 0)
                 }
                 val startMs = cal.timeInMillis
-                val endMs = startMs + (7 * 24 * 60 * 60 * 1000L)
-                Triple(startMs, endMs, "Last Week")
+                val endMs = startMs + (7 * 24 * 60 * 60 * 1000L) - 1
+                Triple(toSeconds(startMs), toSeconds(endMs), "Last Week")
             }
             SearchEngine.DateFilter.ThisMonth -> {
                 cal.apply {
@@ -736,7 +714,7 @@ class MediaViewModel : ViewModel() {
                 }
                 val startMs = cal.timeInMillis
                 val endMs = now
-                Triple(startMs, endMs, "This Month")
+                Triple(toSeconds(startMs), toSeconds(endMs), "This Month")
             }
             SearchEngine.DateFilter.LastMonth -> {
                 cal.apply {
@@ -751,7 +729,7 @@ class MediaViewModel : ViewModel() {
                 cal.add(java.util.Calendar.MONTH, 1)
                 cal.add(java.util.Calendar.MILLISECOND, -1)
                 val endMs = cal.timeInMillis
-                Triple(startMs, endMs, "Last Month")
+                Triple(toSeconds(startMs), toSeconds(endMs), "Last Month")
             }
             is SearchEngine.DateFilter.Year -> {
                 cal.apply {
@@ -766,7 +744,7 @@ class MediaViewModel : ViewModel() {
                 cal.add(java.util.Calendar.YEAR, 1)
                 cal.add(java.util.Calendar.MILLISECOND, -1)
                 val endMs = cal.timeInMillis
-                Triple(startMs, endMs, "${filter.year}")
+                Triple(toSeconds(startMs), toSeconds(endMs), "${filter.year}")
             }
             is SearchEngine.DateFilter.Month -> {
                 cal.apply {
@@ -782,7 +760,7 @@ class MediaViewModel : ViewModel() {
                 cal.add(java.util.Calendar.MILLISECOND, -1)
                 val endMs = cal.timeInMillis
                 val monthName = java.text.SimpleDateFormat("MMMM", java.util.Locale.getDefault()).format(cal.time)
-                Triple(startMs, endMs, monthName)
+                Triple(toSeconds(startMs), toSeconds(endMs), monthName)
             }
         }
     }
@@ -876,6 +854,7 @@ class MediaViewModel : ViewModel() {
                     }
             }
         }
+        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -896,6 +875,7 @@ class MediaViewModel : ViewModel() {
                     }
             }
         }
+        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -913,6 +893,7 @@ class MediaViewModel : ViewModel() {
             android.util.Log.d("ROOM_FLOW", "Grouped Media: ${media.size} items grouped by $gridType")
             groupMediaForGrid(media, gridType)
         }
+        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -1026,13 +1007,16 @@ class MediaViewModel : ViewModel() {
         
         // Start observing MediaStore for automatic refresh on media changes
         startObserving(context)
+
+        // Background sync on startup (no loader, keep UI responsive)
+        refresh(context, showLoader = false)
     }
 
     fun isMediaEmpty(): Boolean {
         return mediaFlow.value.isEmpty()
     }
 
-    fun refresh(context: Context) {
+    fun refresh(context: Context, showLoader: Boolean = false) {
         Log.d("SYNC_ENGINE", "refresh() START: Checking repository initialization")
         if (!::repository.isInitialized) {
             initialize(context)
@@ -1040,14 +1024,18 @@ class MediaViewModel : ViewModel() {
         
         viewModelScope.launch {
             // Defensive guard: Prevent overlapping loads
-            if (_isLoading.value) {
+            if (isSyncing) {
+                pendingRefresh = true
                 if (BuildConfig.DEBUG) {
                     android.util.Log.d("SYNC_ENGINE", "Sync skipped (already syncing)")
                 }
                 return@launch
             }
             
-            _isLoading.value = true
+            isSyncing = true
+            if (showLoader) {
+                _isLoading.value = true
+            }
             
             val loadStart = SystemClock.elapsedRealtime()
             if (BuildConfig.DEBUG) {
@@ -1102,6 +1090,15 @@ class MediaViewModel : ViewModel() {
                         Log.d("SYNC_ENGINE", "refresh(): Upserting ${mediaEntities.size} entities to Room")
                         database.mediaDao().upsertAll(mediaEntities)
                         Log.d("SYNC_ENGINE", "Upserted ${mediaEntities.size} items into Room")
+
+                        // Delete stale entries that no longer exist in MediaStore
+                        val currentIds = mediaEntities.map { it.id }.toSet()
+                        val existingIds = database.mediaDao().getAllIds()
+                        val missingIds = existingIds.filterNot { it in currentIds }
+                        if (missingIds.isNotEmpty()) {
+                            Log.d("SYNC_ENGINE", "Deleting ${missingIds.size} stale items from Room")
+                            database.mediaDao().deleteByIds(missingIds)
+                        }
                         
                         if (BuildConfig.DEBUG) {
                             val upsertDuration = SystemClock.elapsedRealtime() - upsertStart
@@ -1131,6 +1128,12 @@ class MediaViewModel : ViewModel() {
                 // Note: loader is now controlled by Room flow emissions (see init block)
                 // Set to false here as fallback in case of errors
                 _isLoading.value = false
+                isSyncing = false
+
+                if (pendingRefresh) {
+                    pendingRefresh = false
+                    refresh(context, showLoader = false)
+                }
             }
         }
     }
@@ -1147,9 +1150,12 @@ class MediaViewModel : ViewModel() {
     // Room now handles sorting via SQL ORDER BY (mediaFlow flatMapLatest)
     // ═════════════════════════════════════════════════════════════════════
 
-    fun delete(item: MediaItem, onComplete: (Boolean) -> Unit) {
+    fun delete(context: Context, item: MediaItem, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch {
             val success = repository.delete(item)
+            if (success) {
+                refresh(context, showLoader = false)
+            }
             onComplete(success)
         }
     }
@@ -1237,11 +1243,13 @@ class MediaViewModel : ViewModel() {
                     }
                 } else {
                     // For older versions, use direct delete
+                    val selectedIds = _selectedItems.value.map { it.id }
                     val uris = _selectedItems.value.map { it.uri }
                     val success = repository.deleteMediaItems(context, uris)
                     if (success) {
+                        removeMediaFromRoom(selectedIds)
+                        markLocalMutation()
                         exitSelectionMode()
-                        refresh(context)
                     }
                     onComplete(success)
                 }
@@ -1255,6 +1263,7 @@ class MediaViewModel : ViewModel() {
     // Called when user confirms the trash request
     fun onDeleteConfirmed(context: Context) {
         viewModelScope.launch {
+            val deletedIds = _selectedItems.value.map { it.id }
             val itemCount = _selectedItems.value.size
             val itemType = if (_selectedItems.value.all { it.isVideo }) {
                 if (itemCount == 1) "video" else "videos"
@@ -1266,8 +1275,9 @@ class MediaViewModel : ViewModel() {
             
             _deleteSuccessMessage.value = "$itemCount $itemType moved to trash"
             
+            removeMediaFromRoom(deletedIds)
+            markLocalMutation()
             exitSelectionMode()
-            refresh(context)
             
             // Auto-dismiss after 2 seconds
             kotlinx.coroutines.delay(2000)
@@ -1341,73 +1351,16 @@ class MediaViewModel : ViewModel() {
         }
     }
     
-    // Search functions
-    fun searchMedia(query: String) {
-        // Cancel previous search job first
-        searchJob?.cancel()
-        
-        // Guard: handle empty/blank query safely - do this BEFORE setting _searchQuery
+    fun setSearchQuery(query: String) {
+        searchDebounceJob?.cancel()
+        _searchQuery.value = query
         if (query.isBlank()) {
-            _searchQuery.value = ""
-            _searchResults.value = SearchEngine.SearchResult(emptyList(), emptyList(), "")
             _isSearching.value = false
             return
         }
-        
-        // Now safe to set query
-        _searchQuery.value = query
         _isSearching.value = true
-        
-        // Material 3 Expressive: 300ms debounce prevents unnecessary searches during typing.
-        // Search execution is instant (<100ms) on cached data, so no visible loader needed.
-        // The isSearching state is kept for potential future network-based search.
-        searchJob = viewModelScope.launch {
-            delay(300)
-            
-            // Use cached media list (no MediaStore query)
-            val cachedMedia = _allMediaCached.value
-            
-            // Guard: ensure media is loaded
-            if (cachedMedia.isEmpty()) {
-                _searchResults.value = SearchEngine.SearchResult(emptyList(), emptyList(), query)
-                _isSearching.value = false
-                return@launch
-            }
-            
-            // Perform traditional search on cached data (filename, date, location)
-            val traditionalResults = SearchEngine.search(query, cachedMedia)
-            
-            // Perform ML-based label search with confidence filtering (if database initialized)
-            val mlResults = if (::database.isInitialized) {
-                try {
-                    val labelDao = database.mediaLabelDao()
-                    val labelMatches = labelDao.searchByLabel(query.lowercase())
-                    
-                    // Apply post-processing filter and ranking
-                    SearchResultFilter.filterAndRankMedia(
-                        query = query,
-                        matchedLabels = labelMatches,
-                        mediaItems = cachedMedia,
-                        hardFilter = true // Remove low-confidence matches
-                    )
-                } catch (e: Exception) {
-                    emptyList()
-                }
-            } else {
-                emptyList()
-            }
-            
-            // Combine results (traditional + ML-based)
-            // Remove duplicates by ID, prioritize traditional matches
-            val traditionalMedia = traditionalResults.matchedMedia
-            val combinedMedia = (traditionalMedia + mlResults)
-                .distinctBy { item -> item.id }
-            
-            _searchResults.value = SearchEngine.SearchResult(
-                matchedAlbums = traditionalResults.matchedAlbums,
-                matchedMedia = combinedMedia,
-                query = query
-            )
+        searchDebounceJob = viewModelScope.launch {
+            delay(200)
             _isSearching.value = false
         }
     }
@@ -1473,13 +1426,9 @@ class MediaViewModel : ViewModel() {
     }
     
     fun clearSearch() {
-        // Cancel any ongoing search
-        searchJob?.cancel()
-        searchJob = null
-        
-        // Reset state directly without triggering searchMedia
+        searchDebounceJob?.cancel()
+        searchDebounceJob = null
         _searchQuery.value = ""
-        _searchResults.value = SearchEngine.SearchResult(emptyList(), emptyList(), "")
         _isSearching.value = false
     }
     
@@ -1526,6 +1475,7 @@ class MediaViewModel : ViewModel() {
     private fun permanentlyDeleteTrashedItems(context: Context, items: List<MediaItem>) {
         val uris = items.map { it.uri }
         pendingDeleteUris = uris
+        pendingDeleteIds = items.map { it.id }
         
         val pendingIntent = repository.createPermanentDeleteRequest(uris)
         if (pendingIntent != null) {
@@ -1555,7 +1505,7 @@ class MediaViewModel : ViewModel() {
             pendingRestoreUris = emptyList()
             exitTrashSelectionMode()
             loadTrashedItems(context)
-            refresh(context)
+            refresh(context, showLoader = false)
         }
     }
     
@@ -1581,7 +1531,12 @@ class MediaViewModel : ViewModel() {
                     _deleteSuccessMessage.value = null
                 }
             }
+            if (pendingDeleteIds.isNotEmpty()) {
+                removeMediaFromRoom(pendingDeleteIds)
+                markLocalMutation()
+            }
             pendingDeleteUris = emptyList()
+            pendingDeleteIds = emptyList()
             exitTrashSelectionMode()
             loadTrashedItems(context)
         }
@@ -1876,16 +1831,6 @@ class MediaViewModel : ViewModel() {
     // Grid type functions
     fun setGridType(type: GridType) {
         _gridType.value = type
-        viewModelScope.launch {
-            val start = SystemClock.elapsedRealtime()
-            val grouped = withContext(Dispatchers.Default) {
-                groupMediaForGrid(_sortedMedia.value, type)
-            }
-            _groupedMedia.value = grouped
-            if (BuildConfig.DEBUG) {
-                android.util.Log.d("Perf", "Grouping took ${SystemClock.elapsedRealtime() - start} ms")
-            }
-        }
         // Save to DataStore
         viewModelScope.launch {
             if (::settingsDataStore.isInitialized) {
@@ -1986,8 +1931,13 @@ class MediaViewModel : ViewModel() {
             mediaContentObserver = MediaContentObserver(context) {
                 // ROOM-FIRST: ContentObserver triggers MediaStore → Room sync
                 // Room flows auto-emit → UI updates automatically
+                val now = SystemClock.elapsedRealtime()
+                if (now < suppressObserverUntilMs) {
+                    android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, sync suppressed")
+                    return@MediaContentObserver
+                }
                 android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, triggering sync")
-                refresh(context)
+                refresh(context, showLoader = false)
                 // Schedule deferred ML labeling after refresh completes
                 scheduleDeferredLabelingIfNeeded(context)
             }
@@ -2030,6 +1980,19 @@ class MediaViewModel : ViewModel() {
     fun stopObserving() {
         mediaContentObserver?.unregister()
         mediaContentObserver = null
+    }
+
+    private fun markLocalMutation() {
+        suppressObserverUntilMs = SystemClock.elapsedRealtime() + 1500L
+    }
+
+    private suspend fun removeMediaFromRoom(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            database.mediaDao().deleteByIds(ids)
+            database.favoriteDao().removeFavorites(ids)
+            database.mediaLabelDao().deleteLabelsForMediaIds(ids)
+        }
     }
 
     /**
