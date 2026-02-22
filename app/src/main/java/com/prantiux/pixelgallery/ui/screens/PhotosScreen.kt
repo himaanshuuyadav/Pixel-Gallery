@@ -82,7 +82,7 @@ fun PhotosScreen(
         // ROOM-FIRST: No manual refresh needed - Room flows are reactive
         // ContentObserver will trigger MediaStore sync automatically when media changes
         if (permissionsState.allPermissionsGranted && viewModel.isMediaEmpty()) {
-            viewModel.refresh(context)
+            viewModel.refresh(context, showLoader = false)
         }
     }
 
