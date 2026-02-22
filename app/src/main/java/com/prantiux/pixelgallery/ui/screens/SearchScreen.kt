@@ -74,6 +74,9 @@ fun SearchScreen(
     val searchResultsRaw by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
     val isSearching by viewModel.isSearching.collectAsState()
     
+    // CALLING TAB LOG
+    android.util.Log.d("SCREEN_TAB", "SearchScreen collected ${searchResultsRaw.size} results for query='$searchQuery'")
+    
     // ROOM-FIRST: Compute search result structure from raw media list
     val searchResults = remember(searchResultsRaw) {
         val matchedAlbums = searchResultsRaw
@@ -218,10 +221,10 @@ fun SearchScreen(
                 inputField = {
                     SearchBarDefaults.InputField(
                         query = searchQuery,
-                        onQueryChange = { viewModel.searchMedia(it) },
+                        onQueryChange = { viewModel.setSearchQuery(it) },
                         onSearch = { query ->
                             if (query.isNotBlank()) {
-                                viewModel.searchMedia(query)
+                                viewModel.setSearchQuery(query)
                                 viewModel.addRecentSearch(query.trim())
                                 isSearchBarActive = false
                                 focusManager.clearFocus()
@@ -334,7 +337,7 @@ fun SearchScreen(
                                         RecentSearchPill(
                                             text = search,
                                             onClick = {
-                                                viewModel.searchMedia(search)
+                                                viewModel.setSearchQuery(search)
                                                 viewModel.addRecentSearch(search)
                                                 isSearchBarActive = false
                                                 focusManager.clearFocus()
@@ -396,7 +399,7 @@ fun SearchScreen(
                                                 .wrapContentWidth()
                                                 .clip(RoundedCornerShape(20.dp))
                                                 .clickable {
-                                                    viewModel.searchMedia(filter.label.lowercase())
+                                                    viewModel.setSearchQuery(filter.label.lowercase())
                                                     viewModel.addRecentSearch(filter.label)
                                                     isSearchBarActive = false
                                                     focusManager.clearFocus()
