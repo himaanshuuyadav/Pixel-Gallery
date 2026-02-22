@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [FavoriteEntity::class, MediaLabelEntity::class, MediaEntity::class], 
-    version = 4, 
+    version = 5, 
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -67,6 +67,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
         
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Create individual indices for frequently accessed columns
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_dateAdded ON media(dateAdded)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_bucketId ON media(bucketId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_isVideo ON media(isVideo)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_displayName ON media(displayName)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_size ON media(size)")
+                
+                // Create composite index for common filter + sort pattern
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_isVideo_dateAdded ON media(isVideo, dateAdded)")
+            }
+        }
+        
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -74,7 +88,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "pixel_gallery_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 INSTANCE = instance
                 instance
