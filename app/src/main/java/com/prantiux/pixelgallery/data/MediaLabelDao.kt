@@ -54,6 +54,9 @@ interface MediaLabelDao {
      */
     @Query("DELETE FROM media_labels WHERE mediaId = :mediaId")
     suspend fun deleteLabelsForMedia(mediaId: Long)
+
+    @Query("DELETE FROM media_labels WHERE mediaId IN (:mediaIds)")
+    suspend fun deleteLabelsForMediaIds(mediaIds: List<Long>)
     
     /**
      * Clear all labels (for debugging)
