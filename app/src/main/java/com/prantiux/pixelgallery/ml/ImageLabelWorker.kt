@@ -13,7 +13,7 @@ import com.google.mlkit.vision.label.ImageLabel
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 import com.prantiux.pixelgallery.data.AppDatabase
 import com.prantiux.pixelgallery.data.MediaLabelEntity
-import com.prantiux.pixelgallery.data.MediaRepository
+import com.prantiux.pixelgallery.data.toMediaItem
 import kotlinx.coroutines.tasks.await
 import java.io.IOException
 
@@ -48,11 +48,9 @@ class ImageLabelWorker(
         return try {
             val database = AppDatabase.getDatabase(applicationContext)
             val labelDao = database.mediaLabelDao()
-            val repository = MediaRepository(applicationContext)
-            
-            // Get all media from MediaStore
-            Log.d(TAG, "📸 Loading images from MediaStore...")
-            val allImages = repository.loadImages()
+            // Get all images from Room (Room-first)
+            Log.d(TAG, "📸 Loading images from Room...")
+            val allImages = database.mediaDao().getAllImagesOnce().map { it.toMediaItem() }
             val totalImages = allImages.size
             Log.d(TAG, "📊 Total images found: $totalImages")
             
