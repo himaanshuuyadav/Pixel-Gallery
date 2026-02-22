@@ -1569,6 +1569,7 @@ fun MediaOverlay(
                                 val deleted = context.contentResolver.delete(item.uri, null, null)
                                 if (deleted > 0) {
                                     Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
+                                    viewModel.refresh(context, showLoader = false)
                                     onDismiss()
                                 } else {
                                     Toast.makeText(context, "Failed to delete", Toast.LENGTH_SHORT).show()
