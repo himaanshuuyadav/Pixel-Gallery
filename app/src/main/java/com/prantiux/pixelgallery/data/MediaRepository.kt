@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
 import com.prantiux.pixelgallery.model.Album
@@ -45,6 +46,18 @@ class MediaRepository(private val context: Context) {
         }
     }
 
+    private fun buildMediaPath(relativePath: String?, legacyPath: String?, displayName: String): String {
+        if (!legacyPath.isNullOrBlank()) {
+            return legacyPath
+        }
+        if (relativePath.isNullOrBlank()) {
+            return ""
+        }
+        val basePath = Environment.getExternalStorageDirectory().path.trimEnd('/')
+        val normalizedRelative = if (relativePath.endsWith("/")) relativePath else "$relativePath/"
+        return "$basePath/$normalizedRelative$displayName"
+    }
+
     suspend fun loadImages(): List<MediaItem> = withContext(Dispatchers.IO) {
         val items = mutableListOf<MediaItem>()
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -53,7 +66,7 @@ class MediaRepository(private val context: Context) {
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
 
-        val projection = arrayOf(
+        val projection = mutableListOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.DATE_ADDED,
@@ -62,16 +75,30 @@ class MediaRepository(private val context: Context) {
             MediaStore.Images.Media.BUCKET_ID,
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Images.Media.WIDTH,
-            MediaStore.Images.Media.HEIGHT,
-            MediaStore.Images.Media.DATA
+            MediaStore.Images.Media.HEIGHT
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        } else {
+            projection.add(MediaStore.Images.Media.DATA)
+        }
+
+        val selection = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                "${MediaStore.MediaColumns.IS_TRASHED} = 0 AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                "${MediaStore.MediaColumns.IS_PENDING} = 0"
+            }
+            else -> null
+        }
 
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
         context.contentResolver.query(
             collection,
-            projection,
-            null,
+            projection.toTypedArray(),
+            selection,
             null,
             sortOrder
         )?.use { cursor ->
@@ -84,7 +111,12 @@ class MediaRepository(private val context: Context) {
             val bucketNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
-            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+            val relativePathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                cursor.getColumnIndex(MediaStore.Images.Media.DATA)
+            } else {
+                -1
+            }
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -96,12 +128,11 @@ class MediaRepository(private val context: Context) {
                 val bucketName = cursor.getString(bucketNameColumn) ?: "Unknown"
                 val width = cursor.getInt(widthColumn)
                 val height = cursor.getInt(heightColumn)
-                val path = cursor.getString(dataColumn) ?: ""
+                val relativePath = if (relativePathColumn >= 0) cursor.getString(relativePathColumn) else null
+                val legacyPath = if (dataColumn >= 0) cursor.getString(dataColumn) else null
+                val path = buildMediaPath(relativePath, legacyPath, name)
                 
-                val contentUri = ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    id
-                )
+                val contentUri = ContentUris.withAppendedId(collection, id)
                 
                 // GPS reading removed to improve gallery load performance
                 // GPS data can be read on-demand when viewing individual images
@@ -137,7 +168,7 @@ class MediaRepository(private val context: Context) {
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         }
 
-        val projection = arrayOf(
+        val projection = mutableListOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DATE_ADDED,
@@ -147,16 +178,30 @@ class MediaRepository(private val context: Context) {
             MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Video.Media.DURATION,
             MediaStore.Video.Media.WIDTH,
-            MediaStore.Video.Media.HEIGHT,
-            MediaStore.Video.Media.DATA
+            MediaStore.Video.Media.HEIGHT
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        } else {
+            projection.add(MediaStore.Video.Media.DATA)
+        }
+
+        val selection = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                "${MediaStore.MediaColumns.IS_TRASHED} = 0 AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                "${MediaStore.MediaColumns.IS_PENDING} = 0"
+            }
+            else -> null
+        }
 
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
 
         context.contentResolver.query(
             collection,
-            projection,
-            null,
+            projection.toTypedArray(),
+            selection,
             null,
             sortOrder
         )?.use { cursor ->
@@ -170,7 +215,12 @@ class MediaRepository(private val context: Context) {
             val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.HEIGHT)
-            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+            val relativePathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                cursor.getColumnIndex(MediaStore.Video.Media.DATA)
+            } else {
+                -1
+            }
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -183,12 +233,11 @@ class MediaRepository(private val context: Context) {
                 val duration = cursor.getLong(durationColumn)
                 val width = cursor.getInt(widthColumn)
                 val height = cursor.getInt(heightColumn)
-                val path = cursor.getString(dataColumn) ?: ""
+                val relativePath = if (relativePathColumn >= 0) cursor.getString(relativePathColumn) else null
+                val legacyPath = if (dataColumn >= 0) cursor.getString(dataColumn) else null
+                val path = buildMediaPath(relativePath, legacyPath, name)
                 
-                val contentUri = ContentUris.withAppendedId(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    id
-                )
+                val contentUri = ContentUris.withAppendedId(collection, id)
                 
                 // GPS reading removed to improve gallery load performance
                 // GPS data can be read on-demand when viewing individual videos
