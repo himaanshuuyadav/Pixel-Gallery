@@ -48,6 +48,9 @@ interface MediaDao {
     @Query("SELECT * FROM media WHERE isVideo = 0 ORDER BY dateAdded DESC")
     fun getAllImages(): Flow<List<MediaEntity>>
 
+    @Query("SELECT * FROM media WHERE isVideo = 0")
+    suspend fun getAllImagesOnce(): List<MediaEntity>
+
     @Query("SELECT * FROM media WHERE isVideo = 1 ORDER BY dateAdded DESC")
     fun getAllVideos(): Flow<List<MediaEntity>>
 
@@ -63,23 +66,7 @@ interface MediaDao {
     fun searchMedia(query: String): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
-    // ALBUMS QUERY (Group by bucket)
-    // ═════════════════════════════════════════════════════════════════════
-    @Query("""
-        SELECT 
-            bucketId,
-            bucketName,
-            COUNT(*) as itemCount,
-            MAX(dateAdded) as lastModified,
-            MIN(uri) as coverUri
-        FROM media
-        WHERE bucketId IS NOT NULL
-        GROUP BY bucketId
-        ORDER BY lastModified DESC
-    """)
-    fun getAlbumsRaw(): Flow<List<AlbumData>>
 
-    // ═════════════════════════════════════════════════════════════════════
     // GET MEDIA BY BUCKET (for album detail view)
     // ═════════════════════════════════════════════════════════════════════
     @Query("""
@@ -153,6 +140,13 @@ interface MediaDao {
     """)
     fun searchByGif(query: String): Flow<List<MediaEntity>>
 
+    @Query("""
+        SELECT * FROM media
+        WHERE mimeType LIKE '%gif%'
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByGifOnly(): Flow<List<MediaEntity>>
+
     // ═════════════════════════════════════════════════════════════════════
     // ADVANCED SEARCH - SCREENSHOT FILTERING (special case)
     // ═════════════════════════════════════════════════════════════════════
@@ -166,6 +160,14 @@ interface MediaDao {
     """)
     fun searchByScreenshots(query: String): Flow<List<MediaEntity>>
 
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketName LIKE '%screenshot%'
+           OR displayName LIKE '%screenshot%'
+        ORDER BY dateAdded DESC
+    """)
+    fun searchScreenshotsOnly(): Flow<List<MediaEntity>>
+
     // ═════════════════════════════════════════════════════════════════════
     // ADVANCED SEARCH - CAMERA FILTERING (special case)
     // ═════════════════════════════════════════════════════════════════════
@@ -178,6 +180,14 @@ interface MediaDao {
         ORDER BY dateAdded DESC
     """)
     fun searchByCamera(query: String): Flow<List<MediaEntity>>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketName LIKE '%camera%'
+           OR bucketName LIKE '%dcim%'
+        ORDER BY dateAdded DESC
+    """)
+    fun searchByCameraOnly(): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
     // ADVANCED SEARCH - ML LABEL FILTERING (with JOIN to media_labels)
@@ -260,11 +270,4 @@ interface MediaDao {
     suspend fun deleteAll()
 }
 
-// Data class for album grouping result
-data class AlbumData(
-    val bucketId: String?,
-    val bucketName: String?,
-    val itemCount: Int,
-    val lastModified: Long,
-    val coverUri: String
-)
+
