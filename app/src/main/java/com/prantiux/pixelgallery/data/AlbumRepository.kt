@@ -17,19 +17,7 @@ class AlbumRepository(private val context: Context) {
     // Threshold for considering an album as "main" based on item count
     private val MAIN_ALBUM_THRESHOLD = 10
 
-    /**
-     * REFACTORED: This method is now deprecated in favor of ViewModel-based album generation.
-     * Use MediaViewModel.categorizedAlbums StateFlow instead.
-     * 
-     * Kept for backward compatibility but will trigger additional MediaStore queries.
-     * @deprecated Use MediaViewModel.categorizedAlbums which derives albums from cached media
-     */
-    @Deprecated("Use MediaViewModel.categorizedAlbums StateFlow", ReplaceWith("viewModel.categorizedAlbums"))
-    suspend fun loadCategorizedAlbums(): CategorizedAlbums = withContext(Dispatchers.IO) {
-        val regularAlbums = loadAllAlbums()
-        // Don't include smart albums in main Albums screen
-        categorizeAlbums(regularAlbums)
-    }
+
     
     /**
      * Load ML-based smart albums (used by Search screen only)
