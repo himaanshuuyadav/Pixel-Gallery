@@ -4,8 +4,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -70,7 +73,11 @@ fun SubPageScaffold(
     content: LazyListScope.() -> Unit
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
-        state = rememberTopAppBarState()
+        state = rememberTopAppBarState(),
+        snapAnimationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessHigh
+        )
     )
     
     // Calculate collapse progress (0 = expanded, 1 = collapsed)
@@ -79,6 +86,7 @@ fun SubPageScaffold(
     } else {
         scrollBehavior.state.collapsedFraction
     }
+    val subtitleAlpha = (1f - collapseFraction * 1.2f).coerceIn(0.2f, 1f)
     
     Scaffold(
         modifier = Modifier
@@ -99,7 +107,9 @@ fun SubPageScaffold(
                                 text = subtitle,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .alpha(subtitleAlpha)
                             )
                         }
                     }
