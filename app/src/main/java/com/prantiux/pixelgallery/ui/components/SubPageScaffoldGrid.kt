@@ -6,8 +6,11 @@ import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,8 +49,19 @@ fun SubPageScaffoldGrid(
     content: LazyGridScope.() -> Unit
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
-        state = rememberTopAppBarState()
+        state = rememberTopAppBarState(),
+        snapAnimationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessHigh
+        )
     )
+
+    val collapseFraction = if (scrollBehavior.state.collapsedFraction.isNaN()) {
+        0f
+    } else {
+        scrollBehavior.state.collapsedFraction
+    }
+    val subtitleAlpha = (1f - collapseFraction * 1.2f).coerceIn(0.2f, 1f)
     
     val gridState = rememberLazyGridState()
     
@@ -70,7 +84,9 @@ fun SubPageScaffoldGrid(
                                 text = subtitle,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .alpha(subtitleAlpha)
                             )
                         }
                     }
