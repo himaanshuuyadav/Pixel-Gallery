@@ -81,6 +81,7 @@ fun AlbumsScreen(
     // This flow automatically updates when Room data changes (via MediaStore sync)
     val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
     var showReorderBottomSheet by remember { mutableStateOf(false) }
@@ -89,6 +90,12 @@ fun AlbumsScreen(
     // Albums are derived from cached media in viewModel.refresh()
 
     Box(modifier = modifier.fillMaxSize()) {
+        if (initialSetupInProgress) {
+            com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
+                modifier = Modifier.align(Alignment.Center),
+                label = "Setting up gallery..."
+            )
+        } else
         // Only show "no albums" if loading is complete AND still no albums
         // This prevents showing "no albums" briefly during initial load
         if (!isLoading && categorizedAlbums.mainAlbums.isEmpty()) {
