@@ -36,6 +36,7 @@ class SettingsDataStore(private val context: Context) {
         private val SWIPE_UP_TO_DETAILS_KEY = booleanPreferencesKey("swipe_up_to_details")
         private val DOUBLE_TAP_TO_ZOOM_KEY = booleanPreferencesKey("double_tap_to_zoom")
         private val DOUBLE_TAP_ZOOM_LEVEL_KEY = stringPreferencesKey("double_tap_zoom_level")
+        private val INITIAL_SYNC_COMPLETED_KEY = booleanPreferencesKey("initial_sync_completed")
         // Playback settings
         private val AUTO_PLAY_VIDEOS_KEY = booleanPreferencesKey("auto_play_videos")
         private val RESUME_PLAYBACK_KEY = booleanPreferencesKey("resume_playback")
@@ -142,6 +143,14 @@ class SettingsDataStore(private val context: Context) {
         .map { preferences ->
             preferences[DEFAULT_TAB_KEY] ?: "Gallery"
         }
+
+    /**
+     * Get initial sync completed state as Flow
+     */
+    val initialSyncCompletedFlow: Flow<Boolean> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[INITIAL_SYNC_COMPLETED_KEY] ?: false
+        }
     
     /**
      * Save default tab preference
@@ -149,6 +158,15 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveDefaultTab(tab: String) {
         context.settingsDataStore.edit { preferences ->
             preferences[DEFAULT_TAB_KEY] = tab
+        }
+    }
+
+    /**
+     * Save initial sync completed flag
+     */
+    suspend fun setInitialSyncCompleted(value: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[INITIAL_SYNC_COMPLETED_KEY] = value
         }
     }
     
