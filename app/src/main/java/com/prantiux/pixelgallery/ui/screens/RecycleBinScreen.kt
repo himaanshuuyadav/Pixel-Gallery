@@ -211,9 +211,8 @@ fun RecycleBinContent(
                 // Material 3 Expressive: Show LoadingIndicator for MediaStore trashed query (200ms-1s)
                 // Uses shape-morphing expressive motion for SHORT operations
                 if (isLoading) {
-                    com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                        size = 48.dp
+                    com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
+                        modifier = Modifier.align(Alignment.Center)
                     )
                 } else if (trashedItems.isEmpty()) {
                     Column(
