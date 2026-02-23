@@ -100,9 +100,7 @@ fun GalleryViewSettingScreen(
                         .fillParentMaxHeight(0.7f),
                     contentAlignment = Alignment.Center
                 ) {
-                    com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
-                        size = 48.dp
-                    )
+                    com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator()
                 }
             }
         } else {
