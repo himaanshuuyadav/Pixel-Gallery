@@ -1,17 +1,27 @@
 package com.prantiux.pixelgallery.ui.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.prantiux.pixelgallery.R
 
 /**
  * Material 3 Expressive Loading Indicator
@@ -44,6 +54,34 @@ fun ExpressiveLoadingIndicator(
         modifier = modifier.size(size),
         color = MaterialTheme.colorScheme.primary
     )
+}
+
+/**
+ * Echo-style Loading Indicator
+ * 
+ * Mirrors the echo app's loading layout with a larger indicator and label.
+ */
+@Composable
+fun EchoLoadingIndicator(
+    modifier: Modifier = Modifier,
+    size: Dp = 64.dp,
+    label: String = stringResource(R.string.loading)
+) {
+    Column(
+        modifier = modifier.padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        ExpressiveLoadingIndicator(size = size)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.displaySmall.copy(fontSize = 22.sp),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .widthIn(max = 240.dp)
+        )
+    }
 }
 
 /**
