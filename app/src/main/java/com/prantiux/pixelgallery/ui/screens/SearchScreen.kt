@@ -605,20 +605,9 @@ fun SearchScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            modifier = Modifier.padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
-                                size = 56.dp
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                "Searching...",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
+                            modifier = Modifier.padding(32.dp)
+                        )
                     }
                 }
                 searchQuery.isNotBlank() && !showLoadingIndicator && searchResults.matchedAlbums.isEmpty() && searchResults.matchedMedia.isEmpty() -> {
