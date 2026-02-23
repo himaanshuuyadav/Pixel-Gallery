@@ -126,9 +126,7 @@ fun MoveToAlbumDialog(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
-                            size = 48.dp
-                        )
+                        com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator()
                     }
                 } else {
                     LazyColumn(
