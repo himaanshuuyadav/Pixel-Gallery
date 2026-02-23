@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharingStarted
@@ -82,6 +83,7 @@ class MediaViewModel : ViewModel() {
     private var mediaContentObserver: MediaContentObserver? = null
     private var isSyncing = false
     private var pendingRefresh = false
+    private var initialSyncCompletedCached: Boolean? = null
 
     // Active Album management for smart albums only
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
@@ -94,6 +96,12 @@ class MediaViewModel : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     
+    private val _initialSetupInProgress = MutableStateFlow(false)
+    val initialSetupInProgress: StateFlow<Boolean> = _initialSetupInProgress.asStateFlow()
+
+    private val _mediaPermissionsGranted = MutableStateFlow(false)
+    val mediaPermissionsGranted: StateFlow<Boolean> = _mediaPermissionsGranted.asStateFlow()
+
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
@@ -1009,7 +1017,35 @@ class MediaViewModel : ViewModel() {
         startObserving(context)
 
         // Background sync on startup (no loader, keep UI responsive)
-        refresh(context, showLoader = false)
+        viewModelScope.launch {
+            val storedInitialSyncCompleted = settingsDataStore.initialSyncCompletedFlow.first()
+            val hasLocalMedia = withContext(Dispatchers.IO) {
+                database.mediaDao().getAllIds().isNotEmpty()
+            }
+            val effectiveInitialSyncCompleted = storedInitialSyncCompleted && hasLocalMedia
+            initialSyncCompletedCached = effectiveInitialSyncCompleted
+            Log.d(
+                "INIT_SETUP",
+                "Initial sync completed flag = $storedInitialSyncCompleted, hasLocalMedia=$hasLocalMedia, effective=$effectiveInitialSyncCompleted"
+            )
+            if (!effectiveInitialSyncCompleted) {
+                if (storedInitialSyncCompleted) {
+                    settingsDataStore.setInitialSyncCompleted(false)
+                    initialSyncCompletedCached = false
+                    Log.d("INIT_SETUP", "Reset initial sync completed flag to false (empty DB)")
+                }
+                _initialSetupInProgress.value = true
+                Log.d("INIT_SETUP", "Initial setup in progress = true")
+            }
+            refresh(context, showLoader = false)
+        }
+    }
+
+    fun setMediaPermissionsGranted(granted: Boolean) {
+        if (_mediaPermissionsGranted.value != granted) {
+            _mediaPermissionsGranted.value = granted
+            Log.d("INIT_SETUP", "Media permissions granted = $granted")
+        }
     }
 
     fun isMediaEmpty(): Boolean {
@@ -1033,6 +1069,12 @@ class MediaViewModel : ViewModel() {
             }
             
             isSyncing = true
+            val initialSyncCompleted = initialSyncCompletedCached
+                ?: settingsDataStore.initialSyncCompletedFlow.first().also {
+                    initialSyncCompletedCached = it
+                }
+            Log.d("SYNC_ENGINE", "Initial sync completed cached = $initialSyncCompleted")
+            var roomWriteCompleted = false
             if (showLoader) {
                 _isLoading.value = true
             }
@@ -1104,8 +1146,27 @@ class MediaViewModel : ViewModel() {
                             val upsertDuration = SystemClock.elapsedRealtime() - upsertStart
                             android.util.Log.d("SYNC_ENGINE", "Room sync completed: ${upsertDuration}ms (${mediaEntities.size} items synced)")
                         }
+
+                        roomWriteCompleted = true
                     } catch (e: Exception) {
                         android.util.Log.e("SYNC_ENGINE", "Error syncing to Room", e)
+                    }
+                }
+
+                if (roomWriteCompleted) {
+                    val permissionsGranted = _mediaPermissionsGranted.value
+                    Log.d(
+                        "SYNC_ENGINE",
+                        "Room write completed, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
+                    )
+                    if (!initialSyncCompleted && permissionsGranted) {
+                        settingsDataStore.setInitialSyncCompleted(true)
+                        initialSyncCompletedCached = true
+                        Log.d("INIT_SETUP", "Initial sync completed flag set to true")
+                    }
+                    if (_initialSetupInProgress.value) {
+                        _initialSetupInProgress.value = false
+                        Log.d("INIT_SETUP", "Initial setup in progress = false")
                     }
                 }
                 
@@ -1129,6 +1190,11 @@ class MediaViewModel : ViewModel() {
                 // Set to false here as fallback in case of errors
                 _isLoading.value = false
                 isSyncing = false
+                if (!_mediaPermissionsGranted.value && (initialSyncCompletedCached == false)) {
+                    _initialSetupInProgress.value = true
+                    Log.d("INIT_SETUP", "Initial setup remains true (permissions not granted)")
+                }
+                Log.d("SYNC_ENGINE", "refresh() END: isSyncing=false, isLoading=false")
 
                 if (pendingRefresh) {
                     pendingRefresh = false
