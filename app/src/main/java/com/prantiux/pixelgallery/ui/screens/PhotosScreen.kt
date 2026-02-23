@@ -60,6 +60,7 @@ fun PhotosScreen(
     val images by viewModel.imagesFlow.collectAsState()
     val videos by viewModel.videosFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
 
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -73,12 +74,18 @@ fun PhotosScreen(
 
     val permissionsState = rememberMultiplePermissionsState(permissions)
 
+    LaunchedEffect(permissionsState.allPermissionsGranted) {
+        viewModel.setMediaPermissionsGranted(permissionsState.allPermissionsGranted)
+    }
+
     LaunchedEffect(Unit) {
         val start = SystemClock.elapsedRealtime()
         withFrameNanos { }
         if (BuildConfig.DEBUG) {
             Log.d("Perf", "First frame rendered in ${SystemClock.elapsedRealtime() - start} ms")
         }
+        Log.d("INIT_SETUP", "Permissions granted = ${permissionsState.allPermissionsGranted}")
+        Log.d("INIT_SETUP", "Initial setup in progress = $initialSetupInProgress")
         // ROOM-FIRST: No manual refresh needed - Room flows are reactive
         // ContentObserver will trigger MediaStore sync automatically when media changes
         if (permissionsState.allPermissionsGranted && viewModel.isMediaEmpty()) {
@@ -122,6 +129,7 @@ fun PhotosContent(
     val scrollbarMonth by viewModel.scrollbarMonth.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
     val pinchGestureEnabled by viewModel.pinchGestureEnabled.collectAsState()
+    val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
@@ -284,10 +292,14 @@ fun PhotosContent(
             // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
             // Never show on subsequent navigations to prevent UI jank
             // Show loading FIRST, only show "no media" after loading completes
-            if (showLoading) {
-                com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator(
+            if (initialSetupInProgress) {
+                com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
                     modifier = Modifier.align(Alignment.Center),
-                    size = 48.dp
+                    label = "Setting up gallery..."
+                )
+            } else if (showLoading) {
+                com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
+                    modifier = Modifier.align(Alignment.Center)
                 )
             } else if (sortedMediaList.isEmpty()) {
                 // Only show "no media" after loading is complete (when not loading)
