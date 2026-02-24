@@ -29,9 +29,9 @@ fun GalleryViewSettingScreen(
     settingsDataStore: SettingsDataStore,
     onBackClick: () -> Unit = {}
 ) {
-    // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
-    // ROOM-FIRST: Use Room-derived categorized albums flow
-    val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
+    // SETTINGS: Use UNFILTERED album list (not affected by Photos View album selection)
+    // allCategorizedAlbumsFlow shows ALL albums regardless of _selectedAlbums state
+    val categorizedAlbums by viewModel.allCategorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     
     val albums = remember(categorizedAlbums) {
