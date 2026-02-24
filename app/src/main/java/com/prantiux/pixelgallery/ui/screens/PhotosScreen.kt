@@ -56,9 +56,9 @@ fun PhotosScreen(
     onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    // ROOM-FIRST: Observe Room flows instead of MediaStore-derived StateFlows
-    val images by viewModel.imagesFlow.collectAsState()
-    val videos by viewModel.videosFlow.collectAsState()
+    // ROOM-FIRST: Observe mediaFlow (includes album filtering)
+    val media by viewModel.mediaFlow.collectAsState()
+    val groupedMedia by viewModel.groupedMediaFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
@@ -95,8 +95,8 @@ fun PhotosScreen(
 
     if (permissionsState.allPermissionsGranted) {
         PhotosContent(
-            images = images,
-            videos = videos,
+            media = media,
+            groupedMedia = groupedMedia,
             isLoading = isLoading,
             sortMode = sortMode,
             onSortModeChanged = { viewModel.setSortMode(it) },
@@ -113,8 +113,8 @@ fun PhotosScreen(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotosContent(
-    images: List<MediaItem>,
-    videos: List<MediaItem>,
+    media: List<MediaItem>,
+    groupedMedia: List<com.prantiux.pixelgallery.model.MediaGroup>,
     isLoading: Boolean,
     sortMode: SortMode,
     onSortModeChanged: (SortMode) -> Unit,
@@ -199,7 +199,7 @@ fun PhotosContent(
     
     // Track if initial load is complete - only show loader on FIRST load after permission grant
     // Initialize based on whether we already have data
-    var hasLoadedOnce by remember { mutableStateOf(images.isNotEmpty() || videos.isNotEmpty()) }
+    var hasLoadedOnce by remember { mutableStateOf(media.isNotEmpty()) }
     var previousIsLoading by remember { mutableStateOf(isLoading) }
     
     LaunchedEffect(isLoading) {
@@ -207,8 +207,7 @@ fun PhotosContent(
         // AND we have media items
         // AND hasLoadedOnce is still false
         if (previousIsLoading && !isLoading && !hasLoadedOnce) {
-            val totalMediaCount = images.size + videos.size
-            if (totalMediaCount > 0) {
+            if (media.isNotEmpty()) {
                 hasLoadedOnce = true
             }
         }
@@ -217,16 +216,12 @@ fun PhotosContent(
         previousIsLoading = isLoading
     }
     
-    // Show loading when: loading AND (never loaded before OR lists are empty)
-    val showLoading = isLoading && (!hasLoadedOnce || (images.isEmpty() && videos.isEmpty()))
-    
-    // ROOM-FIRST: Use Room flows (single source of truth, computed once on IO/Default thread)
-    val sortedMediaList by viewModel.mediaFlow.collectAsState()
-    val groupedMedia by viewModel.groupedMediaFlow.collectAsState()
+    // Show loading when: loading AND (never loaded before OR list is empty)
+    val showLoading = isLoading && (!hasLoadedOnce || media.isEmpty())
     
     // Create index map for O(1) lookups instead of O(n) indexOf()
-    val indexMap = remember(sortedMediaList) {
-        sortedMediaList.mapIndexed { i, item -> item.id to i }.toMap()
+    val indexMap = remember(media) {
+        media.mapIndexed { i, item -> item.id to i }.toMap()
     }
     
     // Determine column count based on grid type
@@ -301,7 +296,7 @@ fun PhotosContent(
                 com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
                     modifier = Modifier.align(Alignment.Center)
                 )
-            } else if (sortedMediaList.isEmpty()) {
+            } else if (media.isEmpty()) {
                 // Only show "no media" after loading is complete (when not loading)
                 Text(
                     "No media found",
