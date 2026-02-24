@@ -47,6 +47,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.prantiux.pixelgallery.ui.screens.*
 import com.prantiux.pixelgallery.ui.overlay.MediaOverlay
+import android.Manifest
+import android.os.Build
+import androidx.core.content.ContextCompat
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import com.prantiux.pixelgallery.ui.animation.AnimatedRootContent
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.icons.FontIcon
@@ -286,6 +291,40 @@ fun AppNavigation(
     onTabChanged: (String) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    
+    // ════════════════════════════════════════════════════════════════════════════════════
+    // PERMISSION GATING: Check if media permissions are granted on first composition
+    // ════════════════════════════════════════════════════════════════════════════════════
+    val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        listOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO
+        )
+    } else {
+        listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    
+    var permissionsGranted by remember {
+        val allGranted = requiredPermissions.all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        Log.d("ONBOARDING", "Permission check at startup: $allGranted")
+        mutableStateOf(allGranted)
+    }
+    
+    // If permissions not granted, show onboarding screen
+    if (!permissionsGranted) {
+        OnboardingScreen(
+            onPermissionGranted = {
+                Log.d("ONBOARDING", "Permission granted from OnboardingScreen, proceeding to gallery")
+                permissionsGranted = true
+            }
+        )
+        return
+    }
+    
+    // Permissions granted: proceed with normal navigation
     val albumRepository = remember { com.prantiux.pixelgallery.data.AlbumRepository(context) }
     val videoPositionDataStore = remember { com.prantiux.pixelgallery.data.VideoPositionDataStore(context) }
     val navController = rememberNavController()
