@@ -71,10 +71,6 @@ private data class ComputedMediaState(
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MediaViewModel : ViewModel() {
-    init {
-        Log.d("VM_INIT", "ViewModel constructor: Starting property initialization")
-    }
-    
     private lateinit var repository: MediaRepository
     private lateinit var albumRepository: AlbumRepository
     private lateinit var recentSearchesDataStore: RecentSearchesDataStore
@@ -256,10 +252,8 @@ class MediaViewModel : ViewModel() {
     private val mediaEntitiesFlow: StateFlow<List<MediaEntity>> = _databaseReady
         .flatMapLatest { ready ->
             if (!ready) {
-                Log.d("VM_FLOW", "Database not ready yet")
                 flowOf(emptyList())
             } else {
-                Log.d("VM_FLOW", "Database ready — connecting DAO")
                 _sortMode.flatMapLatest { sortMode ->
                     when (sortMode) {
                         SortMode.DATE_DESC -> database.mediaDao().getMediaByDateDesc()
@@ -287,16 +281,84 @@ class MediaViewModel : ViewModel() {
      * - MediaStore sync adds/removes media
      * - Favorite status changes
      * - Database is updated
+     * - Selected albums changes (Photos View filter)
      */
     val mediaFlow: StateFlow<List<MediaItem>> = _databaseReady
         .flatMapLatest { ready ->
             if (!ready) {
                 flowOf(emptyList())
             } else {
-                mediaEntitiesFlow.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                    android.util.Log.d("ROOM_FLOW", "Room emitted ${entities.size} items")
-                    entities.toMediaItems(favIds.toSet())
-                }
+                mediaEntitiesFlow
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        entities.toMediaItems(favIds.toSet())
+                    }
+                    .combine(_selectedAlbums) { mediaItems, selectedAlbums ->
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "mediaFlow: Media count before filter: ${mediaItems.size}")
+                            Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums.size} album(s)")
+                        }
+                        
+                        val filtered = if (selectedAlbums.isEmpty()) {
+                            if (BuildConfig.DEBUG) {
+                                Log.d("PHOTOS_FILTER", "mediaFlow: No albums selected → returning empty list")
+                            }
+                            emptyList()
+                        } else {
+                            mediaItems.filter { it.bucketId in selectedAlbums }
+                        }
+                        
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "mediaFlow: Media count after filter: ${filtered.size}")
+                        }
+                        
+                        filtered
+                    }
+            }
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    
+    /**
+     * ALL ALBUMS FLOW: Complete album list from Room (UNFILTERED)
+     * 
+     * Shows ALL albums regardless of Photos View album selection.
+     * Used by Settings screen to display full album list with checkboxes.
+     * Does NOT apply _selectedAlbums filter.
+     */
+    val allAlbumsFlow: StateFlow<List<Album>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                flowOf(emptyList())
+            } else {
+                mediaEntitiesFlow
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        entities.toMediaItems(favIds.toSet())
+                    }
+                    .map { items ->
+                        if (items.isEmpty()) {
+                            emptyList()
+                        } else {
+                            items
+                                .groupBy { it.bucketId }
+                                .map { (bucketId, groupItems) ->
+                                    val topSix = groupItems.take(6)
+                                    Album(
+                                        id = bucketId,
+                                        name = groupItems.first().bucketName,
+                                        coverUri = groupItems.firstOrNull()?.uri,
+                                        itemCount = groupItems.size,
+                                        bucketDisplayName = groupItems.first().bucketName,
+                                        topMediaUris = topSix.map { it.uri },
+                                        topMediaItems = topSix
+                                    )
+                                }
+                                .sortedByDescending { it.itemCount }
+                        }
+                    }
             }
         }
         .distinctUntilChanged()
@@ -323,7 +385,6 @@ class MediaViewModel : ViewModel() {
             if (items.isEmpty()) {
                 emptyList()
             } else {
-                android.util.Log.d("ROOM_FLOW", "Albums: Grouping ${items.size} items into albums")
                 items
                     .groupBy { it.bucketId }
                     .map { (bucketId, groupItems) ->
@@ -357,7 +418,28 @@ class MediaViewModel : ViewModel() {
      */
     val categorizedAlbumsFlow: StateFlow<CategorizedAlbums> = albumsFlow
         .map { albums ->
-            android.util.Log.d("ROOM_FLOW", "Categorized Albums: ${albums.size} total (${albums.take(4).size} main, ${albums.drop(4).size} other)")
+            CategorizedAlbums(
+                mainAlbums = albums.take(4),
+                otherAlbums = albums.drop(4)
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = CategorizedAlbums(emptyList(), emptyList())
+        )
+    
+    /**
+     * ALL CATEGORIZED ALBUMS FLOW: Complete album list categorized (UNFILTERED)
+     * 
+     * Derived from allAlbumsFlow (not filtered by _selectedAlbums).
+     * Used by Settings screen to show ALL albums with checkboxes.
+     * - mainAlbums: First 4 albums (top albums by item count)
+     * - otherAlbums: Remaining albums
+     */
+    val allCategorizedAlbumsFlow: StateFlow<CategorizedAlbums> = allAlbumsFlow
+        .map { albums ->
             CategorizedAlbums(
                 mainAlbums = albums.take(4),
                 otherAlbums = albums.drop(4)
@@ -782,11 +864,8 @@ class MediaViewModel : ViewModel() {
      * Special case: "all" returns all media via mediaFlow.
      */
     fun albumMediaFlow(bucketId: String): kotlinx.coroutines.flow.Flow<List<MediaItem>> {
-        android.util.Log.d("ALBUM_FLOW_DEBUG", "albumMediaFlow called for id=$bucketId")
-        
         // Special case: "all" means all media, not a specific bucket
         if (bucketId == "all") {
-            android.util.Log.d("ALBUM_FLOW", "Using mediaFlow for 'all'")
             return mediaFlow
         }
         
@@ -794,7 +873,6 @@ class MediaViewModel : ViewModel() {
             database.mediaDao().getMediaByBucket(bucketId),
             database.favoriteDao().getAllFavoriteIdsFlow()
         ) { entities, favIds ->
-            android.util.Log.d("ALBUM_FLOW", "Album '$bucketId' emitted ${entities.size} items")
             entities.toMediaItems(favIds.toSet())
         }
     }
@@ -850,16 +928,43 @@ class MediaViewModel : ViewModel() {
      */
     /**
      * IMAGES ONLY FLOW: Images from Room (Room-first - fully reactive)
+     * 
+     * Filters by selected albums from Photos View setting.
+     * Updates automatically when selectedAlbums preference changes.
      */
     val imagesFlow: StateFlow<List<MediaItem>> = _databaseReady
         .flatMapLatest { ready ->
             if (!ready) {
                 flowOf(emptyList())
             } else {
-                database.mediaDao().getAllImages()
-                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        entities.toMediaItems(favIds.toSet())
+                _selectedAlbums.flatMapLatest { selectedBucketIds ->
+                    if (BuildConfig.DEBUG) {
+                        Log.d("PHOTOS_FILTER", "imagesFlow: Selected albums: ${selectedBucketIds.size} album(s)")
                     }
+                    
+                    val bucketList = selectedBucketIds.toList()
+                    val imageDao = if (bucketList.isEmpty()) {
+                        // No albums selected - show no images
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "imagesFlow: No albums selected → returning empty list")
+                        }
+                        flowOf(emptyList())
+                    } else {
+                        // Multiple or specific buckets - use filtered query
+                        database.mediaDao().getImagesByBucketIds(bucketList)
+                    }
+                    
+                    imageDao.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "imagesFlow: Media count before filter: ${entities.size}")
+                        }
+                        val items = entities.toMediaItems(favIds.toSet())
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "imagesFlow: Media count after filter: ${items.size}")
+                        }
+                        items
+                    }
+                }
             }
         }
         .distinctUntilChanged()
@@ -871,16 +976,43 @@ class MediaViewModel : ViewModel() {
     
     /**
      * VIDEOS ONLY FLOW: Videos from Room (Room-first - fully reactive)
+     * 
+     * Filters by selected albums from Photos View setting.
+     * Updates automatically when selectedAlbums preference changes.
      */
     val videosFlow: StateFlow<List<MediaItem>> = _databaseReady
         .flatMapLatest { ready ->
             if (!ready) {
                 flowOf(emptyList())
             } else {
-                database.mediaDao().getAllVideos()
-                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        entities.toMediaItems(favIds.toSet())
+                _selectedAlbums.flatMapLatest { selectedBucketIds ->
+                    if (BuildConfig.DEBUG) {
+                        Log.d("PHOTOS_FILTER", "videosFlow: Selected albums: ${selectedBucketIds.size} album(s)")
                     }
+                    
+                    val bucketList = selectedBucketIds.toList()
+                    val videoDao = if (bucketList.isEmpty()) {
+                        // No albums selected - show no videos
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "videosFlow: No albums selected → returning empty list")
+                        }
+                        flowOf(emptyList())
+                    } else {
+                        // Multiple or specific buckets - use filtered query
+                        database.mediaDao().getVideosByBucketIds(bucketList)
+                    }
+                    
+                    videoDao.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "videosFlow: Media count before filter: ${entities.size}")
+                        }
+                        val items = entities.toMediaItems(favIds.toSet())
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "videosFlow: Media count after filter: ${items.size}")
+                        }
+                        items
+                    }
+                }
             }
         }
         .distinctUntilChanged()
@@ -898,7 +1030,6 @@ class MediaViewModel : ViewModel() {
      */
     val groupedMediaFlow: StateFlow<List<MediaGroup>> = mediaFlow
         .combine(_gridType) { media, gridType ->
-            android.util.Log.d("ROOM_FLOW", "Grouped Media: ${media.size} items grouped by $gridType")
             groupMediaForGrid(media, gridType)
         }
         .distinctUntilChanged()
@@ -912,12 +1043,9 @@ class MediaViewModel : ViewModel() {
     // LOADER STATE: Controlled by first Room emission
     // ─────────────────────────────────────────────────────────────────────────────────
     init {
-        Log.d("VM_INIT", "init block: Properties initialized, starting mediaFlow collection")
         viewModelScope.launch {
             mediaFlow.collect { media ->
-                Log.d("VM_INIT", "init block: mediaFlow collected ${media.size} items")
                 if (media.isNotEmpty() && _isLoading.value) {
-                    android.util.Log.d("PERF", "First Room emission received (${media.size} items)")
                     _isLoading.value = false
                 }
             }
@@ -930,7 +1058,6 @@ class MediaViewModel : ViewModel() {
     fun initialize(context: Context) {
         if (::database.isInitialized) return
         
-        Log.d("VM_INITIALIZE", "initialize(): Called, about to initialize database and repositories")
         repository = MediaRepository(context)
         albumRepository = AlbumRepository(context)
         recentSearchesDataStore = RecentSearchesDataStore(context)
@@ -939,28 +1066,16 @@ class MediaViewModel : ViewModel() {
         
         // Trigger reactive reconnection of flows
         _databaseReady.value = true
-        Log.d("VM_INITIALIZE", "Database initialized")
-        Log.d("VM_INITIALIZE", "initialize(): Database initialized, database.isInitialized=${::database.isInitialized}")
         
         // FAVORITES INITIALIZATION: Reactive Flow collection
-        // Continuously observes getAllFavoriteIdsFlow() - not a one-time blocking load
-        android.util.Log.d("FAVORITES_INIT", "initialize(): Setting up reactive favorite IDs observation...")
+        // Continuously observes getAllFavoriteIdsFlow()
         viewModelScope.launch {
             try {
                 database.favoriteDao().getAllFavoriteIdsFlow().collect { ids ->
-                    val initTime = try { 
-                        java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")) 
-                    } catch (e: Exception) { 
-                        "??:??:??.???" 
-                    }
-                    android.util.Log.d("FAVORITES_INIT", "[$initTime] getAllFavoriteIdsFlow emitted: ${ids.size} favorite IDs")
-                    if (ids.isNotEmpty()) {
-                        android.util.Log.d("FAVORITES_INIT", "  IDs: [${ids.take(5).joinToString(",")}${if(ids.size > 5) ",..." else ""}]")
-                    }
+                    // Reactive collection - no logging needed for normal operation
                 }
             } catch (e: Exception) {
-                android.util.Log.e("FAVORITES_INIT", "ERROR: Failed to observe favorite IDs", e)
-                e.printStackTrace()
+                Log.e("FAVORITES", "Failed to observe favorite IDs", e)
             }
         }
         
@@ -989,13 +1104,49 @@ class MediaViewModel : ViewModel() {
             }
         }
         
-        // Load selected albums from DataStore
+        // Load selected albums from DataStore with first-run default selection
         viewModelScope.launch {
             try {
                 settingsDataStore.selectedAlbumsFlow.collect { albums ->
-                    android.util.Log.d("HIDDEN_DEBUG", "Selected albums count=${albums.size}, ids=${albums.joinToString()}")
-                    _selectedAlbums.value = albums
-                    // Room mediaFlow automatically handles filtering via SQL (no applySorting() needed)
+                    if (albums.isEmpty()) {
+                        // First run: No albums in DataStore
+                        // Detect all distinct bucketIds from Room and set as defaults
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "First run detected: No albums in DataStore")
+                        }
+                        
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val mediaEntities = database.mediaDao().getAllMedia().first()
+                                val distinctBucketIds = mediaEntities
+                                    .mapNotNull { it.bucketId }
+                                    .distinct()
+                                    .toSet()
+                                
+                                if (distinctBucketIds.isNotEmpty()) {
+                                    if (BuildConfig.DEBUG) {
+                                        Log.d("PHOTOS_FILTER", "Applying default selection: ${distinctBucketIds.size} albums")
+                                    }
+                                    // Save to DataStore
+                                    settingsDataStore.saveSelectedAlbums(distinctBucketIds)
+                                    // Update ViewModel state
+                                    _selectedAlbums.value = distinctBucketIds
+                                } else {
+                                    if (BuildConfig.DEBUG) {
+                                        Log.d("PHOTOS_FILTER", "No albums found in Room database")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e("PHOTOS_FILTER", "Error applying default album selection", e)
+                            }
+                        }
+                    } else {
+                        // Not first run: User has previously selected albums
+                        if (BuildConfig.DEBUG) {
+                            Log.d("PHOTOS_FILTER", "Selected albums changed: ${albums.size} album(s)")
+                        }
+                        _selectedAlbums.value = albums
+                    }
                 }
             } catch (e: Exception) {
                 // Ignore cancellation exceptions
@@ -1019,23 +1170,33 @@ class MediaViewModel : ViewModel() {
         // Background sync on startup (no loader, keep UI responsive)
         viewModelScope.launch {
             val storedInitialSyncCompleted = settingsDataStore.initialSyncCompletedFlow.first()
+            Log.d(
+                "INIT_SETUP",
+                "[INIT] storedInitialSyncCompleted=$storedInitialSyncCompleted after reading from DataStore"
+            )
             val hasLocalMedia = withContext(Dispatchers.IO) {
                 database.mediaDao().getAllIds().isNotEmpty()
             }
+            Log.d(
+                "INIT_SETUP",
+                "[INIT] hasLocalMedia=$hasLocalMedia (${if (hasLocalMedia) "PASS" else "FAIL"} - DB empty)"
+            )
             val effectiveInitialSyncCompleted = storedInitialSyncCompleted && hasLocalMedia
             initialSyncCompletedCached = effectiveInitialSyncCompleted
             Log.d(
                 "INIT_SETUP",
-                "Initial sync completed flag = $storedInitialSyncCompleted, hasLocalMedia=$hasLocalMedia, effective=$effectiveInitialSyncCompleted"
+                "[INIT] effectiveInitialSyncCompleted=$effectiveInitialSyncCompleted (will ${if (!effectiveInitialSyncCompleted) "SHOW" else "SKIP"} loader)"
             )
             if (!effectiveInitialSyncCompleted) {
                 if (storedInitialSyncCompleted) {
                     settingsDataStore.setInitialSyncCompleted(false)
                     initialSyncCompletedCached = false
-                    Log.d("INIT_SETUP", "Reset initial sync completed flag to false (empty DB)")
+                    Log.d("INIT_SETUP", "[INIT] Reset initial sync completed flag to false (empty DB detected)")
                 }
                 _initialSetupInProgress.value = true
-                Log.d("INIT_SETUP", "Initial setup in progress = true")
+                Log.d("INIT_SETUP", "[INIT] Initial setup in progress = true → LOADER WILL SHOW")
+            } else {
+                Log.d("INIT_SETUP", "[INIT] Initial setup in progress = false → LOADER WILL NOT SHOW")
             }
             refresh(context, showLoader = false)
         }
@@ -1073,7 +1234,10 @@ class MediaViewModel : ViewModel() {
                 ?: settingsDataStore.initialSyncCompletedFlow.first().also {
                     initialSyncCompletedCached = it
                 }
-            Log.d("SYNC_ENGINE", "Initial sync completed cached = $initialSyncCompleted")
+            Log.d(
+                "SYNC_ENGINE",
+                "[REFRESH-START] initialSyncCompleted=$initialSyncCompleted, permissionsGranted=${_mediaPermissionsGranted.value}"
+            )
             var roomWriteCompleted = false
             if (showLoader) {
                 _isLoading.value = true
@@ -1157,16 +1321,16 @@ class MediaViewModel : ViewModel() {
                     val permissionsGranted = _mediaPermissionsGranted.value
                     Log.d(
                         "SYNC_ENGINE",
-                        "Room write completed, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
+                        "[ROOM-WRITE-COMPLETE] items=${combined.size}, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
                     )
                     if (!initialSyncCompleted && permissionsGranted) {
                         settingsDataStore.setInitialSyncCompleted(true)
                         initialSyncCompletedCached = true
-                        Log.d("INIT_SETUP", "Initial sync completed flag set to true")
+                        Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial sync completed flag set to true")
                     }
                     if (_initialSetupInProgress.value) {
                         _initialSetupInProgress.value = false
-                        Log.d("INIT_SETUP", "Initial setup in progress = false")
+                        Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial setup in progress = false → LOADER STOPPED")
                     }
                 }
                 
@@ -1192,9 +1356,15 @@ class MediaViewModel : ViewModel() {
                 isSyncing = false
                 if (!_mediaPermissionsGranted.value && (initialSyncCompletedCached == false)) {
                     _initialSetupInProgress.value = true
-                    Log.d("INIT_SETUP", "Initial setup remains true (permissions not granted)")
+                    Log.d(
+                        "INIT_SETUP",
+                        "[REFRESH-END] Permissions not granted, keeping setup in progress true"
+                    )
                 }
-                Log.d("SYNC_ENGINE", "refresh() END: isSyncing=false, isLoading=false")
+                Log.d(
+                    "SYNC_ENGINE",
+                    "[REFRESH-END] isSyncing=false, isLoading=${_isLoading.value}, initialSetupInProgress=${_initialSetupInProgress.value}"
+                )
 
                 if (pendingRefresh) {
                     pendingRefresh = false
