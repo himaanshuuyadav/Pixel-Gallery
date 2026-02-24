@@ -51,8 +51,28 @@ interface MediaDao {
     @Query("SELECT * FROM media WHERE isVideo = 0")
     suspend fun getAllImagesOnce(): List<MediaEntity>
 
+    // ═════════════════════════════════════════════════════════════════════
+    // GET IMAGES BY MULTIPLE BUCKETS (for Photos View album filter)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE isVideo = 0 AND bucketId IN (:bucketIds)
+        ORDER BY dateAdded DESC
+    """)
+    fun getImagesByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
+
     @Query("SELECT * FROM media WHERE isVideo = 1 ORDER BY dateAdded DESC")
     fun getAllVideos(): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // GET VIDEOS BY MULTIPLE BUCKETS (for Photos View album filter)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE isVideo = 1 AND bucketId IN (:bucketIds)
+        ORDER BY dateAdded DESC
+    """)
+    fun getVideosByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
     // SEARCH QUERY (Room-based search - displayName + bucketName)
@@ -75,6 +95,16 @@ interface MediaDao {
         ORDER BY dateAdded DESC
     """)
     fun getMediaByBucket(bucketId: String): Flow<List<MediaEntity>>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // GET MEDIA BY MULTIPLE BUCKETS (for Photos View album filter)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY dateAdded DESC
+    """)
+    fun getMediaByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
     // SMART ALBUMS - RECENTLY ADDED
