@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,6 +49,17 @@ fun DebugSettingScreen(
     val labelingProgress by viewModel.labelingProgress.collectAsState()
     val isCharging = remember { 
         mutableStateOf(com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context))
+    }
+
+    val themeShapes = MaterialTheme.shapes
+    val shapeOptions = remember(themeShapes) {
+        buildMaterialShapeOptions(themeShapes)
+    }
+    var selectedShapeName by remember { mutableStateOf(shapeOptions.firstOrNull()?.name ?: "") }
+    LaunchedEffect(shapeOptions) {
+        if (shapeOptions.isNotEmpty() && shapeOptions.none { it.name == selectedShapeName }) {
+            selectedShapeName = shapeOptions.first().name
+        }
     }
     
     // Track next batch status
@@ -99,11 +111,6 @@ fun DebugSettingScreen(
         subtitle = "Developer tools",
         onNavigateBack = onBackClick
     ) {
-        // Add consistent spacing
-        item {
-            Spacer(modifier = Modifier.height(28.dp))
-        }
-        
         // ML LABELING DEBUG PANEL
         item {
             CategoryHeader("ML Image Labeling")
@@ -374,6 +381,77 @@ fun DebugSettingScreen(
         
         item {
             Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        // Material 3 shapes preview
+        item {
+            CategoryHeader("Material Shapes")
+        }
+
+        if (shapeOptions.isEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "No shapes found. Update Material3 to access the shape library.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        } else {
+            item {
+                SettingsGroup {
+                    shapeOptions.forEachIndexed { index, option ->
+                        val position = when {
+                            shapeOptions.size == 1 -> SettingPosition.SINGLE
+                            index == 0 -> SettingPosition.TOP
+                            index == shapeOptions.lastIndex -> SettingPosition.BOTTOM
+                            else -> SettingPosition.MIDDLE
+                        }
+                        ShapeSelectionItem(
+                            name = option.name,
+                            selected = option.name == selectedShapeName,
+                            position = position,
+                            onClick = { selectedShapeName = option.name }
+                        )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            item {
+                val selectedShape = shapeOptions.firstOrNull { it.name == selectedShapeName }?.shape
+                Surface(
+                    shape = selectedShape ?: MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(96.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Preview: ${selectedShapeName.ifEmpty { "medium" }}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(28.dp))
+            }
         }
         
         // Image metadata viewer
@@ -660,6 +738,117 @@ private fun formatAddress(address: Address?): String? {
     address.countryName?.let { parts.add(it) }
     
     return if (parts.isNotEmpty()) parts.joinToString(", ") else null
+}
+
+private data class NamedShape(
+    val name: String,
+    val shape: Shape
+)
+
+private fun buildMaterialShapeOptions(themeShapes: Shapes): List<NamedShape> {
+    val baseShapes = listOf(
+        NamedShape("extraSmall", themeShapes.extraSmall),
+        NamedShape("small", themeShapes.small),
+        NamedShape("medium", themeShapes.medium),
+        NamedShape("large", themeShapes.large),
+        NamedShape("extraLarge", themeShapes.extraLarge)
+    )
+    val libraryShapes = loadMaterialShapesFromLibrary()
+    return (baseShapes + libraryShapes)
+        .distinctBy { it.name }
+        .sortedBy { it.name }
+}
+
+private fun loadMaterialShapesFromLibrary(): List<NamedShape> {
+    return runCatching {
+        val klass = Class.forName("androidx.compose.material3.MaterialShapes")
+        val instance = klass.declaredFields
+            .firstOrNull { it.name == "INSTANCE" }
+            ?.also { it.isAccessible = true }
+            ?.get(null)
+            ?: klass.getDeclaredConstructor().newInstance()
+        val shapes = mutableListOf<NamedShape>()
+
+        klass.declaredFields
+            .filter { Shape::class.java.isAssignableFrom(it.type) }
+            .forEach { field ->
+                field.isAccessible = true
+                val shape = field.get(instance) as? Shape ?: return@forEach
+                shapes.add(NamedShape(field.name, shape))
+            }
+
+        klass.methods
+            .filter { it.parameterCount == 0 && Shape::class.java.isAssignableFrom(it.returnType) }
+            .forEach { method ->
+                val name = normalizeGetterName(method.name)
+                val shape = method.invoke(instance) as? Shape ?: return@forEach
+                shapes.add(NamedShape(name, shape))
+            }
+
+        shapes
+    }.getOrDefault(emptyList())
+}
+
+private fun normalizeGetterName(name: String): String {
+    return if (name.startsWith("get") && name.length > 3) {
+        name.substring(3).replaceFirstChar { it.lowercase() }
+    } else {
+        name
+    }
+}
+
+@Composable
+private fun ShapeSelectionItem(
+    name: String,
+    selected: Boolean,
+    position: SettingPosition,
+    onClick: () -> Unit
+) {
+    val shape = when (position) {
+        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
+        SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
+        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
+        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
+    }
+
+    Surface(
+        onClick = onClick,
+        shape = shape,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (selected) "Selected" else "Tap to preview",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (selected) {
+                Text(
+                    text = "Active",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
 }
 
 /**
