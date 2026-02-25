@@ -104,20 +104,10 @@ fun GalleryViewSettingScreen(
                 }
             }
         } else {
-            // Add consistent spacing like LayoutSettingScreen
-            item {
-                Spacer(modifier = Modifier.height(28.dp))
-            }
-            
             // System Albums Section
             if (systemAlbums.isNotEmpty()) {
                 item {
-                    Text(
-                        text = "System Albums",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+                    CategoryHeader("System Albums")
                 }
                 
                 items(systemAlbums.size) { index ->
@@ -150,14 +140,15 @@ fun GalleryViewSettingScreen(
             
             // User Albums Section
             if (userAlbums.isNotEmpty()) {
+                // Add spacing only if systemAlbums exist
+                if (systemAlbums.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+                
                 item {
-                    val topPadding = if (systemAlbums.isNotEmpty()) 24.dp else 0.dp
-                    Text(
-                        text = "User Albums",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = topPadding, bottom = 8.dp)
-                    )
+                    CategoryHeader("User Albums")
                 }
                 
                 items(userAlbums.size) { index ->
