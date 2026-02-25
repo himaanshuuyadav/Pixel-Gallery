@@ -84,7 +84,7 @@ fun SmartAlbumViewScreen(
             subtitle = if (albumMedia.isEmpty()) null else "${albumMedia.size} ${if (albumMedia.size == 1) "item" else "items"}",
             onNavigateBack = onNavigateBack,
             columns = 3,
-            contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 16.dp, bottom = 16.dp),
+            contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 44.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
