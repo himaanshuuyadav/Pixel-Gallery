@@ -94,11 +94,6 @@ fun PreviewsSettingScreen(
         subtitle = "Customize thumbnail appearance",
         onNavigateBack = onBackClick
     ) {
-        // Add consistent spacing
-        item {
-            Spacer(modifier = Modifier.height(28.dp))
-        }
-        
         // Thumbnail tweaks category header
         item {
             CategoryHeader("Thumbnail tweaks")
