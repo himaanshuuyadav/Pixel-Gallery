@@ -35,8 +35,9 @@ fun MoveToAlbumDialog(
     var isMoving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     
-    // REFACTORED: Use ViewModel's Room-backed albums flow
-    val cachedAlbums by viewModel.albumsFlow.collectAsState(initial = emptyList())
+    // UNFILTERED: Use allAlbumsFlow (not affected by Photos View Settings filter)
+    // Move dialog must show ALL albums regardless of Photos tab selection
+    val cachedAlbums by viewModel.allAlbumsFlow.collectAsState(initial = emptyList())
     val isLoading by viewModel.isLoading.collectAsState()
     
     // Debug log for album loading
