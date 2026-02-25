@@ -72,8 +72,8 @@ fun ExpandableTopAppBar(
     // Subtitle alpha - fade out smoothly but completely
     val subtitleAlpha = (1f - scrollProgress * 1.5f).coerceIn(0f, 1f)
     
-    // Title vertical alignment - reduced padding for better icon spacing
-    val titleBottomPadding = lerp(24.dp, 12.dp, scrollProgress)
+    // Title vertical alignment - perfectly centered in collapsed state
+    val titleBottomPadding = lerp(46.dp, 15.dp, scrollProgress)
     
     // Background color with proper opacity
     val backgroundColor = MaterialTheme.colorScheme.surface
@@ -104,7 +104,7 @@ fun ExpandableTopAppBar(
                     .padding(horizontal = 20.dp)
                     .padding(bottom = titleBottomPadding),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 // Title and subtitle column
                 Column(
