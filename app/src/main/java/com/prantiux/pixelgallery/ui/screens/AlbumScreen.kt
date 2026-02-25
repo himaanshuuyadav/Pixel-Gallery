@@ -28,12 +28,14 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,6 +79,9 @@ fun AlbumDetailScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val density = LocalDensity.current
+    var contentTopPx by remember { mutableStateOf<Float?>(null) }
+    var firstHeaderTopPx by remember { mutableStateOf<Float?>(null) }
     
     // Remember grid state for scrollbar
     val gridState = rememberLazyGridState()
@@ -190,7 +195,15 @@ fun AlbumDetailScreen(
             )
         )
         
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { coords ->
+                    if (contentTopPx == null) {
+                        contentTopPx = coords.positionInRoot().y
+                    }
+                }
+        ) {
             if (albumMedia.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -228,13 +241,24 @@ fun AlbumDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    groupedMedia.forEach { group ->
+                    groupedMedia.forEachIndexed { index, group ->
                         // Date Header - spans all columns with checkbox when in selection mode
                         item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columnCount) }) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp),
+                                    .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
+                                    .then(
+                                        if (index == 0) {
+                                            Modifier.onGloballyPositioned { coords ->
+                                                if (firstHeaderTopPx == null) {
+                                                    firstHeaderTopPx = coords.positionInRoot().y
+                                                }
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
+                                    ),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -324,7 +348,11 @@ fun AlbumDetailScreen(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
-            topPadding = 88.dp + 16.dp + 32.dp, // Align with first date header
+            topPadding = if (contentTopPx != null && firstHeaderTopPx != null) {
+                with(density) { (firstHeaderTopPx!! - contentTopPx!!).coerceAtLeast(0f).toDp() }
+            } else {
+                0.dp
+            },
             dateGroups = dateGroupsForScrollbar,
             coroutineScope = coroutineScope,
             isDarkTheme = isDarkTheme,
