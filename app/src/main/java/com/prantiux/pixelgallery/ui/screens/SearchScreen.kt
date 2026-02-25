@@ -34,7 +34,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -512,7 +514,7 @@ fun SearchScreen(
                     }
                     
                     val smartAlbumRows = smartAlbums.chunked(2)
-                    val isLoadingSmartAlbums = images.isNotEmpty() || videos.isNotEmpty() && smartAlbums.isEmpty()
+                    val isLoadingSmartAlbums = (images.isNotEmpty() || videos.isNotEmpty()) && smartAlbums.isEmpty()
 
                     LazyColumn(
                         state = lazyListState,
@@ -645,6 +647,10 @@ fun SearchScreen(
                     val gridState = rememberLazyGridState()
                     val coroutineScope = rememberCoroutineScope()
                     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+                    val density = LocalDensity.current
+                    var contentTopPx by remember { mutableStateOf<Float?>(null) }
+                    var albumsHeaderTopPx by remember { mutableStateOf<Float?>(null) }
+                    var mediaHeaderTopPx by remember { mutableStateOf<Float?>(null) }
                     
                     // Apply filter logic
                     val showAlbums = when (selectedFilter) {
@@ -665,7 +671,15 @@ fun SearchScreen(
                         else -> "Photos & Videos (${filteredMedia.size})"
                     }
                     
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned { coords ->
+                                if (contentTopPx == null) {
+                                    contentTopPx = coords.positionInRoot().y
+                                }
+                            }
+                    ) {
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(3),
                             state = gridState,
@@ -681,7 +695,17 @@ fun SearchScreen(
                                     text = "Albums (${searchResults.matchedAlbums.size})",
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .then(
+                                            if (albumsHeaderTopPx == null) {
+                                                Modifier.onGloballyPositioned { coords ->
+                                                    albumsHeaderTopPx = coords.positionInRoot().y
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
                                 )
                             }
                             
@@ -721,7 +745,17 @@ fun SearchScreen(
                                     text = categoryHeading,
                                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .then(
+                                            if (mediaHeaderTopPx == null) {
+                                                Modifier.onGloballyPositioned { coords ->
+                                                    mediaHeaderTopPx = coords.positionInRoot().y
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
                                 )
                             }
                             
@@ -773,7 +807,16 @@ fun SearchScreen(
                             modifier = Modifier.align(Alignment.TopEnd),
                             gridState = gridState,
                             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.SMOOTH_SCROLLING,
-                            topPadding = 88.dp + 2.dp,
+                            topPadding = if (contentTopPx != null && (albumsHeaderTopPx != null || mediaHeaderTopPx != null)) {
+                                val headerTopPx = if (showAlbums && searchResults.matchedAlbums.isNotEmpty() && albumsHeaderTopPx != null) {
+                                    albumsHeaderTopPx!!
+                                } else {
+                                    mediaHeaderTopPx ?: 0f
+                                }
+                                with(density) { (headerTopPx - contentTopPx!!).coerceAtLeast(0f).toDp() }
+                            } else {
+                                0.dp
+                            },
                             totalItems = (if (showAlbums) searchResults.matchedAlbums.size else 0) + filteredMedia.size + 3,
                             coroutineScope = coroutineScope,
                             isDarkTheme = isDarkTheme
