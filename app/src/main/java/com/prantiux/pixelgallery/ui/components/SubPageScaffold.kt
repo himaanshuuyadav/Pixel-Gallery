@@ -8,7 +8,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -86,7 +85,6 @@ fun SubPageScaffold(
     } else {
         scrollBehavior.state.collapsedFraction
     }
-    val subtitleAlpha = (1f - collapseFraction * 1.2f).coerceIn(0.2f, 1f)
     
     Scaffold(
         modifier = Modifier
@@ -107,9 +105,7 @@ fun SubPageScaffold(
                                 text = subtitle,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .padding(top = 4.dp)
-                                    .alpha(subtitleAlpha)
+                                modifier = Modifier.padding(top = 4.dp)
                             )
                         }
                     }
