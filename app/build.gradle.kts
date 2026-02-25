@@ -84,8 +84,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     
-    // Material3 - REQUIRED MINIMUM ALPHA VERSION (EXPLICIT)
-    implementation("androidx.compose.material3:material3:1.5.0-alpha11")
+    // Material3 Expressive APIs (MaterialShapes, LoadingIndicator)
+    implementation("androidx.compose.material3:material3:1.5.0-alpha14")
     
     // Material Icons Extended (for DragIndicator and other rounded icons)
     implementation("androidx.compose.material:material-icons-extended")
