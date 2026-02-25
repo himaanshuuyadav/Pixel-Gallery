@@ -71,9 +71,8 @@ fun ThemeSettingScreen(
         subtitle = "Customize app appearance",
         onNavigateBack = onBackClick
     ) {
-        // Add consistent spacing
         item {
-            Spacer(modifier = Modifier.height(28.dp))
+            CategoryHeader("Appearance")
         }
         
         item {
