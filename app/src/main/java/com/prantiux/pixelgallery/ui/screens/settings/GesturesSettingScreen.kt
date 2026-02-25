@@ -78,11 +78,6 @@ fun GesturesSettingScreen(
         subtitle = "Customize swipe and tap interactions",
         onNavigateBack = onBackClick
     ) {
-        // Add consistent spacing
-        item {
-            Spacer(modifier = Modifier.height(28.dp))
-        }
-        
         // Navigation category header
         item {
             CategoryHeader("Navigation")
