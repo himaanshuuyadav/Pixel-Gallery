@@ -45,7 +45,7 @@ fun SettingsScreen(
     
     SubPageScaffold(
         title = "Settings",
-        subtitle = null,
+        subtitle = "Customize your gallery experience",
         onNavigateBack = onBackClick
     ) {
         // Appearance Section
