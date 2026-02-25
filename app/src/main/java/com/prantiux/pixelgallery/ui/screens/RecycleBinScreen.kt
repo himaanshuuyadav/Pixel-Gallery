@@ -26,8 +26,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,6 +137,9 @@ fun RecycleBinContent(
     val navBarHeight = calculateFloatingNavBarHeight()
     val view = LocalView.current
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val density = LocalDensity.current
+    var contentTopPx by remember { mutableStateOf<Float?>(null) }
+    var firstHeaderTopPx by remember { mutableStateOf<Float?>(null) }
     
     // Scrollbar state for overlay
     var scrollbarOverlayText by remember { mutableStateOf("") }
@@ -163,7 +168,15 @@ fun RecycleBinContent(
         state = rememberTopAppBarState()
     )
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coords ->
+                if (contentTopPx == null) {
+                    contentTopPx = coords.positionInRoot().y
+                }
+            }
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Material 3 Expressive collapsing header
             MediumTopAppBar(
@@ -262,13 +275,24 @@ fun RecycleBinContent(
                         val capturedSelectedItems = selectedItems
                         val capturedIsSelectionMode = isSelectionMode
                         
-                        groupedItems.forEach { group ->
+                        groupedItems.forEachIndexed { index, group ->
                             // Section header with checkbox for selecting all in category
                             item(span = { GridItemSpan(3) }) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp),
+                                        .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
+                                        .then(
+                                            if (index == 0) {
+                                                Modifier.onGloballyPositioned { coords ->
+                                                    if (firstHeaderTopPx == null) {
+                                                        firstHeaderTopPx = coords.positionInRoot().y
+                                                    }
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -380,7 +404,11 @@ fun RecycleBinContent(
             modifier = Modifier.align(Alignment.TopEnd),
             gridState = gridState,
             mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DAY_LEFT_JUMPING,
-            topPadding = 88.dp + 16.dp + 32.dp, // Align with first day-left header
+            topPadding = if (contentTopPx != null && firstHeaderTopPx != null) {
+                with(density) { (firstHeaderTopPx!! - contentTopPx!!).coerceAtLeast(0f).toDp() }
+            } else {
+                0.dp
+            },
             dayLeftGroups = dayLeftGroupsForScrollbar,
             coroutineScope = coroutineScope,
             isDarkTheme = isDarkTheme,
