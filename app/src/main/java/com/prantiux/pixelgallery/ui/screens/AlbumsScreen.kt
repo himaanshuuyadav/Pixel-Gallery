@@ -71,15 +71,16 @@ fun AlbumsScreen(
     onNavigateToAllAlbums: () -> Unit,
     onNavigateToRecycleBin: () -> Unit = {},
     onNavigateToFavorites: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
     viewModel: MediaViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // ROOM-FIRST: Use Room-derived categorizedAlbumsFlow instead of MediaStore-derived categorizedAlbums
-    // This flow automatically updates when Room data changes (via MediaStore sync)
-    val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
+    // UNFILTERED: Use allCategorizedAlbumsFlow (not affected by Photos View Settings filter)
+    // Albums tab must show ALL albums regardless of Photos tab selection
+    val categorizedAlbums by viewModel.allCategorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     
@@ -142,7 +143,8 @@ fun AlbumsScreen(
                             selectedMainAlbumIndex = index
                         },
                         onViewAllClick = onNavigateToAllAlbums,
-                        onEditClick = { showReorderBottomSheet = true }
+                        onEditClick = { showReorderBottomSheet = true },
+                        onSettingsClick = onNavigateToSettings
                     )
                 }
 
@@ -206,7 +208,8 @@ fun AlbumsHeaderWithTabs(
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
     onViewAllClick: () -> Unit,
-    onEditClick: () -> Unit = {}
+    onEditClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {}
 ) {
     val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     
@@ -216,16 +219,46 @@ fun AlbumsHeaderWithTabs(
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        // Title - same font size as Photos collapsed heading (26sp)
-        Text(
-            text = "Albums",
-            fontSize = 26.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
+        // Title with Settings icon - same style as Photos screen
+        Row(
             modifier = Modifier
+                .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp)
-                .statusBarsPadding()
-        )
+                .statusBarsPadding(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Albums",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            // Settings icon button - same as Photos screen
+            IconButton(
+                onClick = onSettingsClick,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        FontIcon(
+                            unicode = FontIcons.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            size = 22.sp
+                        )
+                    }
+                }
+            }
+        }
         
         // Tabs - directly below without spacer
         MainAlbumTabs(
