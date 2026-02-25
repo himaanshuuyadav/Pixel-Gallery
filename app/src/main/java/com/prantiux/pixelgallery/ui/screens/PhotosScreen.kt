@@ -5,6 +5,9 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,7 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import android.view.HapticFeedbackConstants
 import androidx.compose.ui.text.font.FontWeight
@@ -136,6 +142,9 @@ fun PhotosContent(
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    var contentTopPx by remember { mutableStateOf<Float?>(null) }
+    var firstHeaderTopPx by remember { mutableStateOf<Float?>(null) }
     
     // Pinch gesture state
     var cumulativeScale by remember { mutableStateOf(1f) }
@@ -244,6 +253,27 @@ fun PhotosContent(
         }
     }
     
+    // Snap animation for header - same behavior as SubPageScaffold
+    val snappedScrollProgress = remember { Animatable(0f) }
+    
+    // Track scrolling state to detect when scroll stops
+    LaunchedEffect(gridState.isScrollInProgress, scrollProgress.value) {
+        if (gridState.isScrollInProgress) {
+            // While scrolling, snap immediately to follow scroll position
+            snappedScrollProgress.snapTo(scrollProgress.value)
+        } else {
+            // When scroll stops, animate to nearest state (expanded or collapsed)
+            val targetProgress = if (scrollProgress.value < 0.5f) 0f else 1f
+            snappedScrollProgress.animateTo(
+                targetValue = targetProgress,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
+        }
+    }
+    
     // Calculate navbar height for proper content padding
     val navBarHeight = calculateFloatingNavBarHeight()
     
@@ -273,7 +303,7 @@ fun PhotosContent(
         // Expandable Top App Bar - sticky header
         com.prantiux.pixelgallery.ui.components.ExpandableTopAppBar(
             title = "Photos",
-            scrollProgress = scrollProgress.value,
+            scrollProgress = snappedScrollProgress.value,
             onSettingsClick = onNavigateToSettings,
             modifier = Modifier.fillMaxWidth()
         )
@@ -283,6 +313,11 @@ fun PhotosContent(
             modifier = Modifier
                 .fillMaxSize()
                 .background(color = MaterialTheme.colorScheme.surface)
+                .onGloballyPositioned { coords ->
+                    if (contentTopPx == null) {
+                        contentTopPx = coords.positionInRoot().y
+                    }
+                }
         ) {
             // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
             // Never show on subsequent navigations to prevent UI jank
@@ -323,13 +358,24 @@ fun PhotosContent(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         
-                        groupedMedia.forEach { group ->
+                        groupedMedia.forEachIndexed { index, group ->
                         // Date Header - spans all columns with checkbox when in selection mode
                         item(span = { GridItemSpan(columnCount) }) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 8.dp, top = 28.dp, bottom = 8.dp, end = 8.dp),
+                                    .padding(start = 8.dp, top = 28.dp, bottom = 8.dp, end = 8.dp)
+                                    .then(
+                                        if (index == 0) {
+                                            Modifier.onGloballyPositioned { coords ->
+                                                if (firstHeaderTopPx == null) {
+                                                    firstHeaderTopPx = coords.positionInRoot().y
+                                                }
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
+                                    ),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -446,7 +492,11 @@ fun PhotosContent(
                 modifier = Modifier.align(Alignment.TopEnd),
                 gridState = gridState,
                 mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
-                topPadding = 0.dp, // No offset needed since app bar is above
+                topPadding = if (contentTopPx != null && firstHeaderTopPx != null) {
+                    with(density) { (firstHeaderTopPx!! - contentTopPx!!).coerceAtLeast(0f).toDp() }
+                } else {
+                    0.dp
+                },
                 dateGroups = dateGroupsForScrollbar,
                 coroutineScope = coroutineScope,
                 isDarkTheme = isDarkTheme,
