@@ -556,6 +556,9 @@ fun AppNavigation(
                             onNavigateToFavorites = {
                                 navController.navigate(Screen.Favorites.route)
                             },
+                            onNavigateToSettings = {
+                                navController.navigate(Screen.Settings.route)
+                            },
                             viewModel = viewModel
                         )
                     }
