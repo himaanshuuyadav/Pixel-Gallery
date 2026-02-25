@@ -77,11 +77,6 @@ fun PlaybackSettingScreen(
         subtitle = "Video playback preferences",
         onNavigateBack = onBackClick
     ) {
-        // Add consistent spacing
-        item {
-            Spacer(modifier = Modifier.height(28.dp))
-        }
-        
         // Behavior category
         item {
             CategoryHeader("Behavior")
