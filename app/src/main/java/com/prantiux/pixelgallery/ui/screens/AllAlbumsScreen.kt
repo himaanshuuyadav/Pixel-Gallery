@@ -35,9 +35,9 @@ fun AllAlbumsScreen(
     viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     modifier: Modifier = Modifier
 ) {
-    // REFACTORED: Use ViewModel's cached albums instead of querying MediaStore
-    // ROOM-FIRST: Use Room-derived categorized albums flow
-    val categorizedAlbums by viewModel.categorizedAlbumsFlow.collectAsState()
+    // UNFILTERED: Use allCategorizedAlbumsFlow (not affected by Photos View Settings filter)
+    // All Albums screen must show ALL albums regardless of Photos tab selection
+    val categorizedAlbums by viewModel.allCategorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     
     val allAlbums = remember(categorizedAlbums) {
@@ -51,7 +51,7 @@ fun AllAlbumsScreen(
         subtitle = if (allAlbums.isEmpty()) null else "${allAlbums.size} ${if (allAlbums.size == 1) "album" else "albums"}",
         onNavigateBack = onNavigateBack,
         columns = 2,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = navBarHeight + 16.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 44.dp, bottom = navBarHeight + 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
