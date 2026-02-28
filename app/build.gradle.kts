@@ -85,7 +85,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     
     // Material3 Expressive APIs (MaterialShapes, LoadingIndicator)
-    implementation("androidx.compose.material3:material3:1.5.0-alpha14")
+    implementation("androidx.compose.material3:material3:1.5.0-alpha15")
     
     // Material Icons Extended (for DragIndicator and other rounded icons)
     implementation("androidx.compose.material:material-icons-extended")
