@@ -1,6 +1,7 @@
 package com.prantiux.pixelgallery.ui.theme
 
 import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import android.util.LruCache
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
@@ -88,6 +89,132 @@ fun extractSeedColor(bitmap: Bitmap): Color {
     }
 
     return color
+}
+
+/**
+ * Theme-aware swatch selection from Palette.
+ * Mimics Echo app color extraction strategy.
+ *
+ * @param palette Palette generated from bitmap
+ * @param isDarkTheme true for dark mode, false for light mode
+ * @return Selected color swatch as Int, or null if none available
+ */
+fun selectThemeAwareSwatch(palette: Palette, isDarkTheme: Boolean): Int? {
+    return if (isDarkTheme) {
+        // Dark theme priority: deep vibrant → dark muted → vibrant → dominant
+        palette.darkVibrantSwatch?.rgb
+            ?: palette.darkMutedSwatch?.rgb
+            ?: palette.vibrantSwatch?.rgb
+            ?: palette.dominantSwatch?.rgb
+    } else {
+        // Light theme priority: light vibrant → vibrant → light muted → dominant
+        palette.lightVibrantSwatch?.rgb
+            ?: palette.vibrantSwatch?.rgb
+            ?: palette.lightMutedSwatch?.rgb
+            ?: palette.dominantSwatch?.rgb
+    }
+}
+
+/**
+ * Computes perceived brightness using WCAG formula.
+ * Range: 0-255 where >127 is "light", <128 is "dark"
+ */
+fun computePerceptualBrightness(color: Color): Int {
+    val r = color.red * 255
+    val g = color.green * 255
+    val b = color.blue * 255
+    return (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+}
+
+/**
+ * Echo-inspired theme-aware color adjustment for Smart Album cards.
+ *
+ * Steps:
+ * 1. Gentle saturation reduction (15% if saturation > 85%)
+ * 2. Theme-aware blending with surface color (30% for dark, 25% for light)
+ * 3. Brightness validation and adjustment
+ *
+ * @param color Extracted swatch color
+ * @param isDarkTheme true for dark mode
+ * @param surfaceColor Material 3 surface color for theme-aware blending
+ * @return Adjusted color ready for UI
+ */
+fun adjustColorForSmartAlbum(
+    color: Color,
+    isDarkTheme: Boolean,
+    surfaceColor: Color
+): Color {
+    var workingColor = color
+
+    // Step 1: Gentle saturation reduction (only if high saturation)
+    val hsl = FloatArray(3)
+    ColorUtils.RGBToHSL(
+        (color.red * 255f).toInt(),
+        (color.green * 255f).toInt(),
+        (color.blue * 255f).toInt(),
+        hsl
+    )
+
+    if (hsl[1] > 0.85f) {
+        hsl[1] *= 0.85f // Reduce by 15% only if high saturation
+    }
+
+    val adjustedRgb = ColorUtils.HSLToColor(hsl)
+    workingColor = Color(adjustedRgb)
+
+    // Step 2: Theme-aware blending with surface color
+    // Dark mode: 30% surface blend for harmony
+    // Light mode: 25% surface blend for lighter, softer appearance
+    val blendRatio = if (isDarkTheme) 0.30f else 0.25f
+    
+    val blendedRgb = ColorUtils.blendARGB(
+        AndroidColor.argb(
+            255,
+            (workingColor.red * 255).toInt(),
+            (workingColor.green * 255).toInt(),
+            (workingColor.blue * 255).toInt()
+        ),
+        AndroidColor.argb(
+            255,
+            (surfaceColor.red * 255).toInt(),
+            (surfaceColor.green * 255).toInt(),
+            (surfaceColor.blue * 255).toInt()
+        ),
+        blendRatio
+    )
+    workingColor = Color(blendedRgb)
+
+    // Step 3: Brightness validation and adjustment
+    val brightness = computePerceptualBrightness(workingColor)
+
+    when {
+        brightness < 35 -> {
+            // Too dark - lighten by 5%
+            val hsl2 = FloatArray(3)
+            ColorUtils.RGBToHSL(
+                (workingColor.red * 255f).toInt(),
+                (workingColor.green * 255f).toInt(),
+                (workingColor.blue * 255f).toInt(),
+                hsl2
+            )
+            hsl2[2] = (hsl2[2] + 0.05f).coerceAtMost(1f)
+            workingColor = Color(ColorUtils.HSLToColor(hsl2))
+        }
+        brightness > 220 -> {
+            // Too bright - darken by 5%
+            val hsl2 = FloatArray(3)
+            ColorUtils.RGBToHSL(
+                (workingColor.red * 255f).toInt(),
+                (workingColor.green * 255f).toInt(),
+                (workingColor.blue * 255f).toInt(),
+                hsl2
+            )
+            hsl2[2] = (hsl2[2] - 0.05f).coerceAtLeast(0f)
+            workingColor = Color(ColorUtils.HSLToColor(hsl2))
+        }
+    }
+
+    return workingColor
 }
 
 /**
