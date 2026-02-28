@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 
 package com.prantiux.pixelgallery.navigation
 
@@ -19,6 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -984,7 +987,7 @@ fun AppNavigation(
                                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
                                         Surface(
-                                            shape = SmoothCornerShape(12.dp, 60),
+                                            shape = MaterialShapes.Cookie7Sided.toShape(),
                                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
                                             modifier = Modifier.size(40.dp)
                                         ) {
@@ -1035,7 +1038,7 @@ fun AppNavigation(
                                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
                                         Surface(
-                                            shape = SmoothCornerShape(12.dp, 60),
+                                            shape = MaterialShapes.Cookie7Sided.toShape(),
                                             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
                                             modifier = Modifier.size(40.dp)
                                         ) {
@@ -1079,7 +1082,7 @@ fun AppNavigation(
                                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                                         ) {
                                             Surface(
-                                                shape = SmoothCornerShape(12.dp, 60),
+                                                shape = MaterialShapes.Cookie7Sided.toShape(),
                                                 color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
                                                 modifier = Modifier.size(40.dp)
                                             ) {
