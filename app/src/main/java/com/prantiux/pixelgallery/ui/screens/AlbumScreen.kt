@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package com.prantiux.pixelgallery.ui.screens
 
 import android.content.Intent
@@ -15,6 +17,9 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -444,7 +449,7 @@ fun AlbumDetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 Surface(
-                                    shape = SmoothCornerShape(12.dp, 60),
+                                    shape = MaterialShapes.Cookie7Sided.toShape(),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
                                     modifier = Modifier.size(40.dp)
                                 ) {
@@ -496,7 +501,7 @@ fun AlbumDetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 Surface(
-                                    shape = SmoothCornerShape(12.dp, 60),
+                                    shape = MaterialShapes.Cookie7Sided.toShape(),
                                     color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
                                     modifier = Modifier.size(40.dp)
                                 ) {
@@ -539,7 +544,7 @@ fun AlbumDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
                                     Surface(
-                                        shape = SmoothCornerShape(12.dp, 60),
+                                        shape = MaterialShapes.Cookie7Sided.toShape(),
                                         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
                                         modifier = Modifier.size(40.dp)
                                     ) {
