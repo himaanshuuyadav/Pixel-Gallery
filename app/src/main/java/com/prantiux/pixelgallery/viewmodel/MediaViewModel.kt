@@ -1,13 +1,20 @@
 package com.prantiux.pixelgallery.viewmodel
 
 import android.content.Context
+import android.content.res.Configuration
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.ui.graphics.Color
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.palette.graphics.Palette
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.prantiux.pixelgallery.data.AlbumRepository
@@ -28,6 +35,10 @@ import com.prantiux.pixelgallery.model.MediaGroup
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.search.SearchResultFilter
+import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
+import com.prantiux.pixelgallery.ui.theme.extractSeedColor
+import com.prantiux.pixelgallery.ui.theme.selectThemeAwareSwatch
+import com.prantiux.pixelgallery.ui.theme.adjustColorForSmartAlbum
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -47,6 +58,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlin.math.roundToInt
 
 enum class SortMode {
     DATE_DESC, DATE_ASC, NAME_ASC, NAME_DESC, SIZE_DESC, SIZE_ASC
@@ -88,6 +100,80 @@ class MediaViewModel : ViewModel() {
     private val _smartAlbumThumbnailCache = mutableStateMapOf<String, android.net.Uri?>()
     val smartAlbumThumbnailCache: SnapshotStateMap<String, android.net.Uri?>
         get() = _smartAlbumThumbnailCache
+    
+    // Smart album dominant color cache
+    private val _smartAlbumDominantColors = mutableStateMapOf<String, Color>()
+    val smartAlbumDominantColors: SnapshotStateMap<String, Color>
+        get() = _smartAlbumDominantColors
+
+    fun preloadSmartAlbumColors(
+        context: Context,
+        albums: List<Album>,
+        allMediaItems: List<MediaItem>
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            albums.forEach { album ->
+                val alreadyCached = withContext(Dispatchers.Main) {
+                    _smartAlbumDominantColors.containsKey(album.id)
+                }
+                if (alreadyCached) return@forEach
+
+                val media = SmartAlbumGenerator.getMediaForSmartAlbum(context, album.id, allMediaItems)
+                val firstMedia = media.firstOrNull() ?: return@forEach
+                val extractedColor = extractDominantColor(context, firstMedia.uri) ?: return@forEach
+
+                withContext(Dispatchers.Main) {
+                    _smartAlbumDominantColors[album.id] = extractedColor
+                }
+            }
+        }
+    }
+
+    private fun extractDominantColor(context: Context, uri: Uri): Color? {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream.close()
+
+            if (bitmap == null) return null
+
+            // Build Palette and apply theme-aware swatch selection
+            val palette = Palette.Builder(bitmap)
+                .maximumColorCount(16)
+                .resizeBitmapArea(0)
+                .clearFilters()
+                .generate()
+
+            // Detect dark theme from system configuration
+            val isDarkTheme = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+            // Select theme-aware swatch (Echo-inspired approach)
+            val swatchRgb = selectThemeAwareSwatch(palette, isDarkTheme)
+            if (swatchRgb == null) {
+                bitmap.recycle()
+                return Color(0xFF6C4FF5) // Fallback to primary color
+            }
+
+            val extractedColor = Color(swatchRgb)
+
+            // Use a neutral surface color for blending (works across both light and dark)
+            val surfaceColor = if (isDarkTheme) {
+                Color(0xFF1C1B1F) // Material 3 dark surface
+            } else {
+                Color(0xFFFFFBFE) // Material 3 light surface
+            }
+
+            // Apply theme-aware adjustment
+            val adjustedColor = adjustColorForSmartAlbum(extractedColor, isDarkTheme, surfaceColor)
+
+            bitmap.recycle()
+            adjustedColor
+        } catch (e: Exception) {
+            Log.w("SmartAlbum", "Failed to extract color for uri=$uri: ${e.message}")
+            null
+        }
+    }
+
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
