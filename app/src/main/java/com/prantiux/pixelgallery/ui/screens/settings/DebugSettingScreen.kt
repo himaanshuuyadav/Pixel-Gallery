@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+
 package com.prantiux.pixelgallery.ui.screens.settings
 
 import android.content.Context
@@ -11,15 +13,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.graphics.shapes.RoundedPolygon
 import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -29,7 +34,7 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DebugSettingScreen(
     onBackClick: () -> Unit = {},
@@ -51,9 +56,8 @@ fun DebugSettingScreen(
         mutableStateOf(com.prantiux.pixelgallery.ml.ImageLabelScheduler.isCharging(context))
     }
 
-    val themeShapes = MaterialTheme.shapes
-    val shapeOptions = remember(themeShapes) {
-        buildMaterialShapeOptions(themeShapes)
+    val shapeOptions = remember {
+        buildMaterialShapeOptions()
     }
     var selectedShapeName by remember { mutableStateOf(shapeOptions.firstOrNull()?.name ?: "") }
     LaunchedEffect(shapeOptions) {
@@ -414,7 +418,7 @@ fun DebugSettingScreen(
                             else -> SettingPosition.MIDDLE
                         }
                         ShapeSelectionItem(
-                            name = option.name,
+                            name = option.displayName,
                             selected = option.name == selectedShapeName,
                             position = position,
                             onClick = { selectedShapeName = option.name }
@@ -428,7 +432,8 @@ fun DebugSettingScreen(
             }
 
             item {
-                val selectedShape = shapeOptions.firstOrNull { it.name == selectedShapeName }?.shape
+                val selectedShapeOption = shapeOptions.firstOrNull { it.name == selectedShapeName }
+                val selectedShape = selectedShapeOption?.polygon?.toShape()
                 Surface(
                     shape = selectedShape ?: MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -441,7 +446,7 @@ fun DebugSettingScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Preview: ${selectedShapeName.ifEmpty { "medium" }}",
+                            text = "Preview: ${selectedShapeOption?.displayName ?: "Medium"}",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -742,60 +747,51 @@ private fun formatAddress(address: Address?): String? {
 
 private data class NamedShape(
     val name: String,
-    val shape: Shape
+    val polygon: RoundedPolygon,
+    val displayName: String
 )
 
-private fun buildMaterialShapeOptions(themeShapes: Shapes): List<NamedShape> {
-    val baseShapes = listOf(
-        NamedShape("extraSmall", themeShapes.extraSmall),
-        NamedShape("small", themeShapes.small),
-        NamedShape("medium", themeShapes.medium),
-        NamedShape("large", themeShapes.large),
-        NamedShape("extraLarge", themeShapes.extraLarge)
+private fun buildMaterialShapeOptions(): List<NamedShape> {
+    return listOf(
+        NamedShape("arch", MaterialShapes.Arch, "Arch"),
+        NamedShape("arrow", MaterialShapes.Arrow, "Arrow"),
+        NamedShape("boom", MaterialShapes.Boom, "Boom"),
+        NamedShape("bun", MaterialShapes.Bun, "Bun"),
+        NamedShape("burst", MaterialShapes.Burst, "Burst"),
+        NamedShape("circle", MaterialShapes.Circle, "Circle"),
+        NamedShape("clamShell", MaterialShapes.ClamShell, "Clam Shell"),
+        NamedShape("clover4Leaf", MaterialShapes.Clover4Leaf, "Clover 4 Leaf"),
+        NamedShape("clover8Leaf", MaterialShapes.Clover8Leaf, "Clover 8 Leaf"),
+        NamedShape("cookie4Sided", MaterialShapes.Cookie4Sided, "Cookie 4 Sided"),
+        NamedShape("cookie6Sided", MaterialShapes.Cookie6Sided, "Cookie 6 Sided"),
+        NamedShape("cookie7Sided", MaterialShapes.Cookie7Sided, "Cookie 7 Sided"),
+        NamedShape("cookie9Sided", MaterialShapes.Cookie9Sided, "Cookie 9 Sided"),
+        NamedShape("cookie12Sided", MaterialShapes.Cookie12Sided, "Cookie 12 Sided"),
+        NamedShape("diamond", MaterialShapes.Diamond, "Diamond"),
+        NamedShape("fan", MaterialShapes.Fan, "Fan"),
+        NamedShape("flower", MaterialShapes.Flower, "Flower"),
+        NamedShape("gem", MaterialShapes.Gem, "Gem"),
+        NamedShape("ghostish", MaterialShapes.Ghostish, "Ghostish"),
+        NamedShape("heart", MaterialShapes.Heart, "Heart"),
+        NamedShape("oval", MaterialShapes.Oval, "Oval"),
+        NamedShape("pentagon", MaterialShapes.Pentagon, "Pentagon"),
+        NamedShape("pill", MaterialShapes.Pill, "Pill"),
+        NamedShape("pixelCircle", MaterialShapes.PixelCircle, "Pixel Circle"),
+        NamedShape("pixelTriangle", MaterialShapes.PixelTriangle, "Pixel Triangle"),
+        NamedShape("puffy", MaterialShapes.Puffy, "Puffy"),
+        NamedShape("puffyDiamond", MaterialShapes.PuffyDiamond, "Puffy Diamond"),
+        NamedShape("semiCircle", MaterialShapes.SemiCircle, "Semi Circle"),
+        NamedShape("slanted", MaterialShapes.Slanted, "Slanted"),
+        NamedShape("softBoom", MaterialShapes.SoftBoom, "Soft Boom"),
+        NamedShape("softBurst", MaterialShapes.SoftBurst, "Soft Burst"),
+        NamedShape("square", MaterialShapes.Square, "Square"),
+        NamedShape("sunny", MaterialShapes.Sunny, "Sunny"),
+        NamedShape("triangle", MaterialShapes.Triangle, "Triangle"),
+        NamedShape("verySunny", MaterialShapes.VerySunny, "Very Sunny")
     )
-    val libraryShapes = loadMaterialShapesFromLibrary()
-    return (baseShapes + libraryShapes)
-        .distinctBy { it.name }
-        .sortedBy { it.name }
 }
 
-private fun loadMaterialShapesFromLibrary(): List<NamedShape> {
-    return runCatching {
-        val klass = Class.forName("androidx.compose.material3.MaterialShapes")
-        val instance = klass.declaredFields
-            .firstOrNull { it.name == "INSTANCE" }
-            ?.also { it.isAccessible = true }
-            ?.get(null)
-            ?: klass.getDeclaredConstructor().newInstance()
-        val shapes = mutableListOf<NamedShape>()
 
-        klass.declaredFields
-            .filter { Shape::class.java.isAssignableFrom(it.type) }
-            .forEach { field ->
-                field.isAccessible = true
-                val shape = field.get(instance) as? Shape ?: return@forEach
-                shapes.add(NamedShape(field.name, shape))
-            }
-
-        klass.methods
-            .filter { it.parameterCount == 0 && Shape::class.java.isAssignableFrom(it.returnType) }
-            .forEach { method ->
-                val name = normalizeGetterName(method.name)
-                val shape = method.invoke(instance) as? Shape ?: return@forEach
-                shapes.add(NamedShape(name, shape))
-            }
-
-        shapes
-    }.getOrDefault(emptyList())
-}
-
-private fun normalizeGetterName(name: String): String {
-    return if (name.startsWith("get") && name.length > 3) {
-        name.substring(3).replaceFirstChar { it.lowercase() }
-    } else {
-        name
-    }
-}
 
 @Composable
 private fun ShapeSelectionItem(
