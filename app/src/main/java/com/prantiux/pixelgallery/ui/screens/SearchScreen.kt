@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
+
 package com.prantiux.pixelgallery.ui.screens
 
 import androidx.activity.compose.BackHandler
@@ -9,6 +11,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -20,9 +23,14 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.Alignment
@@ -30,11 +38,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -42,6 +52,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.compose.ui.graphics.Brush
 import coil.compose.AsyncImage
 import com.prantiux.pixelgallery.model.MediaItem
@@ -54,6 +65,7 @@ import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 
 data class AlbumInfo(val name: String, val count: Int, val thumbnailUri: android.net.Uri)
 
@@ -117,6 +129,7 @@ fun SearchScreen(
     // Smart albums state
     var smartAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
     val smartAlbumThumbnailCache = viewModel.smartAlbumThumbnailCache
+    val smartAlbumDominantColors = viewModel.smartAlbumDominantColors
     
     // Load smart albums on launch
     LaunchedEffect(images, videos) {
@@ -124,6 +137,12 @@ fun SearchScreen(
             coroutineScope.launch {
                 val albums = SmartAlbumGenerator.generateSmartAlbums(context)
                 smartAlbums = albums
+
+                viewModel.preloadSmartAlbumColors(
+                    context = context,
+                    albums = albums,
+                    allMediaItems = images + videos
+                )
             }
         }
     }
@@ -513,7 +532,6 @@ fun SearchScreen(
                         }
                     }
                     
-                    val smartAlbumRows = smartAlbums.chunked(2)
                     val isLoadingSmartAlbums = (images.isNotEmpty() || videos.isNotEmpty()) && smartAlbums.isEmpty()
 
                     LazyColumn(
@@ -521,27 +539,26 @@ fun SearchScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
                     ) {
-                        // Smart Albums section (2-column grid) - Always show heading
+                        // Smart Albums section - Horizontal Hero Layout
                         item {
                             SectionLabel("Suggested")
                         }
                         
-                        // Show loading state or actual albums
-                        if (isLoadingSmartAlbums) {
-                            // Loading placeholders - 2 rows of 2 cards
-                            items(2) { rowIndex ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        // Show loading state or actual albums in centered carousel
+                        item {
+                            if (isLoadingSmartAlbums) {
+                                // Loading placeholders - horizontal scroll
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
                                 ) {
-                                    repeat(2) {
+                                    items(4) {
                                         Box(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .aspectRatio(1f)
-                                                .clip(RoundedCornerShape(20.dp))
+                                                .width(280.dp)
+                                                .height(210.dp)
+                                                .clip(RoundedCornerShape(28.dp))
                                                 .background(MaterialTheme.colorScheme.primaryContainer),
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -552,43 +569,61 @@ fun SearchScreen(
                                         }
                                     }
                                 }
-                                if (rowIndex == 0) {
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                }
-                            }
-                        } else if (smartAlbums.isNotEmpty()) {
-                            items(smartAlbumRows.size) { rowIndex ->
-                                val row = smartAlbumRows[rowIndex]
-                                Column {
-                                    Row(
+                            } else if (smartAlbums.isNotEmpty()) {
+                                // Smart Albums Hero Cards in centered carousel with HorizontalPager
+                                val pagerState = rememberPagerState(
+                                    pageCount = { smartAlbums.size }
+                                )
+                                val configuration = LocalConfiguration.current
+                                val screenWidth = configuration.screenWidthDp.dp
+                                val cardWidth = screenWidth * 0.75f
+                                
+                                HorizontalPager(
+                                    state = pagerState,
+                                    contentPadding = PaddingValues(
+                                        horizontal = (screenWidth - cardWidth) / 2
+                                    ),
+                                    pageSpacing = 16.dp,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { page ->
+                                    val album = smartAlbums[page]
+                                    val dominantColor = smartAlbumDominantColors[album.id] 
+                                        ?: MaterialTheme.colorScheme.primaryContainer
+                                    
+                                    val pageOffset = (
+                                        (pagerState.currentPage - page) +
+                                        pagerState.currentPageOffsetFraction
+                                    ).absoluteValue
+                                    
+                                    val scale = lerp(
+                                        start = 0.92f,
+                                        stop = 1f,
+                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                    )
+                                    
+                                    Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        row.forEach { album ->
-                                            Box(modifier = Modifier.weight(1f)) {
-                                                SmartAlbumGridCard(
-                                                    album = album,
-                                                    allMediaItems = allMedia,
-                                                    cachedThumbnailUri = smartAlbumThumbnailCache[album.id],
-                                                    onThumbnailCached = { uri ->
-                                                        smartAlbumThumbnailCache[album.id] = uri
-                                                    },
-                                                    onClick = {
-                                                        navController.navigate(
-                                                            com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
-                                                        )
-                                                    }
-                                                )
+                                            .width(cardWidth)
+                                            .graphicsLayer {
+                                                scaleX = scale
+                                                scaleY = scale
                                             }
-                                        }
-                                        if (row.size == 1) {
-                                            Spacer(modifier = Modifier.weight(1f))
-                                        }
-                                    }
-                                    if (rowIndex != smartAlbumRows.lastIndex) {
-                                        Spacer(modifier = Modifier.height(12.dp))
+                                    ) {
+                                        SmartAlbumHeroCard(
+                                            album = album,
+                                            dominantColor = dominantColor,
+                                            allMediaItems = allMedia,
+                                            cachedThumbnailUri = smartAlbumThumbnailCache[album.id],
+                                            onThumbnailCached = { uri ->
+                                                smartAlbumThumbnailCache[album.id] = uri
+                                            },
+                                            onClick = {
+                                                navController.navigate(
+                                                    com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
+                                                )
+                                            },
+                                            albumIndex = page
+                                        )
                                     }
                                 }
                             }
@@ -1109,19 +1144,22 @@ fun AlbumResultItem(name: String, count: Int, thumbnailUri: android.net.Uri, onC
 }
 
 /**
- * Smart Album grid card - rounded square with thumbnail background and text overlay
+ * Smart Album Vertical Card - Editorial-style vertical layout with pastel backgrounds and centered elements
  */
 @Composable
-fun SmartAlbumGridCard(
-    album: Album, 
+fun SmartAlbumHeroCard(
+    album: Album,
+    dominantColor: Color,
     allMediaItems: List<MediaItem>,
     cachedThumbnailUri: android.net.Uri?,
     onThumbnailCached: (android.net.Uri?) -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    albumIndex: Int = 0
 ) {
     val context = LocalContext.current
     val thumbnailUri = cachedThumbnailUri
     
+    // Load thumbnail if not cached
     LaunchedEffect(album.id, allMediaItems, cachedThumbnailUri) {
         if (cachedThumbnailUri == null) {
             val media = SmartAlbumGenerator.getMediaForSmartAlbum(context, album.id, allMediaItems)
@@ -1129,82 +1167,120 @@ fun SmartAlbumGridCard(
         }
     }
     
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.BottomStart
-    ) {
-        // Thumbnail background
-        if (thumbnailUri != null) {
-            AsyncImage(
-                model = thumbnailUri,
-                contentDescription = album.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-            // Gradient overlay for text readability
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.5f)
-                            ),
-                            startY = 0f,
-                            endY = Float.POSITIVE_INFINITY
-                        )
-                    )
-            )
+    // Select shape based on album index
+    val thumbnailShape = when (albumIndex % 4) {
+        0 -> MaterialShapes.Square.toShape()
+        1 -> MaterialShapes.Clover8Leaf.toShape()
+        2 -> MaterialShapes.Arch.toShape()
+        else -> MaterialShapes.Cookie4Sided.toShape()
+    }
+    
+    // Background color with slight transparency
+    val backgroundColor = remember(dominantColor) {
+        dominantColor.copy(alpha = 0.92f)
+    }
+    
+    // Determine text color based on background luminance (perceived brightness)
+    val textColor = remember(backgroundColor) {
+        val perceivedBrightness = computePerceivedBrightness(backgroundColor)
+        if (perceivedBrightness > 127) Color.Black.copy(alpha = 0.87f) else Color.White
+    }
+    
+    // Pill background with adaptive transparency
+    val pillBackgroundColor = remember(textColor) {
+        val brightness = computePerceivedBrightness(textColor)
+        if (brightness > 127) {
+            Color.Black.copy(alpha = 0.12f)
         } else {
-            // Placeholder
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(32.dp),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
+            Color.White.copy(alpha = 0.25f)
         }
-        
-        // Text overlay at bottom
+    }
+    
+    Surface(
+        modifier = Modifier
+            .width(240.dp)
+            .height(340.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = backgroundColor,
+        onClick = onClick
+    ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.Center
         ) {
+            // Thumbnail with Material 3 Expressive shape masking
+            if (thumbnailUri != null) {
+                AsyncImage(
+                    model = thumbnailUri,
+                    contentDescription = album.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(160.dp)
+                        .clip(thumbnailShape)
+                        .align(Alignment.CenterHorizontally)
+                )
+            } else {
+                // Loading placeholder
+                Box(
+                    modifier = Modifier
+                        .size(160.dp)
+                        .clip(thumbnailShape)
+                        .background(textColor.copy(alpha = 0.1f))
+                        .align(Alignment.CenterHorizontally),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = textColor.copy(alpha = 0.5f),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Title left-aligned
             Text(
                 text = album.name,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = textColor,
                 maxLines = 2,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Start
             )
             
-            // Item count badge overlay
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Count pill left-aligned
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+                shape = RoundedCornerShape(50),
+                color = pillBackgroundColor
             ) {
                 Text(
                     text = "${album.itemCount} ${if (album.itemCount == 1) "item" else "items"}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = textColor,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
         }
     }
+}
+
+/**
+ * Compute perceived brightness of a color using standard luminance formula
+ * Range: 0-255 where >127 is considered "light"
+ */
+private fun computePerceivedBrightness(color: Color): Int {
+    val r = color.red * 255
+    val g = color.green * 255
+    val b = color.blue * 255
+    // WCAG relative luminance formula
+    return (0.299 * r + 0.587 * g + 0.114 * b).toInt()
 }
 
