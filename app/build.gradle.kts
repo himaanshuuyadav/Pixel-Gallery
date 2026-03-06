@@ -142,7 +142,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     
     // Reorderable list for drag and drop
-    implementation("sh.calvin.reorderable:reorderable:2.5.0")
+    implementation("sh.calvin.reorderable:reorderable:2.5.1")
 
     // Core
     implementation("androidx.core:core-ktx:1.15.0")
