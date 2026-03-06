@@ -44,6 +44,9 @@ class SettingsDataStore(private val context: Context) {
         private val KEEP_SCREEN_ON_KEY = booleanPreferencesKey("keep_screen_on")
         private val MUTE_BY_DEFAULT_KEY = booleanPreferencesKey("mute_by_default")
         private val SHOW_CONTROLS_ON_TAP_KEY = booleanPreferencesKey("show_controls_on_tap")
+        private val ALBUM_ORDER_MODE_KEY = stringPreferencesKey("album_order_mode")
+        private val MAIN_ALBUM_ORDER_KEY = stringPreferencesKey("main_album_order")
+        private val OTHER_ALBUM_ORDER_KEY = stringPreferencesKey("other_album_order")
     }
     
     /**
@@ -493,5 +496,75 @@ class SettingsDataStore(private val context: Context) {
         context.settingsDataStore.edit { preferences ->
             preferences[SHOW_CONTROLS_ON_TAP_KEY] = enabled
         }
+    }
+
+    /**
+     * Get album ordering mode as Flow.
+     */
+    val albumOrderModeFlow: Flow<String> = context.settingsDataStore.data
+        .map { preferences ->
+            preferences[ALBUM_ORDER_MODE_KEY] ?: "Based on no. of images"
+        }
+
+    /**
+     * Save album ordering mode preference.
+     */
+    suspend fun saveAlbumOrderMode(mode: String) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[ALBUM_ORDER_MODE_KEY] = mode
+        }
+    }
+
+    /**
+     * Get saved main album order as Flow.
+     */
+    val mainAlbumOrderFlow: Flow<List<String>> = context.settingsDataStore.data
+        .map { preferences ->
+            decodeOrderedIds(preferences[MAIN_ALBUM_ORDER_KEY])
+        }
+
+    /**
+     * Save main album order.
+     */
+    suspend fun saveMainAlbumOrder(albumIds: List<String>) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[MAIN_ALBUM_ORDER_KEY] = encodeOrderedIds(albumIds)
+        }
+    }
+
+    /**
+     * Get saved other album order as Flow.
+     */
+    val otherAlbumOrderFlow: Flow<List<String>> = context.settingsDataStore.data
+        .map { preferences ->
+            decodeOrderedIds(preferences[OTHER_ALBUM_ORDER_KEY])
+        }
+
+    /**
+     * Save other album order.
+     */
+    suspend fun saveOtherAlbumOrder(albumIds: List<String>) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[OTHER_ALBUM_ORDER_KEY] = encodeOrderedIds(albumIds)
+        }
+    }
+
+    /**
+     * Save both album sections in one transaction.
+     */
+    suspend fun saveAlbumOrders(mainAlbumIds: List<String>, otherAlbumIds: List<String>) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[MAIN_ALBUM_ORDER_KEY] = encodeOrderedIds(mainAlbumIds)
+            preferences[OTHER_ALBUM_ORDER_KEY] = encodeOrderedIds(otherAlbumIds)
+        }
+    }
+
+    private fun encodeOrderedIds(ids: List<String>): String {
+        return ids.joinToString(separator = ",")
+    }
+
+    private fun decodeOrderedIds(encoded: String?): List<String> {
+        if (encoded.isNullOrBlank()) return emptyList()
+        return encoded.split(',').map { it.trim() }.filter { it.isNotEmpty() }
     }
 }
