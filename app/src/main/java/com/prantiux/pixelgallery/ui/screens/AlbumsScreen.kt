@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import android.view.HapticFeedbackConstants
+import android.os.SystemClock
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DragIndicator
 import sh.calvin.reorderable.ReorderableItem
@@ -47,6 +48,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.zIndex
+import com.prantiux.pixelgallery.BuildConfig
 import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.data.SettingsDataStore
 import com.prantiux.pixelgallery.model.Album
@@ -82,12 +84,19 @@ fun AlbumsScreen(
     
     // UNFILTERED: Use allCategorizedAlbumsFlow (not affected by Photos View Settings filter)
     // Albums tab must show ALL albums regardless of Photos tab selection
-    val categorizedAlbums by viewModel.allCategorizedAlbumsFlow.collectAsState()
+    val allAlbums by viewModel.allAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val albumOrderMode by settingsDataStore.albumOrderModeFlow.collectAsState(initial = "Based on no. of images")
     val mainAlbumOrder by settingsDataStore.mainAlbumOrderFlow.collectAsState(initial = emptyList())
     val otherAlbumOrder by settingsDataStore.otherAlbumOrderFlow.collectAsState(initial = emptyList())
+    var localAlbumOrderMode by remember { mutableStateOf<String?>(null) }
+    var localMainAlbumOrder by remember { mutableStateOf<List<String>?>(null) }
+    var localOtherAlbumOrder by remember { mutableStateOf<List<String>?>(null) }
+
+    val effectiveAlbumOrderMode = localAlbumOrderMode ?: albumOrderMode
+    val effectiveMainAlbumOrder = localMainAlbumOrder ?: mainAlbumOrder
+    val effectiveOtherAlbumOrder = localOtherAlbumOrder ?: otherAlbumOrder
     
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
     var showReorderBottomSheet by remember { mutableStateOf(false) }
@@ -104,7 +113,7 @@ fun AlbumsScreen(
         } else
         // Only show "no albums" if loading is complete AND still no albums
         // This prevents showing "no albums" briefly during initial load
-        if (!isLoading && categorizedAlbums.mainAlbums.isEmpty()) {
+        if (!isLoading && allAlbums.isEmpty()) {
             Text(
                 text = "No albums found",
                 modifier = Modifier.align(Alignment.Center),
@@ -112,15 +121,13 @@ fun AlbumsScreen(
                 color = MaterialTheme.colorScheme.onSurface
             )
         } else if (!isLoading) {
-            val albums = remember(categorizedAlbums, albumOrderMode, mainAlbumOrder, otherAlbumOrder) {
-                if (albumOrderMode != "Custom") {
-                    categorizedAlbums
-                } else {
-                    CategorizedAlbums(
-                        mainAlbums = applySavedAlbumOrder(categorizedAlbums.mainAlbums, mainAlbumOrder),
-                        otherAlbums = applySavedAlbumOrder(categorizedAlbums.otherAlbums, otherAlbumOrder)
-                    )
-                }
+            val albums = remember(allAlbums, effectiveAlbumOrderMode, effectiveMainAlbumOrder, effectiveOtherAlbumOrder) {
+                buildDisplayAlbums(
+                    allAlbums = allAlbums,
+                    mode = effectiveAlbumOrderMode,
+                    mainOrderIds = effectiveMainAlbumOrder,
+                    otherOrderIds = effectiveOtherAlbumOrder
+                )
             }
             val navBarHeight = calculateFloatingNavBarHeight()
             val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
@@ -204,8 +211,11 @@ fun AlbumsScreen(
                 ReorderBottomSheet(
                     mainAlbums = albums.mainAlbums,
                     otherAlbums = albums.otherAlbums,
-                    initialAlbumsOrder = albumOrderMode,
+                    initialAlbumsOrder = effectiveAlbumOrderMode,
                     onSave = { mode, mainOrderIds, otherOrderIds ->
+                        localAlbumOrderMode = mode
+                        localMainAlbumOrder = mainOrderIds
+                        localOtherAlbumOrder = otherOrderIds
                         scope.launch {
                             settingsDataStore.saveAlbumOrderMode(mode)
                             if (mode == "Custom") {
@@ -1118,15 +1128,41 @@ fun ReorderBottomSheet(
     onSave: (mode: String, mainAlbumIds: List<String>, otherAlbumIds: List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val logTag = "AlbumsReorder"
+    val sessionId = remember { "S${SystemClock.elapsedRealtime().toString().takeLast(6)}" }
+    val openedAtMs = remember { SystemClock.elapsedRealtime() }
+
+    fun log(event: String, message: String) {
+        if (BuildConfig.DEBUG) {
+            val elapsed = SystemClock.elapsedRealtime() - openedAtMs
+            android.util.Log.d(logTag, "[$sessionId][$elapsed ms][$event] $message")
+        }
+    }
+
     val view = LocalView.current
     var albumsOrder by remember(initialAlbumsOrder) { mutableStateOf(initialAlbumsOrder) }
     var albumsOrderExpanded by remember { mutableStateOf(false) }
     var reorderHandleInUse by remember { mutableStateOf(false) }
-    
-    // Mutable lists for reordering
-    var mainAlbumsList by remember(mainAlbums) { mutableStateOf(mainAlbums.toMutableList()) }
-    var otherAlbumsList by remember(otherAlbums) { mutableStateOf(otherAlbums.toMutableList()) }
-    
+    var moveCount by remember { mutableStateOf(0) }
+    var crossMoveCount by remember { mutableStateOf(0) }
+    var dragStartMs by remember { mutableStateOf<Long?>(null) }
+    var dragStopCount by remember { mutableStateOf(0) }
+    var lastMoveAtMs by remember { mutableStateOf<Long?>(null) }
+    var lastScrollLogAtMs by remember { mutableStateOf(0L) }
+
+    // Unified list architecture for seamless drag across categories.
+    var allAlbumsList by remember(mainAlbums, otherAlbums) {
+        mutableStateOf((mainAlbums + otherAlbums).toMutableList())
+    }
+    var mainCount by remember(mainAlbums) { mutableStateOf(mainAlbums.size) }
+
+    val mainAlbumsList = remember(allAlbumsList, mainCount) {
+        allAlbumsList.take(mainCount)
+    }
+    val otherAlbumsList = remember(allAlbumsList, mainCount) {
+        allAlbumsList.drop(mainCount)
+    }
+
     val albumsOrderRotation by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (albumsOrderExpanded) 180f else 0f,
         animationSpec = androidx.compose.animation.core.tween(300)
@@ -1141,36 +1177,117 @@ fun ReorderBottomSheet(
         onMove = { from, to ->
             if (albumsOrder != "Custom") return@rememberReorderableLazyListState
 
+            moveCount += 1
+            val now = SystemClock.elapsedRealtime()
+            val deltaFromLastMove = lastMoveAtMs?.let { now - it } ?: -1L
+            lastMoveAtMs = now
+
             val fromId = from.key as? String ?: return@rememberReorderableLazyListState
             val toId = to.key as? String ?: return@rememberReorderableLazyListState
 
-            val fromMainIndex = mainAlbumsList.indexOfFirst { it.id == fromId }
-            val toMainIndex = mainAlbumsList.indexOfFirst { it.id == toId }
-            if (fromMainIndex != -1 && toMainIndex != -1) {
-                mainAlbumsList = mainAlbumsList.toMutableList().apply {
-                    add(toMainIndex, removeAt(fromMainIndex))
-                }
-                return@rememberReorderableLazyListState
+            val fromIndex = allAlbumsList.indexOfFirst { it.id == fromId }
+            val toIndex = allAlbumsList.indexOfFirst { it.id == toId }
+            if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
+
+            log(
+                event = "MOVE",
+                message = "#${moveCount} from=$fromId(list=$fromIndex/raw=${from.index}) to=$toId(list=$toIndex/raw=${to.index}), deltaFromLastMove=${deltaFromLastMove}ms"
+            )
+
+            val fromInMain = fromIndex < mainCount
+            val toInMain = toIndex < mainCount
+
+            allAlbumsList = allAlbumsList.toMutableList().apply {
+                add(toIndex, removeAt(fromIndex))
             }
 
-            val fromOtherIndex = otherAlbumsList.indexOfFirst { it.id == fromId }
-            val toOtherIndex = otherAlbumsList.indexOfFirst { it.id == toId }
-            if (fromOtherIndex != -1 && toOtherIndex != -1) {
-                otherAlbumsList = otherAlbumsList.toMutableList().apply {
-                    add(toOtherIndex, removeAt(fromOtherIndex))
+            when {
+                fromInMain && !toInMain -> {
+                    mainCount = (mainCount - 1).coerceAtLeast(0)
+                    crossMoveCount += 1
+                    log(event = "MOVE_CROSS_MAIN_TO_OTHER", message = "mainCount=$mainCount crossMoves=$crossMoveCount")
+                }
+                !fromInMain && toInMain -> {
+                    mainCount = (mainCount + 1).coerceAtMost(allAlbumsList.size)
+                    crossMoveCount += 1
+                    log(event = "MOVE_CROSS_OTHER_TO_MAIN", message = "mainCount=$mainCount crossMoves=$crossMoveCount")
+                }
+                fromInMain && toInMain -> {
+                    log(event = "MOVE_MAIN", message = "reordered in main")
+                }
+                else -> {
+                    log(event = "MOVE_OTHER", message = "reordered in other")
                 }
             }
         },
         lazyListState = listState
     )
+
+    LaunchedEffect(Unit) {
+        log(
+            event = "OPEN",
+            message = "main=${mainAlbumsList.size}, other=${otherAlbumsList.size}, mode=$albumsOrder"
+        )
+    }
+
+    LaunchedEffect(albumsOrder) {
+        log(
+            event = "MODE",
+            message = "albumsOrder changed to '$albumsOrder'"
+        )
+    }
+
+    LaunchedEffect(reorderHandleInUse, reorderableState.isAnyItemDragging) {
+        log(
+            event = "DRAG_STATE",
+            message = "handleInUse=$reorderHandleInUse, isAnyItemDragging=${reorderableState.isAnyItemDragging}"
+        )
+    }
+
+    LaunchedEffect(reorderableState.isAnyItemDragging) {
+        if (!reorderableState.isAnyItemDragging && reorderHandleInUse) {
+            reorderHandleInUse = false
+            log(event = "DRAG_RECOVERY", message = "Forced handleInUse=false after drag end")
+        }
+    }
+
+    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastScrollLogAtMs >= 350L) {
+            lastScrollLogAtMs = now
+            log(
+                event = "SCROLL",
+                message = "index=${listState.firstVisibleItemIndex}, offset=${listState.firstVisibleItemScrollOffset}"
+            )
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            log(
+                event = "CLOSE",
+                message = "moves=$moveCount, crossMoves=$crossMoveCount, dragStops=$dragStopCount, finalMain=${mainAlbumsList.size}, finalOther=${otherAlbumsList.size}"
+            )
+        }
+    }
     
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            log(
+                event = "DISMISS",
+                message = "onDismissRequest called (back/outside/swipe)"
+            )
+            onDismiss()
+        },
         sheetState = sheetState
     ) {
-        android.util.Log.d("AlbumsScreen", "ReorderBottomSheet opened with ${mainAlbumsList.size} main albums and ${otherAlbumsList.size} other albums")
+        log(
+            event = "COMPOSE",
+            message = "sheet content composed main=${mainAlbumsList.size}, other=${otherAlbumsList.size}, mode=$albumsOrder"
+        )
         Column(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
         ) {
             // Header
             Row(
@@ -1188,15 +1305,20 @@ fun ReorderBottomSheet(
             
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 userScrollEnabled = !(reorderHandleInUse || reorderableState.isAnyItemDragging),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 // Albums order setting with expandable options
                 item {
                     Surface(
-                        onClick = { albumsOrderExpanded = !albumsOrderExpanded },
+                        onClick = {
+                            albumsOrderExpanded = !albumsOrderExpanded
+                            log(event = "ORDER_SECTION", message = "expanded=$albumsOrderExpanded")
+                        },
                         shape = if (albumsOrderExpanded) 
                             RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp) 
                             else RoundedCornerShape(24.dp),
@@ -1255,8 +1377,19 @@ fun ReorderBottomSheet(
                                     isSelected = albumsOrder == "Based on no. of images",
                                     onClick = {
                                         albumsOrder = "Based on no. of images"
+                                        log(event = "ORDER_OPTION", message = "selected='Based on no. of images'")
                                     },
                                     position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP
+                                )
+                                AlbumOrderOption(
+                                    label = "Recently updated",
+                                    iconUnicode = FontIcons.History,
+                                    isSelected = albumsOrder == "Recently updated",
+                                    onClick = {
+                                        albumsOrder = "Recently updated"
+                                        log(event = "ORDER_OPTION", message = "selected='Recently updated'")
+                                    },
+                                    position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.MIDDLE
                                 )
                                 AlbumOrderOption(
                                     label = "Custom",
@@ -1264,6 +1397,7 @@ fun ReorderBottomSheet(
                                     isSelected = albumsOrder == "Custom",
                                     onClick = {
                                         albumsOrder = "Custom"
+                                        log(event = "ORDER_OPTION", message = "selected='Custom'")
                                     },
                                     position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM
                                 )
@@ -1276,90 +1410,63 @@ fun ReorderBottomSheet(
                     Spacer(modifier = Modifier.height(24.dp))
                 }
                 
-                // Main albums heading
-                item {
-                    Text(
-                        text = "Main albums",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-                    )
-                }
-                
-                // Main albums list  
-                items(mainAlbumsList.size, key = { mainAlbumsList[it].id }) { index ->
-                    ReorderableItem(
-                        state = reorderableState,
-                        key = mainAlbumsList[index].id,
-                        enabled = albumsOrder == "Custom"
-                    ) { isDragging ->
-                        DraggableAlbumItem(
-                            albumName = mainAlbumsList[index].name,
-                            position = when {
-                                mainAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
-                                index == 0 -> AlbumItemPosition.TOP
-                                index == mainAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
-                                else -> AlbumItemPosition.MIDDLE
-                            },
-                            isDragging = isDragging,
-                            handleModifier = if (albumsOrder == "Custom") {
-                                Modifier.draggableHandle(
-                                    onDragStarted = {
-                                        reorderHandleInUse = true
-                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                    },
-                                    onDragStopped = {
-                                        reorderHandleInUse = false
-                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                    }
-                                )
-                            } else {
-                                Modifier
-                            }
+                if (allAlbumsList.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "Main albums",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
                         )
                     }
                 }
-                
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                }
-                
-                // Other albums heading
-                item {
-                    Text(
-                        text = "Other albums",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-                    )
-                }
-                
-                // Other albums list
-                items(otherAlbumsList.size, key = { otherAlbumsList[it].id }) { index ->
+
+                items(allAlbumsList.size, key = { allAlbumsList[it].id }) { index ->
+                    val album = allAlbumsList[index]
+                    if (index == mainCount && mainCount in 1 until allAlbumsList.size) {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = "Other albums",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                        )
+                    }
+
                     ReorderableItem(
                         state = reorderableState,
-                        key = otherAlbumsList[index].id,
+                        key = album.id,
                         enabled = albumsOrder == "Custom"
                     ) { isDragging ->
                         DraggableAlbumItem(
-                            albumName = otherAlbumsList[index].name,
+                            albumName = album.name,
                             position = when {
-                                otherAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
+                                allAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
                                 index == 0 -> AlbumItemPosition.TOP
-                                index == otherAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
+                                index == allAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
                                 else -> AlbumItemPosition.MIDDLE
                             },
                             isDragging = isDragging,
                             handleModifier = if (albumsOrder == "Custom") {
                                 Modifier.draggableHandle(
                                     onDragStarted = {
+                                        dragStartMs = SystemClock.elapsedRealtime()
                                         reorderHandleInUse = true
+                                        val section = if (index < mainCount) "main" else "other"
+                                        log(event = "DRAG_START", message = "section=$section album=${album.name} idx=$index")
                                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                     },
                                     onDragStopped = {
                                         reorderHandleInUse = false
+                                        dragStopCount += 1
+                                        val duration = dragStartMs?.let { SystemClock.elapsedRealtime() - it }
+                                        val section = if (index < mainCount) "main" else "other"
+                                        log(
+                                            event = "DRAG_STOP",
+                                            message = "section=$section album=${album.name} idx=$index duration=${duration ?: -1}ms stopCount=$dragStopCount"
+                                        )
                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                     }
                                 )
@@ -1374,21 +1481,31 @@ fun ReorderBottomSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedButton(
-                    onClick = onDismiss,
+                    onClick = {
+                        log(event = "RESTORE", message = "Restore pressed")
+                        allAlbumsList = (mainAlbums + otherAlbums).toMutableList()
+                        mainCount = mainAlbums.size
+                        albumsOrder = "Based on no. of images"
+                    },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Cancel")
+                    Text("Restore")
                 }
                 Button(
                     onClick = {
+                        log(
+                            event = "DONE",
+                            message = "Done pressed mode=$albumsOrder mainCount=$mainCount total=${allAlbumsList.size}"
+                        )
                         onSave(
                             albumsOrder,
-                            mainAlbumsList.map { it.id },
-                            otherAlbumsList.map { it.id }
+                            allAlbumsList.take(mainCount).map { it.id },
+                            allAlbumsList.drop(mainCount).map { it.id }
                         )
                         onDismiss()
                     },
@@ -1444,7 +1561,7 @@ private fun AlbumOrderOption(
             )
             
             Spacer(modifier = Modifier.width(16.dp))
-            
+
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyLarge,
@@ -1530,11 +1647,54 @@ private fun DraggableAlbumItem(
     }
 }
 
-private fun applySavedAlbumOrder(albums: List<Album>, orderedIds: List<String>): List<Album> {
-    if (albums.isEmpty() || orderedIds.isEmpty()) return albums
+private fun buildDisplayAlbums(
+    allAlbums: List<Album>,
+    mode: String,
+    mainOrderIds: List<String>,
+    otherOrderIds: List<String>
+): CategorizedAlbums {
+    // Handle "Recently updated" mode
+    if (mode == "Recently updated") {
+        val sortedAlbums = allAlbums.sortedByDescending { album ->
+            album.topMediaItems.maxOfOrNull { it.dateAdded } ?: 0L
+        }
+        return CategorizedAlbums(
+            mainAlbums = sortedAlbums.take(4),
+            otherAlbums = sortedAlbums.drop(4)
+        )
+    }
+    
+    if (mode != "Custom") {
+        return CategorizedAlbums(
+            mainAlbums = allAlbums.take(4),
+            otherAlbums = allAlbums.drop(4)
+        )
+    }
 
-    val byId = albums.associateBy { it.id }
-    val ordered = orderedIds.mapNotNull { byId[it] }
-    val missing = albums.filterNot { album -> orderedIds.contains(album.id) }
-    return ordered + missing
+    if (mainOrderIds.isEmpty() && otherOrderIds.isEmpty()) {
+        return CategorizedAlbums(
+            mainAlbums = allAlbums.take(4),
+            otherAlbums = allAlbums.drop(4)
+        )
+    }
+
+    val byId = allAlbums.associateBy { it.id }
+
+    val mainAlbums = mainOrderIds
+        .mapNotNull { byId[it] }
+        .distinctBy { it.id }
+
+    val mainIdSet = mainAlbums.map { it.id }.toSet()
+    val otherAlbums = otherOrderIds
+        .mapNotNull { byId[it] }
+        .filterNot { it.id in mainIdSet }
+        .distinctBy { it.id }
+
+    val usedIds = (mainAlbums + otherAlbums).map { it.id }.toSet()
+    val remaining = allAlbums.filterNot { it.id in usedIds }
+
+    return CategorizedAlbums(
+        mainAlbums = mainAlbums,
+        otherAlbums = otherAlbums + remaining
+    )
 }
