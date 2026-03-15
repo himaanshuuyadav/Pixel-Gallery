@@ -36,6 +36,7 @@ import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.search.SearchResultFilter
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
+import com.prantiux.pixelgallery.startup.FrameDebug
 import com.prantiux.pixelgallery.ui.theme.extractSeedColor
 import com.prantiux.pixelgallery.ui.theme.selectThemeAwareSwatch
 import com.prantiux.pixelgallery.ui.theme.adjustColorForSmartAlbum
@@ -46,15 +47,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flowOn
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -83,6 +89,15 @@ private data class ComputedMediaState(
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MediaViewModel : ViewModel() {
+    private companion object {
+        private const val GALLERY_PERF_TAG = "GalleryPerf"
+        private const val PERF_LOG_THRESHOLD = 1000
+        private val INCREMENTAL_MEDIA_BATCHES = listOf(50, 200, 500, 1000)
+        private const val FINAL_STAGE_SPLIT_START = 1000
+        private const val FINAL_STAGE_STEP_SIZE = 100
+        private const val LARGE_BATCH_EMIT_DELAY_MS = 12L
+    }
+
     private lateinit var repository: MediaRepository
     private lateinit var albumRepository: AlbumRepository
     private lateinit var recentSearchesDataStore: RecentSearchesDataStore
@@ -92,6 +107,7 @@ class MediaViewModel : ViewModel() {
     private var isSyncing = false
     private var pendingRefresh = false
     private var initialSyncCompletedCached: Boolean? = null
+    private val refreshStateLock = Any()
 
     // Active Album management for smart albums only
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
@@ -376,32 +392,75 @@ class MediaViewModel : ViewModel() {
             } else {
                 mediaEntitiesFlow
                     .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        entities.toMediaItems(favIds.toSet())
+                        withContext(Dispatchers.Default) {
+                            traceGalleryPerf("mediaFlow.mapEntities") {
+                                logPerfIfLarge("mediaFlow.toMediaItems", entities.size)
+                                entities.toMediaItems(favIds.toSet()).toList()
+                            }
+                        }
                     }
                     .combine(_selectedAlbums) { mediaItems, selectedAlbums ->
-                        if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "mediaFlow: Media count before filter: ${mediaItems.size}")
-                            Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums.size} album(s)")
-                        }
-                        
-                        val filtered = if (selectedAlbums.isEmpty()) {
+                        withContext(Dispatchers.Default) {
                             if (BuildConfig.DEBUG) {
-                                Log.d("PHOTOS_FILTER", "mediaFlow: No albums selected → returning empty list")
+                                Log.d("PHOTOS_FILTER", "mediaFlow: Media count before filter: ${mediaItems.size}")
+                                Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums.size} album(s)")
                             }
-                            emptyList()
-                        } else {
-                            mediaItems.filter { it.bucketId in selectedAlbums }
+
+                            logPerfIfLarge("mediaFlow.albumFilter", mediaItems.size)
+
+                            val filtered = if (selectedAlbums.isEmpty()) {
+                                if (BuildConfig.DEBUG) {
+                                    Log.d("PHOTOS_FILTER", "mediaFlow: No albums selected → returning empty list")
+                                }
+                                emptyList()
+                            } else {
+                                mediaItems.filter { it.bucketId in selectedAlbums }
+                            }
+
+                            if (BuildConfig.DEBUG) {
+                                Log.d("PHOTOS_FILTER", "mediaFlow: Media count after filter: ${filtered.size}")
+                            }
+
+                            filtered.toList()
                         }
-                        
-                        if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "mediaFlow: Media count after filter: ${filtered.size}")
-                        }
-                        
-                        filtered
+                    }
+                    .flatMapLatest { filteredMedia ->
+                        emitIncrementalMediaBatches(filteredMedia)
                     }
             }
         }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    /**
+     * UNFILTERED ROOM-FIRST MEDIA FLOW.
+     *
+     * This bypasses the Photos View selected-albums filter and should be used by
+     * Smart Albums so displayed counts and opened content remain consistent.
+     */
+    val allMediaUnfilteredFlow: StateFlow<List<MediaItem>> = _databaseReady
+        .flatMapLatest { ready ->
+            if (!ready) {
+                flowOf(emptyList())
+            } else {
+                mediaEntitiesFlow
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
+                        withContext(Dispatchers.Default) {
+                            logPerfIfLarge("allMediaUnfilteredFlow.toMediaItems", entities.size)
+                            entities.toMediaItems(favIds.toSet()).toList()
+                        }
+                    }
+            }
+        }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -422,32 +481,41 @@ class MediaViewModel : ViewModel() {
             } else {
                 mediaEntitiesFlow
                     .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        entities.toMediaItems(favIds.toSet())
+                        withContext(Dispatchers.Default) {
+                            logPerfIfLarge("allAlbumsFlow.toMediaItems", entities.size)
+                            entities.toMediaItems(favIds.toSet())
+                        }
                     }
-                    .map { items ->
-                        if (items.isEmpty()) {
-                            emptyList()
-                        } else {
-                            items
-                                .groupBy { it.bucketId }
-                                .map { (bucketId, groupItems) ->
-                                    val topSix = groupItems.take(6)
-                                    Album(
-                                        id = bucketId,
-                                        name = groupItems.first().bucketName,
-                                        coverUri = groupItems.firstOrNull()?.uri,
-                                        itemCount = groupItems.size,
-                                        bucketDisplayName = groupItems.first().bucketName,
-                                        topMediaUris = topSix.map { it.uri },
-                                        topMediaItems = topSix
-                                    )
-                                }
-                                .sortedByDescending { it.itemCount }
+                    .mapLatest { items ->
+                        withContext(Dispatchers.Default) {
+                            logPerfIfLarge("allAlbumsFlow.groupSort", items.size)
+                            if (items.isEmpty()) {
+                                emptyList()
+                            } else {
+                                items
+                                    .groupBy { it.bucketId }
+                                    .map { (bucketId, groupItems) ->
+                                        val topSix = groupItems.take(6)
+                                        Album(
+                                            id = bucketId,
+                                            name = groupItems.first().bucketName,
+                                            coverUri = groupItems.firstOrNull()?.uri,
+                                            itemCount = groupItems.size,
+                                            bucketDisplayName = groupItems.first().bucketName,
+                                            topMediaUris = topSix.map { it.uri },
+                                            topMediaItems = topSix
+                                        )
+                                    }
+                                    .sortedByDescending { it.itemCount }
+                                    .toList()
+                            }
                         }
                     }
             }
         }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -467,28 +535,34 @@ class MediaViewModel : ViewModel() {
      * UI should observe this instead of categorizedAlbums.
      */
     val albumsFlow: StateFlow<List<Album>> = mediaFlow
-        .map { items ->
-            if (items.isEmpty()) {
-                emptyList()
-            } else {
-                items
-                    .groupBy { it.bucketId }
-                    .map { (bucketId, groupItems) ->
-                        val topSix = groupItems.take(6)
-                        Album(
-                            id = bucketId,
-                            name = groupItems.first().bucketName,
-                            coverUri = groupItems.firstOrNull()?.uri,
-                            itemCount = groupItems.size,
-                            bucketDisplayName = groupItems.first().bucketName,
-                            topMediaUris = topSix.map { it.uri },
-                            topMediaItems = topSix
-                        )
-                    }
-                    .sortedByDescending { it.itemCount }
+        .mapLatest { items ->
+            withContext(Dispatchers.Default) {
+                logPerfIfLarge("albumsFlow.groupSort", items.size)
+                if (items.isEmpty()) {
+                    emptyList()
+                } else {
+                    items
+                        .groupBy { it.bucketId }
+                        .map { (bucketId, groupItems) ->
+                            val topSix = groupItems.take(6)
+                            Album(
+                                id = bucketId,
+                                name = groupItems.first().bucketName,
+                                coverUri = groupItems.firstOrNull()?.uri,
+                                itemCount = groupItems.size,
+                                bucketDisplayName = groupItems.first().bucketName,
+                                topMediaUris = topSix.map { it.uri },
+                                topMediaItems = topSix
+                            )
+                        }
+                        .sortedByDescending { it.itemCount }
+                        .toList()
+                }
             }
         }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -717,8 +791,11 @@ class MediaViewModel : ViewModel() {
         ) { entities, favIds ->
             val resultTime = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS"))
             android.util.Log.d("SEARCH_ROOM", "  [$resultTime] Room query returned ${entities.size} items")
-            
-            val mapped = entities.toMediaItems(favIds.toSet())
+
+            val mapped = withContext(Dispatchers.Default) {
+                logPerfIfLarge("searchMediaFlow.toMediaItems", entities.size)
+                entities.toMediaItems(favIds.toSet())
+            }
             android.util.Log.d("SEARCH_ROOM", "  ✓ Mapped to MediaItems: ${mapped.size} items with isFavorite set")
             
             mapped
@@ -959,8 +1036,16 @@ class MediaViewModel : ViewModel() {
             database.mediaDao().getMediaByBucket(bucketId),
             database.favoriteDao().getAllFavoriteIdsFlow()
         ) { entities, favIds ->
-            entities.toMediaItems(favIds.toSet())
+            withContext(Dispatchers.Default) {
+                logPerfIfLarge("albumMediaFlow.toMediaItems", entities.size)
+                entities
+                    .toMediaItems(favIds.toSet())
+                    .sortedByDescending { it.dateAdded }
+                    .toList()
+            }
         }
+            .flowOn(Dispatchers.Default)
+            .conflate()
     }
     
     /**
@@ -988,14 +1073,17 @@ class MediaViewModel : ViewModel() {
                         android.util.Log.d("FAVORITES_FLOW", "  - All media: ${allMedia.size} items")
                         android.util.Log.d("FAVORITES_FLOW", "  - Favorite IDs: ${favIds.size} IDs = [${favIds.take(5).joinToString(",")}${if(favIds.size > 5) "..." else ""}]")
                         
-                        // FILTER: Get media items where ID is in favorite IDs
-                        val favIdSet = favIds.toSet()
-                        val filtered = allMedia.filter { it.id in favIdSet }
-                        
-                        android.util.Log.d("FAVORITES_FLOW", "  - Filtered result: ${filtered.size} items")
-                        
-                        // MAP: MediaEntity → MediaItem (set isFavorite=true for all filtered items)
-                        val mapped = filtered.toMediaItems(favIdSet)
+                        // FILTER + MAP on background thread for large lists
+                        val mapped = withContext(Dispatchers.Default) {
+                            logPerfIfLarge("favoritesFlow.filterMap", allMedia.size)
+                            val favIdSet = favIds.toSet()
+                            val filtered = allMedia.filter { it.id in favIdSet }
+
+                            android.util.Log.d("FAVORITES_FLOW", "  - Filtered result: ${filtered.size} items")
+
+                            // MAP: MediaEntity → MediaItem (set isFavorite=true for all filtered items)
+                            filtered.toMediaItems(favIdSet).toList()
+                        }
                         
                         android.util.Log.d("FAVORITES_FLOW", "  - Mapped result: ${mapped.size} items (all with isFavorite=true)")
                         
@@ -1003,6 +1091,9 @@ class MediaViewModel : ViewModel() {
                     }
             }
         }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -1044,16 +1135,23 @@ class MediaViewModel : ViewModel() {
                         if (BuildConfig.DEBUG) {
                             Log.d("PHOTOS_FILTER", "imagesFlow: Media count before filter: ${entities.size}")
                         }
-                        val items = entities.toMediaItems(favIds.toSet())
+                        val items = withContext(Dispatchers.Default) {
+                            traceGalleryPerf("imagesFlow.filter") {
+                                logPerfIfLarge("imagesFlow.toMediaItems", entities.size)
+                                entities.toMediaItems(favIds.toSet()).toList()
+                            }
+                        }
                         if (BuildConfig.DEBUG) {
                             Log.d("PHOTOS_FILTER", "imagesFlow: Media count after filter: ${items.size}")
                         }
-                        items
+                        items.toList()
                     }
                 }
             }
         }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -1092,16 +1190,23 @@ class MediaViewModel : ViewModel() {
                         if (BuildConfig.DEBUG) {
                             Log.d("PHOTOS_FILTER", "videosFlow: Media count before filter: ${entities.size}")
                         }
-                        val items = entities.toMediaItems(favIds.toSet())
+                        val items = withContext(Dispatchers.Default) {
+                            traceGalleryPerf("videosFlow.filter") {
+                                logPerfIfLarge("videosFlow.toMediaItems", entities.size)
+                                entities.toMediaItems(favIds.toSet()).toList()
+                            }
+                        }
                         if (BuildConfig.DEBUG) {
                             Log.d("PHOTOS_FILTER", "videosFlow: Media count after filter: ${items.size}")
                         }
-                        items
+                        items.toList()
                     }
                 }
             }
         }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -1114,11 +1219,39 @@ class MediaViewModel : ViewModel() {
      * Dynamically groups media based on current grid type (DAY or MONTH).
      * Updates automatically when mediaFlow or gridType changes.
      */
-    val groupedMediaFlow: StateFlow<List<MediaGroup>> = mediaFlow
-        .combine(_gridType) { media, gridType ->
-            groupMediaForGrid(media, gridType)
+    val groupedMediaFlow: StateFlow<List<MediaGroup>> = flow {
+        var previousMedia: List<MediaItem> = emptyList()
+        var previousGridType: GridType? = null
+        var previousGroups: List<MediaGroup> = emptyList()
+
+        mediaFlow.combine(_gridType) { media, gridType -> media to gridType }.collect { (media, gridType) ->
+            val groups = withContext(Dispatchers.Default) {
+                val canAppendIncrementally = previousGridType == gridType &&
+                    media.size >= previousMedia.size &&
+                    previousMedia.isNotEmpty() &&
+                    media.subList(0, previousMedia.size) == previousMedia
+
+                if (canAppendIncrementally) {
+                    traceGalleryPerf("groupedMediaFlow.appendGroups") {
+                        appendGroupedMedia(previousGroups, media.subList(previousMedia.size, media.size), gridType)
+                    }
+                } else {
+                    logPerfIfLarge("groupMediaForGrid", media.size)
+                    traceGalleryPerf("groupMediaForGrid") {
+                        groupMediaForGrid(media, gridType)
+                    }
+                }
+            }
+
+            previousMedia = media
+            previousGridType = gridType
+            previousGroups = groups
+            emit(groups)
         }
+    }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .conflate()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -1140,6 +1273,73 @@ class MediaViewModel : ViewModel() {
     
     // Background sync job for periodic updates (non-blocking)
     private var backgroundSyncJob: Job? = null
+
+    private fun logPerfIfLarge(stage: String, size: Int) {
+        if (size >= PERF_LOG_THRESHOLD) {
+            Log.d(GALLERY_PERF_TAG, "$stage size=$size")
+        }
+    }
+
+    private fun <T> traceGalleryPerf(section: String, block: () -> T): T {
+        return FrameDebug.trace(section, GALLERY_PERF_TAG, block)
+    }
+
+    private fun buildIncrementalBatchSizes(totalSize: Int): List<Int> {
+        if (totalSize <= 0) return emptyList()
+
+        val seedBatches = INCREMENTAL_MEDIA_BATCHES
+            .filter { it in 1..totalSize }
+            .distinct()
+            .sorted()
+
+        val baseLast = seedBatches.lastOrNull() ?: 0
+        val finalStageBatches = if (totalSize > FINAL_STAGE_SPLIT_START && baseLast >= FINAL_STAGE_SPLIT_START) {
+            generateSequence(baseLast + FINAL_STAGE_STEP_SIZE) { previous ->
+                previous + FINAL_STAGE_STEP_SIZE
+            }
+                .takeWhile { it < totalSize }
+                .toList()
+        } else {
+            emptyList()
+        }
+
+        return (seedBatches + finalStageBatches + totalSize)
+            .filter { it in 1..totalSize }
+            .distinct()
+            .sorted()
+    }
+
+    private fun emitIncrementalMediaBatches(fullList: List<MediaItem>) = flow {
+        if (fullList.isEmpty()) {
+            emit(emptyList())
+            return@flow
+        }
+
+        val snapshot = withContext(Dispatchers.Default) { fullList.toList() }
+        val batchSizes = buildIncrementalBatchSizes(snapshot.size)
+
+        batchSizes.forEachIndexed { index, size ->
+            val batch = withContext(Dispatchers.Default) {
+                snapshot.subList(0, size).toList()
+            }
+
+            if (size > FINAL_STAGE_SPLIT_START) {
+                Log.d(GALLERY_PERF_TAG, "Final dataset step emitted size=$size")
+            }
+
+            when {
+                index == 0 -> Log.d(GALLERY_PERF_TAG, "Initial media batch emitted size=$size")
+                size == snapshot.size -> Log.d(GALLERY_PERF_TAG, "Final media dataset emitted size=$size")
+                else -> Log.d(GALLERY_PERF_TAG, "Progressive media batch emitted size=$size")
+            }
+
+            emit(batch)
+
+            if (index < batchSizes.lastIndex && size >= FINAL_STAGE_SPLIT_START) {
+                delay(LARGE_BATCH_EMIT_DELAY_MS)
+            }
+        }
+    }
 
     fun initialize(context: Context) {
         if (::database.isInitialized) return
@@ -1307,15 +1507,17 @@ class MediaViewModel : ViewModel() {
         
         viewModelScope.launch {
             // Defensive guard: Prevent overlapping loads
-            if (isSyncing) {
-                pendingRefresh = true
-                if (BuildConfig.DEBUG) {
-                    android.util.Log.d("SYNC_ENGINE", "Sync skipped (already syncing)")
+            synchronized(refreshStateLock) {
+                if (isSyncing) {
+                    pendingRefresh = true
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.d("SYNC_ENGINE", "Sync skipped (already syncing)")
+                    }
+                    return@launch
                 }
-                return@launch
+                isSyncing = true
             }
-            
-            isSyncing = true
+
             val initialSyncCompleted = initialSyncCompletedCached
                 ?: settingsDataStore.initialSyncCompletedFlow.first().also {
                     initialSyncCompletedCached = it
@@ -1325,6 +1527,9 @@ class MediaViewModel : ViewModel() {
                 "[REFRESH-START] initialSyncCompleted=$initialSyncCompleted, permissionsGranted=${_mediaPermissionsGranted.value}"
             )
             var roomWriteCompleted = false
+            var firstBatchWritten = false
+            val streamedIds = LinkedHashSet<Long>()
+            var streamedItemCount = 0
             if (showLoader) {
                 _isLoading.value = true
             }
@@ -1344,70 +1549,71 @@ class MediaViewModel : ViewModel() {
                 // NO direct UI StateFlow updates
                 // ═════════════════════════════════════════════════════════════
                 
-                // STEP 1: Query MediaStore for latest media (sync source)
-                val images = repository.loadImages()
-                val videos = repository.loadVideos()
-                val combined = (images + videos)
-                
-                if (BuildConfig.DEBUG) {
-                    val queryDuration = SystemClock.elapsedRealtime() - loadStart
-                    android.util.Log.d("SYNC_ENGINE", "MediaStore query completed: ${queryDuration}ms (${combined.size} items)")
+                // STEP 1: Stream MediaStore rows in batches and sync incrementally to Room.
+                repository.streamAllMediaBatches().collect { mediaBatch ->
+                    streamedItemCount += mediaBatch.size
+
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val mediaEntities = mediaBatch.map { item ->
+                                MediaEntity(
+                                    id = item.id,
+                                    uri = item.uri.toString(),
+                                    displayName = item.displayName,
+                                    dateAdded = item.dateAdded,
+                                    bucketId = item.bucketId,
+                                    bucketName = item.bucketName,
+                                    mimeType = item.mimeType,
+                                    width = item.width,
+                                    height = item.height,
+                                    size = item.size,
+                                    duration = if (item.isVideo) item.duration else null,
+                                    isVideo = item.isVideo,
+                                    path = item.path
+                                )
+                            }
+
+                            streamedIds.addAll(mediaEntities.map { it.id })
+                            database.mediaDao().upsertAll(mediaEntities)
+                        } catch (e: Exception) {
+                            android.util.Log.e("SYNC_ENGINE", "Error syncing streamed batch to Room", e)
+                        }
+                    }
+
+                    if (!firstBatchWritten && mediaBatch.isNotEmpty()) {
+                        firstBatchWritten = true
+                        if (_initialSetupInProgress.value) {
+                            _initialSetupInProgress.value = false
+                            Log.d("INIT_SETUP", "[ROOM-WRITE-FIRST-BATCH] Initial setup in progress = false → LOADER STOPPED")
+                        }
+                    }
                 }
-                
-                // STEP 2: Sync to Room database (single source of truth)
+
                 withContext(Dispatchers.IO) {
                     try {
-                        val upsertStart = SystemClock.elapsedRealtime()
-                        
-                        // Convert MediaItem → MediaEntity
-                        val mediaEntities = combined.map { item ->
-                            MediaEntity(
-                                id = item.id,
-                                uri = item.uri.toString(),
-                                displayName = item.displayName,
-                                dateAdded = item.dateAdded,
-                                bucketId = item.bucketId,
-                                bucketName = item.bucketName,
-                                mimeType = item.mimeType,
-                                width = item.width,
-                                height = item.height,
-                                size = item.size,
-                                duration = if (item.isVideo) item.duration else null,
-                                isVideo = item.isVideo,
-                                path = item.path
-                            )
-                        }
-                        
-                        // UPSERT: Insert or replace if exists (Room handles deduplication)
-                        Log.d("SYNC_ENGINE", "refresh(): Upserting ${mediaEntities.size} entities to Room")
-                        database.mediaDao().upsertAll(mediaEntities)
-                        Log.d("SYNC_ENGINE", "Upserted ${mediaEntities.size} items into Room")
-
-                        // Delete stale entries that no longer exist in MediaStore
-                        val currentIds = mediaEntities.map { it.id }.toSet()
                         val existingIds = database.mediaDao().getAllIds()
-                        val missingIds = existingIds.filterNot { it in currentIds }
+                        val missingIds = existingIds.filterNot { it in streamedIds }
                         if (missingIds.isNotEmpty()) {
                             Log.d("SYNC_ENGINE", "Deleting ${missingIds.size} stale items from Room")
                             database.mediaDao().deleteByIds(missingIds)
                         }
-                        
-                        if (BuildConfig.DEBUG) {
-                            val upsertDuration = SystemClock.elapsedRealtime() - upsertStart
-                            android.util.Log.d("SYNC_ENGINE", "Room sync completed: ${upsertDuration}ms (${mediaEntities.size} items synced)")
-                        }
 
                         roomWriteCompleted = true
                     } catch (e: Exception) {
-                        android.util.Log.e("SYNC_ENGINE", "Error syncing to Room", e)
+                        android.util.Log.e("SYNC_ENGINE", "Error finalizing Room sync", e)
                     }
+                }
+
+                if (BuildConfig.DEBUG) {
+                    val queryDuration = SystemClock.elapsedRealtime() - loadStart
+                    android.util.Log.d("SYNC_ENGINE", "MediaStore streaming query completed: ${queryDuration}ms (${streamedItemCount} items)")
                 }
 
                 if (roomWriteCompleted) {
                     val permissionsGranted = _mediaPermissionsGranted.value
                     Log.d(
                         "SYNC_ENGINE",
-                        "[ROOM-WRITE-COMPLETE] items=${combined.size}, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
+                        "[ROOM-WRITE-COMPLETE] items=$streamedItemCount, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
                     )
                     if (!initialSyncCompleted && permissionsGranted) {
                         settingsDataStore.setInitialSyncCompleted(true)
@@ -1439,7 +1645,9 @@ class MediaViewModel : ViewModel() {
                 // Note: loader is now controlled by Room flow emissions (see init block)
                 // Set to false here as fallback in case of errors
                 _isLoading.value = false
-                isSyncing = false
+                synchronized(refreshStateLock) {
+                    isSyncing = false
+                }
                 if (!_mediaPermissionsGranted.value && (initialSyncCompletedCached == false)) {
                     _initialSetupInProgress.value = true
                     Log.d(
@@ -1452,8 +1660,16 @@ class MediaViewModel : ViewModel() {
                     "[REFRESH-END] isSyncing=false, isLoading=${_isLoading.value}, initialSetupInProgress=${_initialSetupInProgress.value}"
                 )
 
-                if (pendingRefresh) {
-                    pendingRefresh = false
+                val triggerPendingRefresh = synchronized(refreshStateLock) {
+                    if (pendingRefresh) {
+                        pendingRefresh = false
+                        true
+                    } else {
+                        false
+                    }
+                }
+
+                if (triggerPendingRefresh) {
                     refresh(context, showLoader = false)
                 }
             }
@@ -2333,6 +2549,85 @@ class MediaViewModel : ViewModel() {
         GridType.MONTH -> groupMediaByMonth(media)
     }
 }
+
+    private fun appendGroupedMedia(
+        previousGroups: List<MediaGroup>,
+        appendedItems: List<MediaItem>,
+        gridType: GridType
+    ): List<MediaGroup> {
+        if (appendedItems.isEmpty()) return previousGroups
+
+        val result = previousGroups.toMutableList()
+        appendedItems.forEach { item ->
+            val itemGroup = createMediaGroup(gridType, listOf(item))
+            val lastGroup = result.lastOrNull()
+
+            if (lastGroup != null && lastGroup.date == itemGroup.date) {
+                val mergedItems = lastGroup.items + item
+                result[result.lastIndex] = createMediaGroup(gridType, mergedItems)
+            } else {
+                result.add(itemGroup)
+            }
+        }
+
+        return result.toList()
+    }
+
+    private fun createMediaGroup(gridType: GridType, items: List<MediaItem>): MediaGroup {
+        return when (gridType) {
+            GridType.DAY -> createDayMediaGroup(items)
+            GridType.MONTH -> createMonthMediaGroup(items)
+        }
+    }
+
+    private fun createDayMediaGroup(items: List<MediaItem>): MediaGroup {
+        val calendar = Calendar.getInstance()
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        val anchorItem = items.first()
+        calendar.timeInMillis = anchorItem.dateAdded * 1000
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+        val itemYear = calendar.get(Calendar.YEAR)
+
+        val displayDate = when {
+            isToday(calendar) -> "Today"
+            isYesterday(calendar) -> "Yesterday"
+            itemYear == currentYear -> SimpleDateFormat("d MMM", Locale.getDefault()).format(calendar.time)
+            else -> SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(calendar.time)
+        }
+
+        val mostCommonLocation = items
+            .mapNotNull { it.location }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        return MediaGroup(date, displayDate, items, mostCommonLocation)
+    }
+
+    private fun createMonthMediaGroup(items: List<MediaItem>): MediaGroup {
+        val calendar = Calendar.getInstance()
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        val anchorItem = items.first()
+        calendar.timeInMillis = anchorItem.dateAdded * 1000
+        val month = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(calendar.time)
+        val itemYear = calendar.get(Calendar.YEAR)
+
+        val displayDate = if (itemYear == currentYear) {
+            SimpleDateFormat("MMMM", Locale.getDefault()).format(calendar.time)
+        } else {
+            SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calendar.time)
+        }
+
+        val mostCommonLocation = items
+            .mapNotNull { it.location }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        return MediaGroup(month, displayDate, items, mostCommonLocation)
+    }
 
 private fun groupMediaByDate(media: List<MediaItem>): List<MediaGroup> {
     val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
