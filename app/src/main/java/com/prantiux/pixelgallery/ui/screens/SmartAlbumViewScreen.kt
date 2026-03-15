@@ -31,6 +31,8 @@ import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -41,9 +43,8 @@ fun SmartAlbumViewScreen(
     onNavigateToViewer: (Int) -> Unit,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
-    // ROOM-FIRST: Use Room flows for unfiltered media
-    val images by viewModel.imagesFlow.collectAsState()
-    val videos by viewModel.videosFlow.collectAsState()
+    // ROOM-FIRST: Use unfiltered media flow for smart albums (independent of Photos View filters)
+    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
@@ -63,16 +64,18 @@ fun SmartAlbumViewScreen(
     var showMoreMenu by remember { mutableStateOf(false) }
     
     // Load smart album media
-    LaunchedEffect(albumId, images, videos) {
+    LaunchedEffect(albumId, allMediaUnfiltered) {
         coroutineScope.launch {
-            val allMedia = images + videos
-            val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMedia)
+            val smartMedia = withContext(Dispatchers.Default) {
+                SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
+                    .sortedByDescending { it.dateAdded }
+            }
             smartAlbumMedia = smartMedia
         }
     }
     
     // Get smart album media or empty list
-    val albumMedia = smartAlbumMedia?.sortedByDescending { it.dateAdded } ?: emptyList()
+    val albumMedia = smartAlbumMedia ?: emptyList()
     
     // Get smart album name
     val albumType = SmartAlbumGenerator.SmartAlbumType.fromId(albumId)
@@ -287,8 +290,7 @@ fun SmartAlbumViewScreen(
                                     viewModel.hideFromSmartAlbum(context, albumId, selectedItems.toList())
                                     viewModel.exitSelectionMode()
                                     // Reload smart album media
-                                    val allMedia = images + videos
-                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMedia)
+                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
                                     smartAlbumMedia = smartMedia
                                     android.widget.Toast.makeText(
                                         context,
