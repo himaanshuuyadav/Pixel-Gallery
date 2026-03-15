@@ -11,8 +11,15 @@ import androidx.exifinterface.media.ExifInterface
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.MediaItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.io.IOException
+
+private const val GALLERY_PERF_TAG = "GalleryPerf"
+private const val MEDIASTORE_INITIAL_BATCH_SIZE = 20
+private const val MEDIASTORE_STREAM_BATCH_SIZE = 50
 
 // Result class for move operations
 data class MoveResult(
@@ -21,6 +28,151 @@ data class MoveResult(
 )
 
 class MediaRepository(private val context: Context) {
+
+    fun streamAllMediaBatches(batchSize: Int = MEDIASTORE_STREAM_BATCH_SIZE): Flow<List<MediaItem>> = flow {
+        val collection = MediaStore.Files.getContentUri("external")
+        val projection = mutableListOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATE_ADDED,
+            MediaStore.Files.FileColumns.SIZE,
+            MediaStore.Files.FileColumns.MIME_TYPE,
+            MediaStore.Files.FileColumns.BUCKET_ID,
+            MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
+            MediaStore.Files.FileColumns.MEDIA_TYPE,
+            MediaStore.Files.FileColumns.WIDTH,
+            MediaStore.Files.FileColumns.HEIGHT,
+            MediaStore.Video.Media.DURATION
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        } else {
+            projection.add(MediaStore.MediaColumns.DATA)
+        }
+
+        val mediaTypeSelection = "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?)"
+        val visibilitySelection = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                "${MediaStore.MediaColumns.IS_TRASHED} = 0 AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                "${MediaStore.MediaColumns.IS_PENDING} = 0"
+            }
+            else -> null
+        }
+
+        val selection = if (visibilitySelection != null) {
+            "$mediaTypeSelection AND $visibilitySelection"
+        } else {
+            mediaTypeSelection
+        }
+
+        val selectionArgs = arrayOf(
+            MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+            MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()
+        )
+
+        val sortOrder = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
+
+        context.contentResolver.query(
+            collection,
+            projection.toTypedArray(),
+            selection,
+            selectionArgs,
+            sortOrder
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+            val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+            val bucketIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_ID)
+            val bucketNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME)
+            val mediaTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+            val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.WIDTH)
+            val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.HEIGHT)
+            val durationColumn = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+            val relativePathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+            } else {
+                -1
+            }
+
+            val batch = ArrayList<MediaItem>(batchSize)
+            var currentBatchTarget = MEDIASTORE_INITIAL_BATCH_SIZE
+            var processedCount = 0
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idColumn)
+                val name = cursor.getString(nameColumn)
+                val dateAdded = cursor.getLong(dateColumn)
+                val size = cursor.getLong(sizeColumn)
+                val mimeType = cursor.getString(mimeColumn)
+                val bucketId = cursor.getString(bucketIdColumn) ?: "unknown"
+                val bucketName = cursor.getString(bucketNameColumn) ?: "Unknown"
+                val mediaType = cursor.getInt(mediaTypeColumn)
+                val isVideo = mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                val width = cursor.getInt(widthColumn)
+                val height = cursor.getInt(heightColumn)
+                val duration = if (durationColumn >= 0 && isVideo) cursor.getLong(durationColumn) else 0L
+                val relativePath = if (relativePathColumn >= 0) cursor.getString(relativePathColumn) else null
+                val legacyPath = if (dataColumn >= 0) cursor.getString(dataColumn) else null
+                val path = buildMediaPath(relativePath, legacyPath, name)
+
+                val contentUri = if (isVideo) {
+                    val videoCollection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                    } else {
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    }
+                    ContentUris.withAppendedId(videoCollection, id)
+                } else {
+                    val imageCollection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                    } else {
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    }
+                    ContentUris.withAppendedId(imageCollection, id)
+                }
+
+                batch.add(
+                    MediaItem(
+                        id = id,
+                        uri = contentUri,
+                        displayName = name,
+                        dateAdded = dateAdded,
+                        size = size,
+                        mimeType = mimeType,
+                        bucketId = bucketId,
+                        bucketName = bucketName,
+                        isVideo = isVideo,
+                        duration = duration,
+                        width = width,
+                        height = height,
+                        path = path,
+                        latitude = null,
+                        longitude = null
+                    )
+                )
+
+                processedCount++
+
+                if (batch.size >= currentBatchTarget) {
+                    emit(batch.toList())
+                    android.util.Log.d(GALLERY_PERF_TAG, "MediaStore streaming batch emitted size=$processedCount")
+                    batch.clear()
+                    currentBatchTarget = batchSize
+                }
+            }
+
+            if (batch.isNotEmpty()) {
+                emit(batch.toList())
+                android.util.Log.d(GALLERY_PERF_TAG, "MediaStore streaming batch emitted size=$processedCount")
+            }
+        }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Extract GPS coordinates from image EXIF data
@@ -480,6 +632,8 @@ class MediaRepository(private val context: Context) {
                 val mediaTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
                 val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
                 val dateExpiresColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_EXPIRES)
+                var trashedImageCount = 0
+                var trashedVideoCount = 0
                 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
@@ -501,10 +655,12 @@ class MediaRepository(private val context: Context) {
                     }
                     
                     val displayName = cursor.getString(nameColumn) ?: "Unknown"
-                    val daysUntilExpiry = (dateExpires - currentTime) / (24 * 60 * 60)
-                    
-                    android.util.Log.d("MediaRepository", 
-                        "Trashed ${if (isVideo) "video" else "image"}: $displayName (expires in $daysUntilExpiry days)")
+
+                    if (isVideo) {
+                        trashedVideoCount++
+                    } else {
+                        trashedImageCount++
+                    }
                     
                     items.add(
                         MediaItem(
@@ -522,6 +678,11 @@ class MediaRepository(private val context: Context) {
                         )
                     )
                 }
+
+                android.util.Log.d(
+                    "MediaRepository",
+                    "Trashed items summary: total=${items.size}, images=$trashedImageCount, videos=$trashedVideoCount"
+                )
                 
                 android.util.Log.d("MediaRepository", "=== FINAL: ${items.size} valid trashed items (matching Google Files) ===")
             }
