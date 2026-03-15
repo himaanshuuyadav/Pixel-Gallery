@@ -209,7 +209,7 @@ internal fun SettingsGroup(content: @Composable () -> Unit) {
 @Composable
 internal fun GroupedSettingItem(
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     iconUnicode: String,
     position: SettingPosition,
     onClick: () -> Unit,
@@ -250,12 +250,14 @@ internal fun GroupedSettingItem(
                     color = if (enabled) MaterialTheme.colorScheme.onSurface 
                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant 
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    )
+                }
             }
             FontIcon(
                 unicode = FontIcons.KeyboardArrowRight,
