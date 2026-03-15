@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.carousel.CarouselDefaults
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.FlowRow
@@ -65,6 +68,8 @@ import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
 
 data class AlbumInfo(val name: String, val count: Int, val thumbnailUri: android.net.Uri)
@@ -83,6 +88,7 @@ fun SearchScreen(
     // ROOM-FIRST: Use Room flows for base media lists
     val images by viewModel.imagesFlow.collectAsState()
     val videos by viewModel.videosFlow.collectAsState()
+    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     // ROOM-FIRST: Use Room-based search flow instead of in-memory search
     val searchResultsRaw by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
@@ -122,6 +128,7 @@ fun SearchScreen(
     // Search filter state
     var selectedFilter by remember { mutableStateOf("All") }
     val filterOptions = listOf("All", "Albums", "Images and Videos", "Images", "Videos")
+    var albumActionsSheet by remember { mutableStateOf<Album?>(null) }
     
     // Get real recent searches from DataStore
     val recentSearches by viewModel.recentSearches.collectAsState()
@@ -132,8 +139,8 @@ fun SearchScreen(
     val smartAlbumDominantColors = viewModel.smartAlbumDominantColors
     
     // Load smart albums on launch
-    LaunchedEffect(images, videos) {
-        if (images.isNotEmpty() || videos.isNotEmpty()) {
+    LaunchedEffect(allMediaUnfiltered) {
+        if (allMediaUnfiltered.isNotEmpty()) {
             coroutineScope.launch {
                 val albums = SmartAlbumGenerator.generateSmartAlbums(context)
                 smartAlbums = albums
@@ -141,7 +148,7 @@ fun SearchScreen(
                 viewModel.preloadSmartAlbumColors(
                     context = context,
                     albums = albums,
-                    allMediaItems = images + videos
+                    allMediaItems = allMediaUnfiltered
                 )
             }
         }
@@ -186,17 +193,20 @@ fun SearchScreen(
         }
     }
 
-    // Combine and sort by date - use remember only, derivedStateOf is for internal recomposition optimization
-    val allMedia: List<MediaItem> = remember(images, videos) { 
-        (images + videos).sortedByDescending { it.dateAdded }
+    // Build search collections off the main thread to avoid frame drops with large media lists.
+    val allMedia by produceState(initialValue = emptyList<MediaItem>(), images, videos) {
+        value = withContext(Dispatchers.Default) {
+            (images + videos).sortedByDescending { it.dateAdded }
+        }
     }
-    
-    // Get unique albums - cached calculation
-    val albums: List<AlbumInfo> = remember(allMedia) {
-        allMedia.groupBy { it.bucketName }
-            .filter { it.key.isNotEmpty() }
-            .map { (name, items) -> AlbumInfo(name, items.size, items.firstOrNull()?.uri ?: android.net.Uri.EMPTY) }
-            .sortedByDescending { it.count }
+
+    val albums by produceState(initialValue = emptyList<AlbumInfo>(), allMedia) {
+        value = withContext(Dispatchers.Default) {
+            allMedia.groupBy { it.bucketName }
+                .filter { it.key.isNotEmpty() }
+                .map { (name, items) -> AlbumInfo(name, items.size, items.firstOrNull()?.uri ?: android.net.Uri.EMPTY) }
+                .sortedByDescending { it.count }
+        }
     }
     
     // Quick filters from SearchEngine
@@ -570,49 +580,29 @@ fun SearchScreen(
                                     }
                                 }
                             } else if (smartAlbums.isNotEmpty()) {
-                                // Smart Albums Hero Cards in centered carousel with HorizontalPager
-                                val pagerState = rememberPagerState(
-                                    pageCount = { smartAlbums.size }
-                                )
-                                val configuration = LocalConfiguration.current
-                                val screenWidth = configuration.screenWidthDp.dp
-                                val cardWidth = screenWidth * 0.75f
-                                
-                                HorizontalPager(
-                                    state = pagerState,
-                                    contentPadding = PaddingValues(
-                                        horizontal = (screenWidth - cardWidth) / 2
-                                    ),
-                                    pageSpacing = 16.dp,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { page ->
-                                    val album = smartAlbums[page]
-                                    val dominantColor = smartAlbumDominantColors[album.id] 
-                                        ?: MaterialTheme.colorScheme.primaryContainer
-                                    
-                                    val pageOffset = (
-                                        (pagerState.currentPage - page) +
-                                        pagerState.currentPageOffsetFraction
-                                    ).absoluteValue
-                                    
-                                    val scale = lerp(
-                                        start = 0.92f,
-                                        stop = 1f,
-                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
-                                    )
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .width(cardWidth)
-                                            .graphicsLayer {
-                                                scaleX = scale
-                                                scaleY = scale
-                                            }
-                                    ) {
+                                val cardHeight = 240.dp
+                                val rowCount = (smartAlbums.size + 1) / 2
+                                val gridHeight = (cardHeight * rowCount) + (12.dp * (rowCount - 1).coerceAtLeast(0))
+
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(2),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    userScrollEnabled = false,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(gridHeight)
+                                ) {
+                                    items(smartAlbums.size) { index ->
+                                        val album = smartAlbums[index]
+                                        val dominantColor = smartAlbumDominantColors[album.id]
+                                            ?: MaterialTheme.colorScheme.primaryContainer
+
                                         SmartAlbumHeroCard(
                                             album = album,
                                             dominantColor = dominantColor,
-                                            allMediaItems = allMedia,
+                                            allMediaItems = allMediaUnfiltered,
                                             cachedThumbnailUri = smartAlbumThumbnailCache[album.id],
                                             onThumbnailCached = { uri ->
                                                 smartAlbumThumbnailCache[album.id] = uri
@@ -622,7 +612,7 @@ fun SearchScreen(
                                                     com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
                                                 )
                                             },
-                                            albumIndex = page
+                                            albumIndex = index
                                         )
                                     }
                                 }
@@ -745,26 +735,54 @@ fun SearchScreen(
                             }
                             
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp)
-                                ) {
-                                    items(searchResults.matchedAlbums.size) { index ->
-                                        val albumMatch = searchResults.matchedAlbums[index]
-                                        AlbumPillItem(
-                                            name = albumMatch.albumName,
-                                            thumbnailUri = albumMatch.items.firstOrNull()?.uri ?: android.net.Uri.EMPTY,
-                                            onClick = {
-                                                // Navigate to album screen using bucketId from first item
-                                                val bucketId = albumMatch.items.firstOrNull()?.bucketId
-                                                if (bucketId != null) {
-                                                    // Save search to recent searches first
-                                                    viewModel.addRecentSearch(searchQuery)
-                                                    navController.navigate(com.prantiux.pixelgallery.navigation.Screen.AlbumDetail.createRoute(bucketId))
-                                                }
-                                            }
-                                        )
+                                val carouselState = rememberCarouselState { searchResults.matchedAlbums.size }
+                                HorizontalMultiBrowseCarousel(
+                                    state = carouselState,
+                                    preferredItemWidth = 160.dp,
+                                    itemSpacing = 4.dp,
+                                    flingBehavior = CarouselDefaults.multiBrowseFlingBehavior(state = carouselState),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .wrapContentHeight()
+                                ) { index ->
+                                    val albumMatch = searchResults.matchedAlbums[index]
+                                    val visibleFraction = if (carouselItemDrawInfo.maxSize > 0f) {
+                                        (carouselItemDrawInfo.size / carouselItemDrawInfo.maxSize).coerceIn(0f, 1f)
+                                    } else {
+                                        0f
                                     }
+                                    val isMostlyVisible = visibleFraction > 0.5f
+                                    val bucketId = albumMatch.items.firstOrNull()?.bucketId
+
+                                    OtherAlbumPillButton(
+                                        album = Album(
+                                            id = bucketId ?: albumMatch.albumName,
+                                            name = albumMatch.albumName,
+                                            coverUri = albumMatch.items.firstOrNull()?.uri,
+                                            itemCount = albumMatch.items.size
+                                        ),
+                                        onClick = {
+                                            if (bucketId != null) {
+                                                // Save search to recent searches first
+                                                viewModel.addRecentSearch(searchQuery)
+                                                navController.navigate(com.prantiux.pixelgallery.navigation.Screen.AlbumDetail.createRoute(bucketId))
+                                            }
+                                        },
+                                        onMenuClick = {
+                                            albumActionsSheet = Album(
+                                                id = bucketId ?: albumMatch.albumName,
+                                                name = albumMatch.albumName,
+                                                coverUri = albumMatch.items.firstOrNull()?.uri,
+                                                itemCount = albumMatch.items.size
+                                            )
+                                        },
+                                        showTitle = isMostlyVisible,
+                                        modifier = Modifier
+                                            .width(160.dp)
+                                            .height(170.dp)
+                                            .maskClip(MaterialTheme.shapes.extraLarge)
+                                    )
                                 }
                             }
                             
@@ -860,6 +878,12 @@ fun SearchScreen(
                 }
             }
         }
+            albumActionsSheet?.let { album ->
+                AlbumActionsBottomSheet(
+                    album = album,
+                    onDismiss = { albumActionsSheet = null }
+                )
+            }
         }
     }
 }
@@ -1063,41 +1087,6 @@ fun AlbumQuickAccessItem(name: String, count: Int, thumbnailUri: android.net.Uri
 }
 
 @Composable
-fun AlbumPillItem(name: String, thumbnailUri: android.net.Uri, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(120.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-    ) {
-        // Square album cover image
-        AsyncImage(
-            model = thumbnailUri,
-            contentDescription = "$name album cover",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-        
-        // Overlaid pill label at bottom center
-        Text(
-            text = name,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 8.dp, start = 8.dp, end = 8.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(50)
-                )
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        )
-    }
-}
-
-@Composable
 fun AlbumResultItem(name: String, count: Int, thumbnailUri: android.net.Uri, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
@@ -1167,106 +1156,96 @@ fun SmartAlbumHeroCard(
         }
     }
     
-    // Select shape based on album index
-    val thumbnailShape = when (albumIndex % 4) {
-        0 -> MaterialShapes.Square.toShape()
-        1 -> MaterialShapes.Clover8Leaf.toShape()
-        2 -> MaterialShapes.Arch.toShape()
-        else -> MaterialShapes.Cookie4Sided.toShape()
-    }
-    
-    // Background color with slight transparency
-    val backgroundColor = remember(dominantColor) {
-        dominantColor.copy(alpha = 0.92f)
-    }
-    
-    // Determine text color based on background luminance (perceived brightness)
-    val textColor = remember(backgroundColor) {
-        val perceivedBrightness = computePerceivedBrightness(backgroundColor)
-        if (perceivedBrightness > 127) Color.Black.copy(alpha = 0.87f) else Color.White
-    }
-    
-    // Pill background with adaptive transparency
-    val pillBackgroundColor = remember(textColor) {
-        val brightness = computePerceivedBrightness(textColor)
-        if (brightness > 127) {
-            Color.Black.copy(alpha = 0.12f)
-        } else {
-            Color.White.copy(alpha = 0.25f)
-        }
+    val labelBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
+
+    // Use a different expressive shape for each card's item-count badge.
+    val countBadgeShape = when (albumIndex % 4) {
+        0 -> MaterialShapes.Clover8Leaf.toShape()
+        1 -> MaterialShapes.Pill.toShape()
+        2 -> MaterialShapes.Gem.toShape()
+        else -> MaterialShapes.Cookie6Sided.toShape()
     }
     
     Surface(
         modifier = Modifier
-            .width(240.dp)
-            .height(340.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = backgroundColor,
+            .fillMaxWidth()
+            .height(240.dp)
+            .clip(RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         onClick = onClick
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.Start,
-            verticalArrangement = Arrangement.Center
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Thumbnail with Material 3 Expressive shape masking
-            if (thumbnailUri != null) {
-                AsyncImage(
-                    model = thumbnailUri,
-                    contentDescription = album.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(160.dp)
-                        .clip(thumbnailShape)
-                        .align(Alignment.CenterHorizontally)
-                )
-            } else {
-                // Loading placeholder
-                Box(
-                    modifier = Modifier
-                        .size(160.dp)
-                        .clip(thumbnailShape)
-                        .background(textColor.copy(alpha = 0.1f))
-                        .align(Alignment.CenterHorizontally),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = textColor.copy(alpha = 0.5f),
-                        strokeWidth = 2.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                // Full thumbnail area (no inner masking/clipping)
+                if (thumbnailUri != null) {
+                    AsyncImage(
+                        model = thumbnailUri,
+                        contentDescription = album.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            strokeWidth = 2.dp
+                        )
+                    }
                 }
             }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Title left-aligned
-            Text(
-                text = album.name,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = textColor,
-                maxLines = 2,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Start
-            )
-            
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            // Count pill left-aligned
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = pillBackgroundColor
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(labelBackgroundColor)
+                    .heightIn(min = 56.dp)
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
             ) {
-                Text(
-                    text = "${album.itemCount} ${if (album.itemCount == 1) "item" else "items"}",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = textColor,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = album.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        shape = countBadgeShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = album.itemCount.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
             }
         }
     }
