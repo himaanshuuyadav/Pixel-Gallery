@@ -3,11 +3,16 @@
 package com.prantiux.pixelgallery.navigation
 
 import android.util.Log
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,8 +45,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -62,8 +69,11 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.dialogs.CopyToAlbumDialog
 import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlin.math.roundToInt
 
 data class NavItem(
     val route: String,
@@ -93,6 +103,104 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object GesturesSetting : Screen("gestures_setting", "Gestures")
     object PlaybackSetting : Screen("playback_setting", "Playback")
     object DebugSetting : Screen("debug_setting", "Debug")
+}
+
+private object HierarchicalNavMotion {
+    private const val DURATION_MS = 280
+    private const val ENTER_ALPHA = 0.9f
+    private const val PRIMARY_SLIDE_FRACTION = 0.28f
+    private const val SECONDARY_SLIDE_FRACTION = 0.08f
+
+    private val animationSpec = tween<IntOffset>(
+        durationMillis = DURATION_MS,
+        easing = FastOutSlowInEasing
+    )
+
+    private val fadeSpec = tween<Float>(
+        durationMillis = DURATION_MS,
+        easing = FastOutSlowInEasing
+    )
+
+    private val hierarchicalRoutes = setOf(
+        Screen.Settings.route,
+        Screen.AllAlbums.route,
+        Screen.RecycleBin.route,
+        Screen.Favorites.route,
+        Screen.GridTypeSetting.route,
+        Screen.GalleryViewSetting.route,
+        Screen.ThemeSetting.route,
+        Screen.PreviewsSetting.route,
+        Screen.GesturesSetting.route,
+        Screen.PlaybackSetting.route,
+        Screen.DebugSetting.route,
+        Screen.AlbumDetail.route,
+        Screen.SmartAlbumView.route
+    )
+
+    private fun isHierarchicalRoute(route: String?): Boolean {
+        if (route == null) return false
+        return route in hierarchicalRoutes ||
+            route.startsWith("album/") ||
+            route.startsWith("smartalbum/")
+    }
+
+    private fun shouldAnimate(
+        initialState: NavBackStackEntry,
+        targetState: NavBackStackEntry
+    ): Boolean {
+        return isHierarchicalRoute(initialState.destination.route) ||
+            isHierarchicalRoute(targetState.destination.route)
+    }
+
+    val enterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+        if (!shouldAnimate(initialState, targetState)) {
+            EnterTransition.None
+        } else {
+            slideInHorizontally(
+                animationSpec = animationSpec,
+                initialOffsetX = { fullWidth -> (fullWidth * PRIMARY_SLIDE_FRACTION).roundToInt() }
+            ) + fadeIn(
+                animationSpec = fadeSpec,
+                initialAlpha = ENTER_ALPHA
+            )
+        }
+    }
+
+    val exitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+        if (!shouldAnimate(initialState, targetState)) {
+            ExitTransition.None
+        } else {
+            slideOutHorizontally(
+                animationSpec = animationSpec,
+                targetOffsetX = { fullWidth -> -(fullWidth * SECONDARY_SLIDE_FRACTION).roundToInt() }
+            ) + fadeOut(animationSpec = fadeSpec)
+        }
+    }
+
+    val popEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+        if (!shouldAnimate(initialState, targetState)) {
+            EnterTransition.None
+        } else {
+            slideInHorizontally(
+                animationSpec = animationSpec,
+                initialOffsetX = { fullWidth -> -(fullWidth * PRIMARY_SLIDE_FRACTION).roundToInt() }
+            ) + fadeIn(
+                animationSpec = fadeSpec,
+                initialAlpha = ENTER_ALPHA
+            )
+        }
+    }
+
+    val popExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+        if (!shouldAnimate(initialState, targetState)) {
+            ExitTransition.None
+        } else {
+            slideOutHorizontally(
+                animationSpec = animationSpec,
+                targetOffsetX = { fullWidth -> (fullWidth * PRIMARY_SLIDE_FRACTION).roundToInt() }
+            ) + fadeOut(animationSpec = fadeSpec)
+        }
+    }
 }
 // Tab switching and startup animations have been removed.
 // - Startup: AnimatedRootContent renders content immediately
@@ -409,6 +517,7 @@ fun AppNavigation(
             
             // ROOM-FIRST: Use Room flows for overlay media (single source of truth)
             val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
+            val allMediaUnfilteredForOverlay by viewModel.allMediaUnfilteredFlow.collectAsState()
             
             // ROOM-FIRST: Album media from pure DAO for overlay (no in-memory filtering!)
             val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
@@ -435,9 +544,8 @@ fun AppNavigation(
                             // Will be populated by LaunchedEffect below
                             emptyList()
                         } else {
-                            // Regular album - use Room DAO query (no in-memory filtering!)
+                            // Regular album - already sorted in ViewModel flow
                             albumMediaForOverlay
-                                .sortedByDescending { it.dateAdded }
                         }
                     }
                     "search" -> {
@@ -454,15 +562,17 @@ fun AppNavigation(
             val coroutineScope = rememberCoroutineScope()
             
             // Load smart album media if overlay is showing a smart album
-            androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, sortedMediaForOverlay) {
+            androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, allMediaUnfilteredForOverlay) {
                 if (isSmartAlbumOverlay) {
                     coroutineScope.launch {
-                        val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(
-                            context,
-                            overlayState.albumId,
-                            sortedMediaForOverlay
-                        )
-                        smartAlbumOverlayMedia = smartMedia.sortedByDescending { it.dateAdded }
+                        val sortedSmartMedia = withContext(Dispatchers.Default) {
+                            SmartAlbumGenerator.getMediaForSmartAlbum(
+                                context,
+                                overlayState.albumId,
+                                allMediaUnfilteredForOverlay
+                            ).sortedByDescending { it.dateAdded }
+                        }
+                        smartAlbumOverlayMedia = sortedSmartMedia
                     }
                 }
             }
@@ -476,9 +586,17 @@ fun AppNavigation(
                 }
             }
 
-            // Material Fade Through tab animation (150ms, FastOutSlowInEasing)
-            val tabAnimationSpec = tween<Float>(durationMillis = 150, easing = FastOutSlowInEasing)
+            // Subtle tab fade-through with directional horizontal offset and Material 3 Expressive spring bounce
+            // Material 3 Expressive spring values: dampingRatio=0.65f for subtle bounce, stiffness=200f for responsive motion
+            val tabAnimationSpec = spring<Float>(dampingRatio = 0.65f, stiffness = 200f)
             val density = LocalDensity.current
+            val activeTabIndex = when (activeRoute) {
+                Screen.Photos.route -> 0
+                Screen.Albums.route -> 1
+                Screen.Search.route -> 2
+                else -> 0
+            }
+            val horizontalOffsetDp = 28f
             
             // Photos tab animation
             val photosAlpha by animateFloatAsState(
@@ -486,10 +604,14 @@ fun AppNavigation(
                 animationSpec = tabAnimationSpec,
                 label = "photosAlpha"
             )
-            val photosTranslationY by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Photos.route) 0f else 18f,
+            val photosTranslationX by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Photos.route) {
+                    0f
+                } else {
+                    if (0 < activeTabIndex) -horizontalOffsetDp else horizontalOffsetDp
+                },
                 animationSpec = tabAnimationSpec,
-                label = "photosTranslationY"
+                label = "photosTranslationX"
             )
             
             // Albums tab animation
@@ -498,10 +620,14 @@ fun AppNavigation(
                 animationSpec = tabAnimationSpec,
                 label = "albumsAlpha"
             )
-            val albumsTranslationY by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Albums.route) 0f else 18f,
+            val albumsTranslationX by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Albums.route) {
+                    0f
+                } else {
+                    if (1 < activeTabIndex) -horizontalOffsetDp else horizontalOffsetDp
+                },
                 animationSpec = tabAnimationSpec,
-                label = "albumsTranslationY"
+                label = "albumsTranslationX"
             )
             
             // Search tab animation
@@ -510,10 +636,14 @@ fun AppNavigation(
                 animationSpec = tabAnimationSpec,
                 label = "searchAlpha"
             )
-            val searchTranslationY by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Search.route) 0f else 18f,
+            val searchTranslationX by animateFloatAsState(
+                targetValue = if (activeRoute == Screen.Search.route) {
+                    0f
+                } else {
+                    if (2 < activeTabIndex) -horizontalOffsetDp else horizontalOffsetDp
+                },
                 animationSpec = tabAnimationSpec,
-                label = "searchTranslationY"
+                label = "searchTranslationX"
             )
 
             Box(modifier = Modifier.fillMaxSize()) {
@@ -527,7 +657,7 @@ fun AppNavigation(
                             .fillMaxSize()
                             .alpha(photosAlpha)
                             .graphicsLayer {
-                                translationY = photosTranslationY * density.density
+                                translationX = photosTranslationX * density.density
                             }
                             .zIndex(if (activeRoute == Screen.Photos.route) 1f else 0f)
                     ) {
@@ -542,7 +672,7 @@ fun AppNavigation(
                             .fillMaxSize()
                             .alpha(albumsAlpha)
                             .graphicsLayer {
-                                translationY = albumsTranslationY * density.density
+                                translationX = albumsTranslationX * density.density
                             }
                             .zIndex(if (activeRoute == Screen.Albums.route) 1f else 0f)
                     ) {
@@ -571,7 +701,7 @@ fun AppNavigation(
                             .fillMaxSize()
                             .alpha(searchAlpha)
                             .graphicsLayer {
-                                translationY = searchTranslationY * density.density
+                                translationX = searchTranslationX * density.density
                             }
                             .zIndex(if (activeRoute == Screen.Search.route) 1f else 0f)
                     ) {
@@ -591,7 +721,11 @@ fun AppNavigation(
                     NavHost(
                         navController = navController,
                         startDestination = startDestination,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        enterTransition = HierarchicalNavMotion.enterTransition,
+                        exitTransition = HierarchicalNavMotion.exitTransition,
+                        popEnterTransition = HierarchicalNavMotion.popEnterTransition,
+                        popExitTransition = HierarchicalNavMotion.popExitTransition
                     ) {
                         composable(
                             route = Screen.Photos.route
