@@ -43,6 +43,7 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.prantiux.pixelgallery.R
 import com.prantiux.pixelgallery.BuildConfig
 import com.prantiux.pixelgallery.model.MediaItem
+import com.prantiux.pixelgallery.startup.StartupTrace
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.viewmodel.SortMode
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
@@ -87,6 +88,7 @@ fun PhotosScreen(
     LaunchedEffect(Unit) {
         val start = SystemClock.elapsedRealtime()
         withFrameNanos { }
+        StartupTrace.markStage("First gallery screen visible", once = true)
         if (BuildConfig.DEBUG) {
             Log.d("Perf", "First frame rendered in ${SystemClock.elapsedRealtime() - start} ms")
         }
@@ -155,6 +157,7 @@ fun PhotosContent(
     // Removed verbose gesture logs
     
     // Transformable state for pinch gesture detection
+    @Suppress("DEPRECATION")
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
         if (pinchGestureEnabled && !isSelectionMode) {
             // Track pan distance to distinguish pinch from scroll
