@@ -3,6 +3,10 @@ package com.prantiux.pixelgallery.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -10,8 +14,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
+import androidx.compose.material3.carousel.CarouselDefaults
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -25,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
@@ -37,28 +49,36 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import android.view.HapticFeedbackConstants
 import android.os.SystemClock
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DragIndicator
+import androidx.compose.material.icons.rounded.Restore
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.math.abs
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.zIndex
-import com.prantiux.pixelgallery.BuildConfig
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.data.SettingsDataStore
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import kotlinx.coroutines.launch
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+
+private val AlbumCardSpacing = 18.dp
+private val AlbumCardSwipeAnimationSpec = tween<Float>(200)
 
 /**
  * Modern Albums Screen with rectangular pill tabs
@@ -85,6 +105,8 @@ fun AlbumsScreen(
     // UNFILTERED: Use allCategorizedAlbumsFlow (not affected by Photos View Settings filter)
     // Albums tab must show ALL albums regardless of Photos tab selection
     val allAlbums by viewModel.allAlbumsFlow.collectAsState()
+    val favorites by viewModel.favoritesFlow.collectAsState()
+    val trashedItems by viewModel.trashedItems.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val albumOrderMode by settingsDataStore.albumOrderModeFlow.collectAsState(initial = "Based on no. of images")
@@ -100,9 +122,18 @@ fun AlbumsScreen(
     
     var selectedMainAlbumIndex by remember { mutableStateOf(0) }
     var showReorderBottomSheet by remember { mutableStateOf(false) }
+    var albumActionsSheet by remember { mutableStateOf<Album?>(null) }
+    var tabTransitionTargetIndex by remember { mutableStateOf<Int?>(null) }
+    val dragOffset = remember { Animatable(0f) }
+    var highlightCardWidth by remember { mutableStateOf(0f) }
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val cardSpacing = with(density) { AlbumCardSpacing.toPx() }
 
-    // No LaunchedEffect needed - data is already loaded by ViewModel
-    // Albums are derived from cached media in viewModel.refresh()
+    // Ensure recycle-bin count is available when Albums tab opens.
+    LaunchedEffect(context) {
+        viewModel.loadTrashedItems(context)
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         if (initialSetupInProgress) {
@@ -161,9 +192,39 @@ fun AlbumsScreen(
                         albums = albums.mainAlbums,
                         selectedIndex = selectedMainAlbumIndex,
                         onTabSelected = { index ->
-                            selectedMainAlbumIndex = index
+                            if (index == selectedMainAlbumIndex || index !in albums.mainAlbums.indices) {
+                                return@AlbumsHeaderWithTabs
+                            }
+
+                            if (highlightCardWidth <= 0f) {
+                                selectedMainAlbumIndex = index
+                                return@AlbumsHeaderWithTabs
+                            }
+
+                            scope.launch {
+                                dragOffset.stop()
+                                tabTransitionTargetIndex = index
+
+                                val direction = if (index > selectedMainAlbumIndex) 1 else -1
+                                val targetOffset = if (direction > 0) {
+                                    -(highlightCardWidth + cardSpacing)
+                                } else {
+                                    highlightCardWidth + cardSpacing
+                                }
+
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                dragOffset.animateTo(
+                                    targetValue = targetOffset,
+                                    animationSpec = AlbumCardSwipeAnimationSpec
+                                )
+
+                                selectedMainAlbumIndex = index
+                                dragOffset.snapTo(0f)
+                                tabTransitionTargetIndex = null
+                            }
                         },
                         onViewAllClick = onNavigateToAllAlbums,
+                        onTabLongPress = { album -> albumActionsSheet = album },
                         onEditClick = { showReorderBottomSheet = true },
                         onSettingsClick = onNavigateToSettings
                     )
@@ -176,12 +237,18 @@ fun AlbumsScreen(
                             albums = albums.mainAlbums,
                             viewModel = viewModel,
                             currentTabIndex = selectedMainAlbumIndex,
+                            dragOffset = dragOffset,
+                            transitionTargetIndex = tabTransitionTargetIndex,
+                            onCardWidthMeasured = { width ->
+                                highlightCardWidth = width
+                            },
                             onTabChange = { newIndex ->
                                 selectedMainAlbumIndex = newIndex
                             },
                             onViewAllClick = { 
                                 onNavigateToAlbum(albums.mainAlbums[selectedMainAlbumIndex].id) 
-                            }
+                            },
+                            onAlbumActionsClick = { album -> albumActionsSheet = album }
                         )
                     }
                 }
@@ -191,7 +258,10 @@ fun AlbumsScreen(
                     if (albums.otherAlbums.isNotEmpty()) {
                         OtherAlbumsSection(
                             albums = albums.otherAlbums,
-                            onAlbumClick = onNavigateToAlbum
+                            onViewAllClick = onNavigateToAllAlbums,
+                            onAlbumClick = onNavigateToAlbum,
+                            onAlbumLongPress = { album -> albumActionsSheet = album },
+                            onAlbumMenuClick = { album -> albumActionsSheet = album }
                         )
                     }
                 }
@@ -201,11 +271,22 @@ fun AlbumsScreen(
                     SpecialActionButtons(
                         onStarredClick = onNavigateToFavorites,
                         onSecureClick = { /* TODO */ },
-                        onRecycleBinClick = onNavigateToRecycleBin
+                        onRecycleBinClick = onNavigateToRecycleBin,
+                        favoritesCount = favorites.size,
+                        secureCount = 0,
+                        recycleBinCount = trashedItems.size
                     )
                 }
             }
             
+            // Album Actions Bottom Sheet
+            albumActionsSheet?.let { album ->
+                AlbumActionsBottomSheet(
+                    album = album,
+                    onDismiss = { albumActionsSheet = null }
+                )
+            }
+
             // Reorder Bottom Sheet
             if (showReorderBottomSheet) {
                 ReorderBottomSheet(
@@ -241,6 +322,7 @@ fun AlbumsHeaderWithTabs(
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
     onViewAllClick: () -> Unit,
+    onTabLongPress: (Album) -> Unit = {},
     onEditClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {}
 ) {
@@ -299,6 +381,7 @@ fun AlbumsHeaderWithTabs(
             selectedIndex = selectedIndex,
             onTabSelected = onTabSelected,
             onViewAllClick = onViewAllClick,
+            onTabLongPress = onTabLongPress,
             onEditClick = onEditClick
         )
     }
@@ -343,6 +426,7 @@ fun MainAlbumTabs(
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
     onViewAllClick: () -> Unit,
+    onTabLongPress: (Album) -> Unit = {},
     onEditClick: () -> Unit = {}
 ) {
     val lazyListState = rememberLazyListState()
@@ -359,7 +443,7 @@ fun MainAlbumTabs(
         state = lazyListState,
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.padding(bottom = 16.dp)
+        modifier = Modifier.padding(bottom = 8.dp)
     ) {
         items(albums.size) { index ->
             RectangularPillTab(
@@ -367,7 +451,8 @@ fun MainAlbumTabs(
                 count = albums[index].itemCount,
                 index = index,
                 selectedIndex = selectedIndex,
-                onClick = { onTabSelected(index) }
+                onClick = { onTabSelected(index) },
+                onLongPress = { onTabLongPress(albums[index]) }
             )
         }
         
@@ -396,7 +481,8 @@ fun RectangularPillTab(
     count: Int,
     index: Int,
     selectedIndex: Int,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null
 ) {
     val isSelected = index == selectedIndex
     
@@ -413,6 +499,7 @@ fun RectangularPillTab(
             index = index,
             selectedIndex = selectedIndex,
             onClick = onClick,
+            onLongClick = onLongPress,
             selectedColor = MaterialTheme.colorScheme.primaryContainer,
             unselectedColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
@@ -453,14 +540,35 @@ fun RectangularPillTab(
 fun ViewAllPillButton(
     onClick: () -> Unit
 ) {
+    val scale = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+    val hapticFeedback = LocalHapticFeedback.current
+    val animSpec = tween<Float>(durationMillis = 250, easing = FastOutSlowInEasing)
+
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier
+            .graphicsLayer {
+                // Match tab feel: horizontal stretch is more noticeable than uniform scale.
+                scaleX = scale.value
+            }
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+                scope.launch {
+                    scale.animateTo(1.15f, animationSpec = animSpec)
+                    scale.animateTo(1f, animationSpec = animSpec)
+                }
+            }
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            // Match tab idle size rhythm (same as AlbumTabAnimation content padding).
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Text(
                 text = "View All",
@@ -480,12 +588,31 @@ fun ViewAllPillButton(
 fun EditPillButton(
     onClick: () -> Unit
 ) {
+    val scale = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+    val hapticFeedback = LocalHapticFeedback.current
+    val animSpec = tween<Float>(durationMillis = 250, easing = FastOutSlowInEasing)
+
     Surface(
-        shape = CircleShape,
+        // Square base with heavy roundness to read as "pill-square" during stretch animation.
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.primaryContainer,
         modifier = Modifier
             .size(44.dp)
-            .clickable(onClick = onClick)
+            .graphicsLayer {
+                scaleX = scale.value
+            }
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+                scope.launch {
+                    scale.animateTo(1.15f, animationSpec = animSpec)
+                    scale.animateTo(1f, animationSpec = animSpec)
+                }
+            }
     ) {
         Box(
             contentAlignment = Alignment.Center,
@@ -509,24 +636,29 @@ fun HighlightAlbumSection(
     albums: List<Album>,
     viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     currentTabIndex: Int,
+    dragOffset: Animatable<Float, AnimationVector1D>,
+    transitionTargetIndex: Int? = null,
+    onCardWidthMeasured: (Float) -> Unit,
     onTabChange: (Int) -> Unit,
-    onViewAllClick: () -> Unit
+    onViewAllClick: () -> Unit,
+    onAlbumActionsClick: (Album) -> Unit = {}
 ) {
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     
-    val dragOffset = remember { Animatable(0f) }
     var cardWidth by remember { mutableStateOf(0f) }
-    val cardSpacing = with(density) { 18.dp.toPx() } // 18dp spacing between cards
+    val cardSpacing = with(density) { AlbumCardSpacing.toPx() }
     val swipeThreshold = 0.3f // 30% of card width to trigger tab change
     
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .clipToBounds()
             .onGloballyPositioned { coordinates ->
                 cardWidth = coordinates.size.width.toFloat()
+                onCardWidthMeasured(cardWidth)
             }
             .pointerInput(currentTabIndex) {
                 detectHorizontalDragGestures(
@@ -558,7 +690,7 @@ fun HighlightAlbumSection(
                                 val targetOffset = if (targetIndex > currentTabIndex) -(cardWidth + cardSpacing) else (cardWidth + cardSpacing)
                                 dragOffset.animateTo(
                                     targetValue = targetOffset,
-                                    animationSpec = tween(200)
+                                    animationSpec = AlbumCardSwipeAnimationSpec
                                 )
                                 onTabChange(targetIndex)
                                 dragOffset.snapTo(0f)
@@ -566,14 +698,14 @@ fun HighlightAlbumSection(
                                 // Snap back to center
                                 dragOffset.animateTo(
                                     targetValue = 0f,
-                                    animationSpec = tween(200)
+                                    animationSpec = AlbumCardSwipeAnimationSpec
                                 )
                             }
                         }
                     },
                     onDragCancel = {
                         scope.launch {
-                            dragOffset.animateTo(0f, animationSpec = tween(200))
+                            dragOffset.animateTo(0f, animationSpec = AlbumCardSwipeAnimationSpec)
                         }
                     },
                     onHorizontalDrag = { change, dragAmount ->
@@ -602,8 +734,23 @@ fun HighlightAlbumSection(
     ) {
         // Render cards in layers: previous (if exists), current, next (if exists)
         val currentAlbum = albums[currentTabIndex]
-        val previousAlbum = if (currentTabIndex > 0) albums[currentTabIndex - 1] else null
-        val nextAlbum = if (currentTabIndex < albums.size - 1) albums[currentTabIndex + 1] else null
+        val resolvedTransitionTarget = transitionTargetIndex?.takeIf {
+            it in albums.indices && it != currentTabIndex
+        }
+        val previousAlbum = when {
+            resolvedTransitionTarget != null && resolvedTransitionTarget < currentTabIndex -> {
+                albums[resolvedTransitionTarget]
+            }
+            currentTabIndex > 0 -> albums[currentTabIndex - 1]
+            else -> null
+        }
+        val nextAlbum = when {
+            resolvedTransitionTarget != null && resolvedTransitionTarget > currentTabIndex -> {
+                albums[resolvedTransitionTarget]
+            }
+            currentTabIndex < albums.size - 1 -> albums[currentTabIndex + 1]
+            else -> null
+        }
         
         val offset = dragOffset.value
         val progress = if (cardWidth > 0) offset / cardWidth else 0f
@@ -614,6 +761,7 @@ fun HighlightAlbumSection(
                 album = it,
                 viewModel = viewModel,
                 onViewAllClick = onViewAllClick,
+                onAlbumActionsClick = onAlbumActionsClick,
                 modifier = Modifier
                     .zIndex(0f)
                     .graphicsLayer {
@@ -641,6 +789,7 @@ fun HighlightAlbumSection(
                 album = it,
                 viewModel = viewModel,
                 onViewAllClick = onViewAllClick,
+                onAlbumActionsClick = onAlbumActionsClick,
                 modifier = Modifier
                     .zIndex(0f)
                     .graphicsLayer {
@@ -667,6 +816,7 @@ fun HighlightAlbumSection(
             album = currentAlbum,
             viewModel = viewModel,
             onViewAllClick = onViewAllClick,
+            onAlbumActionsClick = onAlbumActionsClick,
             modifier = Modifier
                 .zIndex(1f)
                 .graphicsLayer {
@@ -684,6 +834,7 @@ fun AlbumPreviewCard(
     album: Album,
     viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     onViewAllClick: () -> Unit,
+    onAlbumActionsClick: (Album) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -873,7 +1024,14 @@ fun AlbumPreviewCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { onAlbumActionsClick(album) }
+                        )
+                ) {
                     Text(
                         text = album.name,
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
@@ -888,14 +1046,22 @@ fun AlbumPreviewCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                TextButton(
-                    onClick = onViewAllClick,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text("View All")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        onClick = onViewAllClick,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text("View All")
+                    }
+                    IconButton(onClick = { onAlbumActionsClick(album) }) {
+                        FontIcon(
+                            unicode = FontIcons.MoreVert,
+                            contentDescription = "Album actions",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -908,32 +1074,65 @@ fun AlbumPreviewCard(
 @Composable
 fun OtherAlbumsSection(
     albums: List<Album>,
-    onAlbumClick: (String) -> Unit
+    onViewAllClick: () -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onAlbumLongPress: ((Album) -> Unit)? = null,
+    onAlbumMenuClick: ((Album) -> Unit)? = null
 ) {
+    val carouselState = rememberCarouselState { albums.size }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 16.dp)
+            .padding(vertical = 8.dp)
     ) {
-        Text(
-            text = "Other Albums",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 0.dp)
-        )
-        
-        Spacer(modifier = Modifier.height(12.dp))
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            items(albums.size) { index ->
-                OtherAlbumPillButton(
-                    album = albums[index],
-                    onClick = { onAlbumClick(albums[index].id) }
-                )
+            Text(
+                text = "More Albums",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary
+            )
+            TextButton(onClick = onViewAllClick) {
+                Text("View all")
             }
+        }
+        
+        Spacer(modifier = Modifier.height(0.dp))
+
+        HorizontalMultiBrowseCarousel(
+            state = carouselState,
+            preferredItemWidth = 160.dp,
+            itemSpacing = 4.dp,
+            flingBehavior = CarouselDefaults.multiBrowseFlingBehavior(state = carouselState),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight()
+        ) { index ->
+            val album = albums[index]
+            val visibleFraction = if (carouselItemDrawInfo.maxSize > 0f) {
+                (carouselItemDrawInfo.size / carouselItemDrawInfo.maxSize).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val isMostlyVisible = visibleFraction > 0.5f
+            OtherAlbumPillButton(
+                album = album,
+                onClick = { onAlbumClick(album.id) },
+                onLongPress = if (onAlbumLongPress != null) {{ onAlbumLongPress(album) }} else null,
+                onMenuClick = if (onAlbumMenuClick != null) {{ onAlbumMenuClick(album) }} else null,
+                showTitle = isMostlyVisible,
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(170.dp)
+                    .maskClip(MaterialTheme.shapes.extraLarge)
+            )
         }
     }
 }
@@ -942,21 +1141,37 @@ fun OtherAlbumsSection(
  * Square album item for other albums with overlaid pill labels
  * Matches the visual style from the screenshot
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OtherAlbumPillButton(
     album: Album,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    onMenuClick: (() -> Unit)? = null,
+    showTitle: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     Box(
-        modifier = Modifier
-            .size(120.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
+        modifier = modifier
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = if (onLongPress != null) {{
+                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    onLongPress()
+                }} else null
+            )
     ) {
         // Square album cover image
         if (album.coverUri != null) {
             AsyncImage(
-                model = album.coverUri,
+                model = ImageRequest.Builder(context)
+                    .data(album.coverUri)
+                    .size(360, 510)
+                    .crossfade(false)
+                    .build(),
                 contentDescription = "${album.name} cover",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
@@ -969,23 +1184,46 @@ fun OtherAlbumPillButton(
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             )
         }
+
+        if (onMenuClick != null) {
+            Surface(
+                onClick = onMenuClick,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(30.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    FontIcon(
+                        unicode = FontIcons.MoreVert,
+                        contentDescription = "Album actions",
+                        size = 18.sp,
+                        tint = Color.White
+                    )
+                }
+            }
+        }
         
-        // Overlaid pill label at bottom center
-        Text(
-            text = album.name,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 8.dp, start = 8.dp, end = 8.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(50)
-                )
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        )
+        if (showTitle) {
+            // Overlaid pill label at bottom center
+            Text(
+                text = album.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp, start = 8.dp, end = 8.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(50)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
     }
 }
 
@@ -996,28 +1234,32 @@ fun OtherAlbumPillButton(
 fun SpecialActionButtons(
     onStarredClick: () -> Unit,
     onSecureClick: () -> Unit,
-    onRecycleBinClick: () -> Unit
+    onRecycleBinClick: () -> Unit,
+    favoritesCount: Int,
+    secureCount: Int,
+    recycleBinCount: Int
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = 20.dp, vertical = 8.dp)
             .padding(bottom = 16.dp) // Extra bottom padding for navigation bar
     ) {
         Text(
-            text = "Special Folders",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(bottom = 12.dp)
+            text = "Utilities",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 0.dp, vertical = 8.dp)
         )
 
         // Favourites - Top card
         SpecialActionCard(
             iconUnicode = FontIcons.Star,
             label = "Favourites",
-            description = "Your favorite photos",
+            description = "Your favourite photos and albums",
             onClick = onStarredClick,
-            position = SpecialCardPosition.TOP
+            position = SpecialCardPosition.TOP,
+            itemCount = favoritesCount
         )
         
         Spacer(modifier = Modifier.height(4.dp))
@@ -1028,7 +1270,8 @@ fun SpecialActionButtons(
             label = "Secure Folder",
             description = "Protected content",
             onClick = onSecureClick,
-            position = SpecialCardPosition.BOTTOM
+            position = SpecialCardPosition.BOTTOM,
+            itemCount = secureCount
         )
         
         Spacer(modifier = Modifier.height(8.dp))
@@ -1039,7 +1282,8 @@ fun SpecialActionButtons(
             label = "Recycle Bin",
             description = "Recently deleted",
             onClick = onRecycleBinClick,
-            position = SpecialCardPosition.SINGLE
+            position = SpecialCardPosition.SINGLE,
+            itemCount = recycleBinCount
         )
     }
 }
@@ -1052,14 +1296,22 @@ enum class SpecialCardPosition {
 /**
  * Special action card - styled like Grid Type options in Layout Settings
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SpecialActionCard(
     iconUnicode: String,
     label: String,
     description: String,
     onClick: () -> Unit,
-    position: SpecialCardPosition
+    position: SpecialCardPosition,
+    itemCount: Int
 ) {
+    val countBadgeShape = when (position) {
+        SpecialCardPosition.TOP -> MaterialShapes.Clover8Leaf.toShape()
+        SpecialCardPosition.BOTTOM -> MaterialShapes.Pill.toShape()
+        SpecialCardPosition.SINGLE -> MaterialShapes.Cookie6Sided.toShape()
+    }
+
     val cardShape = when (position) {
         SpecialCardPosition.TOP -> SmoothCornerShape(
             cornerRadiusTL = 24.dp,
@@ -1112,6 +1364,22 @@ fun SpecialActionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = countBadgeShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = itemCount.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                }
+            }
         }
     }
 }
@@ -1119,7 +1387,7 @@ fun SpecialActionCard(
 /**
  * Reorder bottom sheet (using Modal BottomSheet with Reorderable library)
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReorderBottomSheet(
     mainAlbums: List<Album>,
@@ -1128,27 +1396,41 @@ fun ReorderBottomSheet(
     onSave: (mode: String, mainAlbumIds: List<String>, otherAlbumIds: List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val logTag = "AlbumsReorder"
-    val sessionId = remember { "S${SystemClock.elapsedRealtime().toString().takeLast(6)}" }
-    val openedAtMs = remember { SystemClock.elapsedRealtime() }
-
-    fun log(event: String, message: String) {
-        if (BuildConfig.DEBUG) {
-            val elapsed = SystemClock.elapsedRealtime() - openedAtMs
-            android.util.Log.d(logTag, "[$sessionId][$elapsed ms][$event] $message")
+    // Helper function to calculate sorted albums based on order mode
+    fun calculateSortedAlbums(albums: List<Album>, mode: String): Pair<MutableList<Album>, Int> {
+        val all = albums.toMutableList()
+        val mainSize = if (mainAlbums.isNotEmpty()) mainAlbums.size else 4
+        
+        return when (mode) {
+            "Based on no. of images" -> {
+                // Sort by number of images in descending order
+                val sorted = all.sortedByDescending { it.itemCount }.toMutableList()
+                Pair(sorted, minOf(mainSize, sorted.size))
+            }
+            "Recently updated" -> {
+                // Sort by most recent media item date in descending order
+                val sorted = all.sortedByDescending { album ->
+                    album.topMediaItems.maxOfOrNull { it.dateAdded } ?: 0L
+                }.toMutableList()
+                Pair(sorted, minOf(mainSize, sorted.size))
+            }
+            else -> {
+                // Custom mode - keep as is
+                Pair(all, mainSize)
+            }
         }
     }
 
     val view = LocalView.current
+    val scope = rememberCoroutineScope()
     var albumsOrder by remember(initialAlbumsOrder) { mutableStateOf(initialAlbumsOrder) }
+    var previousAlbumsOrder by remember(initialAlbumsOrder) { mutableStateOf(initialAlbumsOrder) }
     var albumsOrderExpanded by remember { mutableStateOf(false) }
     var reorderHandleInUse by remember { mutableStateOf(false) }
-    var moveCount by remember { mutableStateOf(0) }
-    var crossMoveCount by remember { mutableStateOf(0) }
+    var isLoadingNewOrder by remember { mutableStateOf(false) }
+    var isRestoring by remember { mutableStateOf(false) }
+    var isDoneConfirming by remember { mutableStateOf(false) }
     var dragStartMs by remember { mutableStateOf<Long?>(null) }
-    var dragStopCount by remember { mutableStateOf(0) }
-    var lastMoveAtMs by remember { mutableStateOf<Long?>(null) }
-    var lastScrollLogAtMs by remember { mutableStateOf(0L) }
 
     // Unified list architecture for seamless drag across categories.
     var allAlbumsList by remember(mainAlbums, otherAlbums) {
@@ -1156,18 +1438,26 @@ fun ReorderBottomSheet(
     }
     var mainCount by remember(mainAlbums) { mutableStateOf(mainAlbums.size) }
 
-    val mainAlbumsList = remember(allAlbumsList, mainCount) {
-        allAlbumsList.take(mainCount)
-    }
-    val otherAlbumsList = remember(allAlbumsList, mainCount) {
-        allAlbumsList.drop(mainCount)
-    }
-
     val albumsOrderRotation by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (albumsOrderExpanded) 180f else 0f,
         animationSpec = androidx.compose.animation.core.tween(300)
     )
-    
+    val restoreInnerCorner by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (isRestoring) 28.dp else 4.dp,
+        animationSpec = androidx.compose.animation.core.tween(300),
+        label = "RestoreSplitInnerCorner"
+    )
+    val restoreRotation by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isRestoring) 360f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(700),
+        label = "RestoreSplitRotation"
+    )
+    val doneEndCorner by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (isDoneConfirming) 28.dp else 4.dp,
+        animationSpec = androidx.compose.animation.core.tween(300),
+        label = "DoneEndCorner"
+    )
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     // Single LazyListState for the entire bottom sheet
@@ -1177,22 +1467,12 @@ fun ReorderBottomSheet(
         onMove = { from, to ->
             if (albumsOrder != "Custom") return@rememberReorderableLazyListState
 
-            moveCount += 1
-            val now = SystemClock.elapsedRealtime()
-            val deltaFromLastMove = lastMoveAtMs?.let { now - it } ?: -1L
-            lastMoveAtMs = now
-
             val fromId = from.key as? String ?: return@rememberReorderableLazyListState
             val toId = to.key as? String ?: return@rememberReorderableLazyListState
 
             val fromIndex = allAlbumsList.indexOfFirst { it.id == fromId }
             val toIndex = allAlbumsList.indexOfFirst { it.id == toId }
             if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
-
-            log(
-                event = "MOVE",
-                message = "#${moveCount} from=$fromId(list=$fromIndex/raw=${from.index}) to=$toId(list=$toIndex/raw=${to.index}), deltaFromLastMove=${deltaFromLastMove}ms"
-            )
 
             val fromInMain = fromIndex < mainCount
             val toInMain = toIndex < mainCount
@@ -1204,314 +1484,345 @@ fun ReorderBottomSheet(
             when {
                 fromInMain && !toInMain -> {
                     mainCount = (mainCount - 1).coerceAtLeast(0)
-                    crossMoveCount += 1
-                    log(event = "MOVE_CROSS_MAIN_TO_OTHER", message = "mainCount=$mainCount crossMoves=$crossMoveCount")
                 }
                 !fromInMain && toInMain -> {
                     mainCount = (mainCount + 1).coerceAtMost(allAlbumsList.size)
-                    crossMoveCount += 1
-                    log(event = "MOVE_CROSS_OTHER_TO_MAIN", message = "mainCount=$mainCount crossMoves=$crossMoveCount")
-                }
-                fromInMain && toInMain -> {
-                    log(event = "MOVE_MAIN", message = "reordered in main")
-                }
-                else -> {
-                    log(event = "MOVE_OTHER", message = "reordered in other")
                 }
             }
         },
         lazyListState = listState
     )
-
-    LaunchedEffect(Unit) {
-        log(
-            event = "OPEN",
-            message = "main=${mainAlbumsList.size}, other=${otherAlbumsList.size}, mode=$albumsOrder"
-        )
-    }
+    val sheetGesturesEnabled = !reorderHandleInUse &&
+        !reorderableState.isAnyItemDragging &&
+        !isLoadingNewOrder &&
+        listState.firstVisibleItemIndex == 0 &&
+        listState.firstVisibleItemScrollOffset == 0
 
     LaunchedEffect(albumsOrder) {
-        log(
-            event = "MODE",
-            message = "albumsOrder changed to '$albumsOrder'"
-        )
-    }
-
-    LaunchedEffect(reorderHandleInUse, reorderableState.isAnyItemDragging) {
-        log(
-            event = "DRAG_STATE",
-            message = "handleInUse=$reorderHandleInUse, isAnyItemDragging=${reorderableState.isAnyItemDragging}"
-        )
-    }
-
-    LaunchedEffect(reorderableState.isAnyItemDragging) {
-        if (!reorderableState.isAnyItemDragging && reorderHandleInUse) {
-            reorderHandleInUse = false
-            log(event = "DRAG_RECOVERY", message = "Forced handleInUse=false after drag end")
+        // Skip first emission — sheet just opened, no loader needed
+        if (previousAlbumsOrder == albumsOrder) {
+            return@LaunchedEffect
         }
-    }
 
-    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastScrollLogAtMs >= 350L) {
-            lastScrollLogAtMs = now
-            log(
-                event = "SCROLL",
-                message = "index=${listState.firstVisibleItemIndex}, offset=${listState.firstVisibleItemScrollOffset}"
-            )
-        }
-    }
+        previousAlbumsOrder = albumsOrder
 
-    DisposableEffect(Unit) {
-        onDispose {
-            log(
-                event = "CLOSE",
-                message = "moves=$moveCount, crossMoves=$crossMoveCount, dragStops=$dragStopCount, finalMain=${mainAlbumsList.size}, finalOther=${otherAlbumsList.size}"
-            )
+        if (albumsOrder == "Custom") {
+            // Switching TO Custom — keep existing order as-is, no preview
+            return@LaunchedEffect
         }
+
+        // Switching FROM any mode TO Based on no. of images / Recently updated
+        isLoadingNewOrder = true
+        kotlinx.coroutines.delay(350)
+        val (sortedAlbums, newMainCount) = calculateSortedAlbums(allAlbumsList, albumsOrder)
+        allAlbumsList = sortedAlbums
+        mainCount = newMainCount
+        isLoadingNewOrder = false
     }
     
     ModalBottomSheet(
         onDismissRequest = {
-            log(
-                event = "DISMISS",
-                message = "onDismissRequest called (back/outside/swipe)"
-            )
             onDismiss()
         },
+        sheetGesturesEnabled = sheetGesturesEnabled,
         sheetState = sheetState
     ) {
-        log(
-            event = "COMPOSE",
-            message = "sheet content composed main=${mainAlbumsList.size}, other=${otherAlbumsList.size}, mode=$albumsOrder"
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
+        Box(
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Header
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
             ) {
-                Text(
-                    text = "Reorder your albums",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                userScrollEnabled = !(reorderHandleInUse || reorderableState.isAnyItemDragging),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                // Albums order setting with expandable options
-                item {
-                    Surface(
-                        onClick = {
-                            albumsOrderExpanded = !albumsOrderExpanded
-                            log(event = "ORDER_SECTION", message = "expanded=$albumsOrderExpanded")
-                        },
-                        shape = if (albumsOrderExpanded) 
-                            RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp) 
-                            else RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            FontIcon(
-                                unicode = FontIcons.SwapVert,
-                                contentDescription = null,
-                                size = 24.sp,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Albums order",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = albumsOrder,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            FontIcon(
-                                unicode = FontIcons.KeyboardArrowDown,
-                                contentDescription = null,
-                                size = 24.sp,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.graphicsLayer { rotationZ = albumsOrderRotation }
-                            )
-                        }
-                    }
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Reorder your albums",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
                 
-                // Expandable options (inspired by badge type)
-                item {
-                    Column {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = albumsOrderExpanded,
-                            enter = androidx.compose.animation.expandVertically(animationSpec = androidx.compose.animation.core.tween(300)) + androidx.compose.animation.fadeIn(),
-                            exit = androidx.compose.animation.shrinkVertically(animationSpec = androidx.compose.animation.core.tween(300)) + androidx.compose.animation.fadeOut()
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                AlbumOrderOption(
-                                    label = "Based on no. of images",
-                                    iconUnicode = FontIcons.Numbers,
-                                    isSelected = albumsOrder == "Based on no. of images",
-                                    onClick = {
-                                        albumsOrder = "Based on no. of images"
-                                        log(event = "ORDER_OPTION", message = "selected='Based on no. of images'")
-                                    },
-                                    position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP
-                                )
-                                AlbumOrderOption(
-                                    label = "Recently updated",
-                                    iconUnicode = FontIcons.History,
-                                    isSelected = albumsOrder == "Recently updated",
-                                    onClick = {
-                                        albumsOrder = "Recently updated"
-                                        log(event = "ORDER_OPTION", message = "selected='Recently updated'")
-                                    },
-                                    position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.MIDDLE
-                                )
-                                AlbumOrderOption(
-                                    label = "Custom",
-                                    iconUnicode = FontIcons.DragHandle,
-                                    isSelected = albumsOrder == "Custom",
-                                    onClick = {
-                                        albumsOrder = "Custom"
-                                        log(event = "ORDER_OPTION", message = "selected='Custom'")
-                                    },
-                                    position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                }
-                
-                if (allAlbumsList.isNotEmpty()) {
+                CompositionLocalProvider(LocalOverscrollFactory provides null) {
+                LazyColumn(
+                    state = listState,
+                    userScrollEnabled = !(reorderHandleInUse || reorderableState.isAnyItemDragging || isLoadingNewOrder),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    // Albums order setting with expandable options
                     item {
-                        Text(
-                            text = "Main albums",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-                        )
-                    }
-                }
-
-                items(allAlbumsList.size, key = { allAlbumsList[it].id }) { index ->
-                    val album = allAlbumsList[index]
-                    if (index == mainCount && mainCount in 1 until allAlbumsList.size) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            text = "Other albums",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-                        )
-                    }
-
-                    ReorderableItem(
-                        state = reorderableState,
-                        key = album.id,
-                        enabled = albumsOrder == "Custom"
-                    ) { isDragging ->
-                        DraggableAlbumItem(
-                            albumName = album.name,
-                            position = when {
-                                allAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
-                                index == 0 -> AlbumItemPosition.TOP
-                                index == allAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
-                                else -> AlbumItemPosition.MIDDLE
+                        Surface(
+                            onClick = {
+                                albumsOrderExpanded = !albumsOrderExpanded
                             },
-                            isDragging = isDragging,
-                            handleModifier = if (albumsOrder == "Custom") {
-                                Modifier.draggableHandle(
+                            shape = if (albumsOrderExpanded) 
+                                RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp) 
+                                else RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 20.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FontIcon(
+                                    unicode = FontIcons.SwapVert,
+                                    contentDescription = null,
+                                    size = 24.sp,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Albums order",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = albumsOrder,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                FontIcon(
+                                    unicode = FontIcons.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    size = 24.sp,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.graphicsLayer { rotationZ = albumsOrderRotation }
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Expandable options (inspired by badge type)
+                    item {
+                        Column {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = albumsOrderExpanded,
+                                enter = androidx.compose.animation.expandVertically(animationSpec = androidx.compose.animation.core.tween(300)) + androidx.compose.animation.fadeIn(),
+                                exit = androidx.compose.animation.shrinkVertically(animationSpec = androidx.compose.animation.core.tween(300)) + androidx.compose.animation.fadeOut()
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    AlbumOrderOption(
+                                        label = "Based on no. of images",
+                                        iconUnicode = FontIcons.Numbers,
+                                        isSelected = albumsOrder == "Based on no. of images",
+                                        onClick = {
+                                            albumsOrder = "Based on no. of images"
+                                            albumsOrderExpanded = false
+                                        },
+                                        position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP
+                                    )
+                                    AlbumOrderOption(
+                                        label = "Recently updated",
+                                        iconUnicode = FontIcons.History,
+                                        isSelected = albumsOrder == "Recently updated",
+                                        onClick = {
+                                            albumsOrder = "Recently updated"
+                                            albumsOrderExpanded = false
+                                        },
+                                        position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.MIDDLE
+                                    )
+                                    AlbumOrderOption(
+                                        label = "Custom",
+                                        iconUnicode = FontIcons.DragHandle,
+                                        isSelected = albumsOrder == "Custom",
+                                        onClick = {
+                                            albumsOrder = "Custom"
+                                            albumsOrderExpanded = false
+                                        },
+                                        position = com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    item {
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
+                    
+                    if (allAlbumsList.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "Main albums",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    items(allAlbumsList.size, key = { allAlbumsList[it].id }) { index ->
+                        val album = allAlbumsList[index]
+                        if (index == mainCount && mainCount in 1 until allAlbumsList.size) {
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(
+                                text = "Other albums",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = album.id,
+                            enabled = true
+                        ) { isDragging ->
+                            DraggableAlbumItem(
+                                albumName = album.name,
+                                position = when {
+                                    allAlbumsList.size == 1 -> AlbumItemPosition.SINGLE
+                                    index == 0 -> AlbumItemPosition.TOP
+                                    index == allAlbumsList.size - 1 -> AlbumItemPosition.BOTTOM
+                                    else -> AlbumItemPosition.MIDDLE
+                                },
+                                isDragging = isDragging,
+                                handleModifier = Modifier.draggableHandle(
                                     onDragStarted = {
+                                        if (albumsOrder != "Custom") {
+                                            albumsOrder = "Custom"
+                                            albumsOrderExpanded = false
+                                        }
                                         dragStartMs = SystemClock.elapsedRealtime()
                                         reorderHandleInUse = true
-                                        val section = if (index < mainCount) "main" else "other"
-                                        log(event = "DRAG_START", message = "section=$section album=${album.name} idx=$index")
                                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                     },
                                     onDragStopped = {
                                         reorderHandleInUse = false
-                                        dragStopCount += 1
-                                        val duration = dragStartMs?.let { SystemClock.elapsedRealtime() - it }
-                                        val section = if (index < mainCount) "main" else "other"
-                                        log(
-                                            event = "DRAG_STOP",
-                                            message = "section=$section album=${album.name} idx=$index duration=${duration ?: -1}ms stopCount=$dragStopCount"
-                                        )
+                                        dragStartMs = null
                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                     }
                                 )
-                            } else {
-                                Modifier
+                            )
+                        }
+                    }
+                }
+                } // end CompositionLocalProvider
+
+            }
+
+            SplitButtonLayout(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                spacing = 2.dp,
+                leadingButton = {
+                    FilledTonalButton(
+                        onClick = {
+                            if (isDoneConfirming) return@FilledTonalButton
+                            isDoneConfirming = true
+                            onSave(
+                                albumsOrder,
+                                allAlbumsList.take(mainCount).map { it.id },
+                                allAlbumsList.drop(mainCount).map { it.id }
+                            )
+                            scope.launch {
+                                kotlinx.coroutines.delay(1000)
+                                sheetState.hide()
+                                onDismiss()
                             }
+                        },
+                        modifier = Modifier.height(56.dp),
+                        shape = RoundedCornerShape(
+                            topStart = 28.dp,
+                            topEnd = doneEndCorner,
+                            bottomEnd = doneEndCorner,
+                            bottomStart = 28.dp
+                        ),
+                        contentPadding = PaddingValues(start = 24.dp, end = 24.dp)
+                    ) {
+                        if (isDoneConfirming) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Done")
+                    }
+                },
+                trailingButton = {
+                    FilledTonalIconButton(
+                        onClick = {
+                            if (isRestoring) return@FilledTonalIconButton
+                            isRestoring = true
+                            albumsOrderExpanded = false
+                            isLoadingNewOrder = true
+                            scope.launch {
+                                kotlinx.coroutines.delay(350)
+                                val restoredAlbums = (mainAlbums + otherAlbums).toMutableList()
+                                val (sortedAlbums, newMainCount) = calculateSortedAlbums(restoredAlbums, "Based on no. of images")
+                                allAlbumsList = sortedAlbums
+                                mainCount = newMainCount
+                                previousAlbumsOrder = "Based on no. of images"
+                                albumsOrder = "Based on no. of images"
+                                isLoadingNewOrder = false
+                                isRestoring = false
+                            }
+                        },
+                        modifier = Modifier.size(56.dp),
+                        shape = RoundedCornerShape(
+                            topStart = restoreInnerCorner,
+                            topEnd = 28.dp,
+                            bottomEnd = 28.dp,
+                            bottomStart = restoreInnerCorner
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Restore,
+                            contentDescription = "Restore",
+                            modifier = Modifier
+                                .size(26.dp)
+                                .graphicsLayer { rotationZ = restoreRotation }
                         )
                     }
                 }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        log(event = "RESTORE", message = "Restore pressed")
-                        allAlbumsList = (mainAlbums + otherAlbums).toMutableList()
-                        mainCount = mainAlbums.size
-                        albumsOrder = "Based on no. of images"
-                    },
-                    modifier = Modifier.weight(1f)
+            )
+            
+            // Loading overlay when switching album orders
+            if (isLoadingNewOrder) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Restore")
-                }
-                Button(
-                    onClick = {
-                        log(
-                            event = "DONE",
-                            message = "Done pressed mode=$albumsOrder mainCount=$mainCount total=${allAlbumsList.size}"
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        ExpressiveLoadingIndicator(size = 56.dp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Sorting albums...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                        onSave(
-                            albumsOrder,
-                            allAlbumsList.take(mainCount).map { it.id },
-                            allAlbumsList.drop(mainCount).map { it.id }
-                        )
-                        onDismiss()
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Done")
+                    }
                 }
             }
         }
