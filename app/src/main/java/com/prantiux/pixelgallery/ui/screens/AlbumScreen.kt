@@ -58,7 +58,10 @@ import com.prantiux.pixelgallery.ui.dialogs.MoveToAlbumDialog
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -71,9 +74,8 @@ fun AlbumDetailScreen(
     onNavigateToViewer: (Int) -> Unit,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
-    // ROOM-FIRST: Use Room flows for unfiltered media
-    val images by viewModel.imagesFlow.collectAsState()
-    val videos by viewModel.videosFlow.collectAsState()
+    // ROOM-FIRST: Use unfiltered media flow for smart albums (independent of Photos View filters)
+    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
     // ROOM-FIRST: Album media from pure DAO query (no in-memory filtering)
     val albumMediaFromFlow by viewModel.albumMediaFlow(albumId).collectAsState(initial = emptyList())
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
@@ -110,11 +112,13 @@ fun AlbumDetailScreen(
     val isSmartAlbum = SmartAlbumGenerator.isSmartAlbum(albumId)
     
     // Load smart album media if needed
-    LaunchedEffect(albumId, images, videos) {
+    LaunchedEffect(albumId, allMediaUnfiltered) {
         if (isSmartAlbum) {
             coroutineScope.launch {
-                val allMedia = images + videos
-                val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMedia)
+                val smartMedia = withContext(Dispatchers.Default) {
+                    SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
+                        .sortedByDescending { it.dateAdded }
+                }
                 smartAlbumMedia = smartMedia
             }
         }
@@ -124,11 +128,10 @@ fun AlbumDetailScreen(
     val albumMedia = remember(albumMediaFromFlow, albumId, smartAlbumMedia) {
         if (isSmartAlbum) {
             // Use smart album results
-            smartAlbumMedia?.sortedByDescending { it.dateAdded } ?: emptyList()
+            smartAlbumMedia ?: emptyList()
         } else {
-            // Regular album - use Room DAO query (no in-memory filtering!)
+            // Regular album is already sorted in ViewModel flow.
             albumMediaFromFlow
-                .sortedByDescending { it.dateAdded }
         }
     }
     
@@ -139,10 +142,12 @@ fun AlbumDetailScreen(
     }
     
     // Group by date or month based on grid type
-    val groupedMedia: List<MediaGroup> = remember(albumMedia, gridType) {
-        when (gridType) {
-            com.prantiux.pixelgallery.viewmodel.GridType.DAY -> groupMediaByDate(albumMedia)
-            com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> groupMediaByMonth(albumMedia)
+    val groupedMedia by produceState(initialValue = emptyList<MediaGroup>(), albumMedia, gridType) {
+        value = withContext(Dispatchers.Default) {
+            when (gridType) {
+                com.prantiux.pixelgallery.viewmodel.GridType.DAY -> groupMediaByDate(albumMedia)
+                com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> groupMediaByMonth(albumMedia)
+            }
         }
     }
     
@@ -574,8 +579,7 @@ fun AlbumDetailScreen(
                                     viewModel.hideFromSmartAlbum(context, albumId, selectedItems.toList())
                                     viewModel.exitSelectionMode()
                                     // Reload smart album media
-                                    val allMedia = images + videos
-                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMedia)
+                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
                                     smartAlbumMedia = smartMedia
                                     android.widget.Toast.makeText(
                                         context,
