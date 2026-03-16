@@ -36,7 +36,6 @@ import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.search.SearchResultFilter
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
-import com.prantiux.pixelgallery.startup.FrameDebug
 import com.prantiux.pixelgallery.ui.theme.extractSeedColor
 import com.prantiux.pixelgallery.ui.theme.selectThemeAwareSwatch
 import com.prantiux.pixelgallery.ui.theme.adjustColorForSmartAlbum
@@ -318,9 +317,6 @@ class MediaViewModel : ViewModel() {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    // Avoid logging the same search query repeatedly
-    private var lastSearchLogQuery: String? = null
-
     private var searchDebounceJob: Job? = null
     
     // Recent searches from DataStore
@@ -402,15 +398,15 @@ class MediaViewModel : ViewModel() {
                     .combine(_selectedAlbums) { mediaItems, selectedAlbums ->
                         withContext(Dispatchers.Default) {
                             if (BuildConfig.DEBUG) {
-                                Log.d("PHOTOS_FILTER", "mediaFlow: Media count before filter: ${mediaItems.size}")
-                                Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums.size} album(s)")
+                                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: Media count before filter: ${mediaItems.size}")
+                                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums.size} album(s)")
                             }
 
                             logPerfIfLarge("mediaFlow.albumFilter", mediaItems.size)
 
                             val filtered = if (selectedAlbums.isEmpty()) {
                                 if (BuildConfig.DEBUG) {
-                                    Log.d("PHOTOS_FILTER", "mediaFlow: No albums selected → returning empty list")
+                                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: No albums selected → returning empty list")
                                 }
                                 emptyList()
                             } else {
@@ -418,7 +414,7 @@ class MediaViewModel : ViewModel() {
                             }
 
                             if (BuildConfig.DEBUG) {
-                                Log.d("PHOTOS_FILTER", "mediaFlow: Media count after filter: ${filtered.size}")
+                                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: Media count after filter: ${filtered.size}")
                             }
 
                             filtered.toList()
@@ -624,18 +620,6 @@ class MediaViewModel : ViewModel() {
         }
         
         val normalizedQuery = query.lowercase(java.util.Locale.getDefault()).trim()
-        val shouldLog = if (normalizedQuery != lastSearchLogQuery) {
-            lastSearchLogQuery = normalizedQuery
-            true
-        } else {
-            false
-        }
-        
-        if (shouldLog) {
-            android.util.Log.d("SEARCH_ROOM", "═══════════════════════════════════════════════════════════")
-            android.util.Log.d("SEARCH_ROOM", "🔍 searchMediaFlow() called with query='$query'")
-            android.util.Log.d("SEARCH_ROOM", "  Normalized: '$normalizedQuery'")
-        }
         
         // DETECT FILTERS using SearchEngine's logic
         val dateFilter = detectSearchDateFilter(normalizedQuery)
@@ -643,19 +627,10 @@ class MediaViewModel : ViewModel() {
         val sizeFilter = detectSearchSizeFilter(normalizedQuery)
         val cleanQuery = removeKeywords(normalizedQuery)
         
-        if (shouldLog) {
-            android.util.Log.d("SEARCH_ROOM", "  Detected filters:")
-            android.util.Log.d("SEARCH_ROOM", "    - Date: ${dateFilter?.toString() ?: "none"}")
-            android.util.Log.d("SEARCH_ROOM", "    - Type: ${typeFilter?.toString() ?: "none"}")
-            android.util.Log.d("SEARCH_ROOM", "    - Size: ${sizeFilter?.toString() ?: "none"}")
-            android.util.Log.d("SEARCH_ROOM", "    - Clean query: '$cleanQuery'")
-        }
-        
         // SELECT APPROPRIATE DAO QUERY based on detected filters
         val daoQuery: kotlinx.coroutines.flow.Flow<List<MediaEntity>> = when {
             // SCREENSHOT (special case)
             normalizedQuery.contains("screenshot") || normalizedQuery.contains("screenshots") -> {
-                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using screenshot search")
                 if (cleanQuery.isBlank()) {
                     database.mediaDao().searchScreenshotsOnly()
                 } else {
@@ -665,7 +640,6 @@ class MediaViewModel : ViewModel() {
             
             // CAMERA (special case)
             normalizedQuery.contains("camera") || normalizedQuery.contains("dcim") -> {
-                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using camera search")
                 if (cleanQuery.isBlank()) {
                     database.mediaDao().searchByCameraOnly()
                 } else {
@@ -675,7 +649,6 @@ class MediaViewModel : ViewModel() {
             
             // GIF (special case)
             normalizedQuery.contains("gif") -> {
-                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using GIF search")
                 if (cleanQuery.isBlank()) {
                     database.mediaDao().searchByGifOnly()
                 } else {
@@ -685,18 +658,14 @@ class MediaViewModel : ViewModel() {
             
             // ML LABEL SEARCH (if query looks like a label-only search)
             cleanQuery.isNotEmpty() && typeFilter == null && dateFilter == null && sizeFilter == null -> {
-                if (shouldLog) android.util.Log.d("SEARCH_ROOM", "  → Using searchByLabel() for potential ML search")
                 database.mediaDao().searchByLabel(cleanQuery)
             }
             
             // ALL THREE FILTERS (Type + Size + Date)
             typeFilter != null && sizeFilter != null && dateFilter != null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByTypeAndSizeAndDate() combo")
                 val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
                 val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
                 val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
-                
-                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName, Size: $sizeName, Date: $dateName")
                 database.mediaDao().searchByTypeAndSizeAndDate(
                     query = cleanQuery,
                     isVideo = isVideo,
@@ -709,11 +678,8 @@ class MediaViewModel : ViewModel() {
             
             // TYPE + DATE
             typeFilter != null && dateFilter != null && sizeFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByTypeAndDate() combo")
                 val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
                 val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
-                
-                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName, Date: $dateName")
                 database.mediaDao().searchByTypeAndDate(
                     query = cleanQuery,
                     isVideo = isVideo,
@@ -724,11 +690,8 @@ class MediaViewModel : ViewModel() {
             
             // TYPE + SIZE
             typeFilter != null && sizeFilter != null && dateFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByTypeAndSize() combo")
                 val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
                 val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
-                
-                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName, Size: $sizeName")
                 database.mediaDao().searchByTypeAndSize(
                     query = cleanQuery,
                     isVideo = isVideo,
@@ -739,11 +702,8 @@ class MediaViewModel : ViewModel() {
             
             // SIZE + DATE
             sizeFilter != null && dateFilter != null && typeFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchBySizeAndDate() combo")
                 val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
                 val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
-                
-                android.util.Log.d("SEARCH_ROOM", "    Size: $sizeName, Date: $dateName")
                 database.mediaDao().searchBySizeAndDate(
                     query = cleanQuery,
                     minSize = minSize,
@@ -755,31 +715,24 @@ class MediaViewModel : ViewModel() {
             
             // ONLY TYPE
             typeFilter != null && dateFilter == null && sizeFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByMediaType()")
                 val (isVideo, typeName) = parseMediaTypeFilter(typeFilter)
-                android.util.Log.d("SEARCH_ROOM", "    Type: $typeName")
                 database.mediaDao().searchByMediaType(query = cleanQuery, isVideo = isVideo)
             }
             
             // ONLY SIZE
             sizeFilter != null && typeFilter == null && dateFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchBySize()")
                 val (minSize, maxSize, sizeName) = parseSizeFilter(sizeFilter)
-                android.util.Log.d("SEARCH_ROOM", "    Size: $sizeName")
                 database.mediaDao().searchBySize(query = cleanQuery, minSize = minSize, maxSize = maxSize)
             }
             
             // ONLY DATE
             dateFilter != null && typeFilter == null && sizeFilter == null -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using searchByDateRange()")
                 val (startMs, endMs, dateName) = parseDateFilter(dateFilter)
-                android.util.Log.d("SEARCH_ROOM", "    Date: $dateName")
                 database.mediaDao().searchByDateRange(query = cleanQuery, startMs = startMs, endMs = endMs)
             }
             
             // DEFAULT: Just name search
             else -> {
-                android.util.Log.d("SEARCH_ROOM", "  → Using basic searchMedia()")
                 database.mediaDao().searchMedia(cleanQuery)
             }
         }
@@ -789,14 +742,10 @@ class MediaViewModel : ViewModel() {
             daoQuery,
             database.favoriteDao().getAllFavoriteIdsFlow()
         ) { entities, favIds ->
-            val resultTime = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS"))
-            android.util.Log.d("SEARCH_ROOM", "  [$resultTime] Room query returned ${entities.size} items")
-
             val mapped = withContext(Dispatchers.Default) {
                 logPerfIfLarge("searchMediaFlow.toMediaItems", entities.size)
                 entities.toMediaItems(favIds.toSet())
             }
-            android.util.Log.d("SEARCH_ROOM", "  ✓ Mapped to MediaItems: ${mapped.size} items with isFavorite set")
             
             mapped
         }
@@ -1062,30 +1011,15 @@ class MediaViewModel : ViewModel() {
             } else {
                 database.mediaDao().getAllMedia()
                     .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { allMedia, favIds ->
-                        val flowEmitTime = try {
-                            java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS"))
-                        } catch (e: Exception) {
-                            "??:??:??.???"
-                        }
-                        
-                        // LOG SOURCE DETAILS
-                        android.util.Log.d("FAVORITES_FLOW", "[$flowEmitTime] combine emitted:")
-                        android.util.Log.d("FAVORITES_FLOW", "  - All media: ${allMedia.size} items")
-                        android.util.Log.d("FAVORITES_FLOW", "  - Favorite IDs: ${favIds.size} IDs = [${favIds.take(5).joinToString(",")}${if(favIds.size > 5) "..." else ""}]")
-                        
                         // FILTER + MAP on background thread for large lists
                         val mapped = withContext(Dispatchers.Default) {
                             logPerfIfLarge("favoritesFlow.filterMap", allMedia.size)
                             val favIdSet = favIds.toSet()
                             val filtered = allMedia.filter { it.id in favIdSet }
 
-                            android.util.Log.d("FAVORITES_FLOW", "  - Filtered result: ${filtered.size} items")
-
                             // MAP: MediaEntity → MediaItem (set isFavorite=true for all filtered items)
                             filtered.toMediaItems(favIdSet).toList()
                         }
-                        
-                        android.util.Log.d("FAVORITES_FLOW", "  - Mapped result: ${mapped.size} items (all with isFavorite=true)")
                         
                         mapped
                     }
@@ -1116,14 +1050,14 @@ class MediaViewModel : ViewModel() {
             } else {
                 _selectedAlbums.flatMapLatest { selectedBucketIds ->
                     if (BuildConfig.DEBUG) {
-                        Log.d("PHOTOS_FILTER", "imagesFlow: Selected albums: ${selectedBucketIds.size} album(s)")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: Selected albums: ${selectedBucketIds.size} album(s)")
                     }
                     
                     val bucketList = selectedBucketIds.toList()
                     val imageDao = if (bucketList.isEmpty()) {
                         // No albums selected - show no images
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "imagesFlow: No albums selected → returning empty list")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: No albums selected → returning empty list")
                         }
                         flowOf(emptyList())
                     } else {
@@ -1133,7 +1067,7 @@ class MediaViewModel : ViewModel() {
                     
                     imageDao.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "imagesFlow: Media count before filter: ${entities.size}")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: Media count before filter: ${entities.size}")
                         }
                         val items = withContext(Dispatchers.Default) {
                             traceGalleryPerf("imagesFlow.filter") {
@@ -1142,7 +1076,7 @@ class MediaViewModel : ViewModel() {
                             }
                         }
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "imagesFlow: Media count after filter: ${items.size}")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: Media count after filter: ${items.size}")
                         }
                         items.toList()
                     }
@@ -1171,14 +1105,14 @@ class MediaViewModel : ViewModel() {
             } else {
                 _selectedAlbums.flatMapLatest { selectedBucketIds ->
                     if (BuildConfig.DEBUG) {
-                        Log.d("PHOTOS_FILTER", "videosFlow: Selected albums: ${selectedBucketIds.size} album(s)")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: Selected albums: ${selectedBucketIds.size} album(s)")
                     }
                     
                     val bucketList = selectedBucketIds.toList()
                     val videoDao = if (bucketList.isEmpty()) {
                         // No albums selected - show no videos
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "videosFlow: No albums selected → returning empty list")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: No albums selected → returning empty list")
                         }
                         flowOf(emptyList())
                     } else {
@@ -1188,7 +1122,7 @@ class MediaViewModel : ViewModel() {
                     
                     videoDao.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "videosFlow: Media count before filter: ${entities.size}")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: Media count before filter: ${entities.size}")
                         }
                         val items = withContext(Dispatchers.Default) {
                             traceGalleryPerf("videosFlow.filter") {
@@ -1197,7 +1131,7 @@ class MediaViewModel : ViewModel() {
                             }
                         }
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "videosFlow: Media count after filter: ${items.size}")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: Media count after filter: ${items.size}")
                         }
                         items.toList()
                     }
@@ -1276,12 +1210,12 @@ class MediaViewModel : ViewModel() {
 
     private fun logPerfIfLarge(stage: String, size: Int) {
         if (size >= PERF_LOG_THRESHOLD) {
-            Log.d(GALLERY_PERF_TAG, "$stage size=$size")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "$stage size=$size")
         }
     }
 
     private fun <T> traceGalleryPerf(section: String, block: () -> T): T {
-        return FrameDebug.trace(section, GALLERY_PERF_TAG, block)
+        return block()
     }
 
     private fun buildIncrementalBatchSizes(totalSize: Int): List<Int> {
@@ -1324,13 +1258,13 @@ class MediaViewModel : ViewModel() {
             }
 
             if (size > FINAL_STAGE_SPLIT_START) {
-                Log.d(GALLERY_PERF_TAG, "Final dataset step emitted size=$size")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Final dataset step emitted size=$size")
             }
 
             when {
-                index == 0 -> Log.d(GALLERY_PERF_TAG, "Initial media batch emitted size=$size")
-                size == snapshot.size -> Log.d(GALLERY_PERF_TAG, "Final media dataset emitted size=$size")
-                else -> Log.d(GALLERY_PERF_TAG, "Progressive media batch emitted size=$size")
+                index == 0 -> if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Initial media batch emitted size=$size")
+                size == snapshot.size -> if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Final media dataset emitted size=$size")
+                else -> if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Progressive media batch emitted size=$size")
             }
 
             emit(batch)
@@ -1398,7 +1332,7 @@ class MediaViewModel : ViewModel() {
                         // First run: No albums in DataStore
                         // Detect all distinct bucketIds from Room and set as defaults
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "First run detected: No albums in DataStore")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "First run detected: No albums in DataStore")
                         }
                         
                         withContext(Dispatchers.IO) {
@@ -1411,7 +1345,7 @@ class MediaViewModel : ViewModel() {
                                 
                                 if (distinctBucketIds.isNotEmpty()) {
                                     if (BuildConfig.DEBUG) {
-                                        Log.d("PHOTOS_FILTER", "Applying default selection: ${distinctBucketIds.size} albums")
+                                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "Applying default selection: ${distinctBucketIds.size} albums")
                                     }
                                     // Save to DataStore
                                     settingsDataStore.saveSelectedAlbums(distinctBucketIds)
@@ -1419,7 +1353,7 @@ class MediaViewModel : ViewModel() {
                                     _selectedAlbums.value = distinctBucketIds
                                 } else {
                                     if (BuildConfig.DEBUG) {
-                                        Log.d("PHOTOS_FILTER", "No albums found in Room database")
+                                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "No albums found in Room database")
                                     }
                                 }
                             } catch (e: Exception) {
@@ -1429,7 +1363,7 @@ class MediaViewModel : ViewModel() {
                     } else {
                         // Not first run: User has previously selected albums
                         if (BuildConfig.DEBUG) {
-                            Log.d("PHOTOS_FILTER", "Selected albums changed: ${albums.size} album(s)")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "Selected albums changed: ${albums.size} album(s)")
                         }
                         _selectedAlbums.value = albums
                     }
@@ -1456,20 +1390,20 @@ class MediaViewModel : ViewModel() {
         // Background sync on startup (no loader, keep UI responsive)
         viewModelScope.launch {
             val storedInitialSyncCompleted = settingsDataStore.initialSyncCompletedFlow.first()
-            Log.d(
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                 "INIT_SETUP",
                 "[INIT] storedInitialSyncCompleted=$storedInitialSyncCompleted after reading from DataStore"
             )
             val hasLocalMedia = withContext(Dispatchers.IO) {
                 database.mediaDao().getAllIds().isNotEmpty()
             }
-            Log.d(
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                 "INIT_SETUP",
                 "[INIT] hasLocalMedia=$hasLocalMedia (${if (hasLocalMedia) "PASS" else "FAIL"} - DB empty)"
             )
             val effectiveInitialSyncCompleted = storedInitialSyncCompleted && hasLocalMedia
             initialSyncCompletedCached = effectiveInitialSyncCompleted
-            Log.d(
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                 "INIT_SETUP",
                 "[INIT] effectiveInitialSyncCompleted=$effectiveInitialSyncCompleted (will ${if (!effectiveInitialSyncCompleted) "SHOW" else "SKIP"} loader)"
             )
@@ -1477,12 +1411,12 @@ class MediaViewModel : ViewModel() {
                 if (storedInitialSyncCompleted) {
                     settingsDataStore.setInitialSyncCompleted(false)
                     initialSyncCompletedCached = false
-                    Log.d("INIT_SETUP", "[INIT] Reset initial sync completed flag to false (empty DB detected)")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[INIT] Reset initial sync completed flag to false (empty DB detected)")
                 }
                 _initialSetupInProgress.value = true
-                Log.d("INIT_SETUP", "[INIT] Initial setup in progress = true → LOADER WILL SHOW")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[INIT] Initial setup in progress = true → LOADER WILL SHOW")
             } else {
-                Log.d("INIT_SETUP", "[INIT] Initial setup in progress = false → LOADER WILL NOT SHOW")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[INIT] Initial setup in progress = false → LOADER WILL NOT SHOW")
             }
             refresh(context, showLoader = false)
         }
@@ -1491,7 +1425,7 @@ class MediaViewModel : ViewModel() {
     fun setMediaPermissionsGranted(granted: Boolean) {
         if (_mediaPermissionsGranted.value != granted) {
             _mediaPermissionsGranted.value = granted
-            Log.d("INIT_SETUP", "Media permissions granted = $granted")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "Media permissions granted = $granted")
         }
     }
 
@@ -1500,7 +1434,7 @@ class MediaViewModel : ViewModel() {
     }
 
     fun refresh(context: Context, showLoader: Boolean = false) {
-        Log.d("SYNC_ENGINE", "refresh() START: Checking repository initialization")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "refresh() START: Checking repository initialization")
         if (!::repository.isInitialized) {
             initialize(context)
         }
@@ -1511,7 +1445,7 @@ class MediaViewModel : ViewModel() {
                 if (isSyncing) {
                     pendingRefresh = true
                     if (BuildConfig.DEBUG) {
-                        android.util.Log.d("SYNC_ENGINE", "Sync skipped (already syncing)")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "Sync skipped (already syncing)")
                     }
                     return@launch
                 }
@@ -1522,7 +1456,7 @@ class MediaViewModel : ViewModel() {
                 ?: settingsDataStore.initialSyncCompletedFlow.first().also {
                     initialSyncCompletedCached = it
                 }
-            Log.d(
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                 "SYNC_ENGINE",
                 "[REFRESH-START] initialSyncCompleted=$initialSyncCompleted, permissionsGranted=${_mediaPermissionsGranted.value}"
             )
@@ -1536,9 +1470,9 @@ class MediaViewModel : ViewModel() {
             
             val loadStart = SystemClock.elapsedRealtime()
             if (BuildConfig.DEBUG) {
-                android.util.Log.d("SYNC_ENGINE", "MediaStore sync START")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore sync START")
             }
-            Log.d("SYNC_ENGINE", "refresh(): Starting MediaStore → Room sync")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "refresh(): Starting MediaStore → Room sync")
             
             try {
                 // ═════════════════════════════════════════════════════════════
@@ -1584,7 +1518,7 @@ class MediaViewModel : ViewModel() {
                         firstBatchWritten = true
                         if (_initialSetupInProgress.value) {
                             _initialSetupInProgress.value = false
-                            Log.d("INIT_SETUP", "[ROOM-WRITE-FIRST-BATCH] Initial setup in progress = false → LOADER STOPPED")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[ROOM-WRITE-FIRST-BATCH] Initial setup in progress = false → LOADER STOPPED")
                         }
                     }
                 }
@@ -1594,7 +1528,7 @@ class MediaViewModel : ViewModel() {
                         val existingIds = database.mediaDao().getAllIds()
                         val missingIds = existingIds.filterNot { it in streamedIds }
                         if (missingIds.isNotEmpty()) {
-                            Log.d("SYNC_ENGINE", "Deleting ${missingIds.size} stale items from Room")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "Deleting ${missingIds.size} stale items from Room")
                             database.mediaDao().deleteByIds(missingIds)
                         }
 
@@ -1606,23 +1540,23 @@ class MediaViewModel : ViewModel() {
 
                 if (BuildConfig.DEBUG) {
                     val queryDuration = SystemClock.elapsedRealtime() - loadStart
-                    android.util.Log.d("SYNC_ENGINE", "MediaStore streaming query completed: ${queryDuration}ms (${streamedItemCount} items)")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore streaming query completed: ${queryDuration}ms (${streamedItemCount} items)")
                 }
 
                 if (roomWriteCompleted) {
                     val permissionsGranted = _mediaPermissionsGranted.value
-                    Log.d(
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                         "SYNC_ENGINE",
                         "[ROOM-WRITE-COMPLETE] items=$streamedItemCount, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
                     )
                     if (!initialSyncCompleted && permissionsGranted) {
                         settingsDataStore.setInitialSyncCompleted(true)
                         initialSyncCompletedCached = true
-                        Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial sync completed flag set to true")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial sync completed flag set to true")
                     }
                     if (_initialSetupInProgress.value) {
                         _initialSetupInProgress.value = false
-                        Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial setup in progress = false → LOADER STOPPED")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial setup in progress = false → LOADER STOPPED")
                     }
                 }
                 
@@ -1633,7 +1567,7 @@ class MediaViewModel : ViewModel() {
                 // - No manual StateFlow updates needed!
                 
                 if (BuildConfig.DEBUG) {
-                    android.util.Log.d("SYNC_ENGINE", "Sync complete. Room flows will update UI automatically.")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "Sync complete. Room flows will update UI automatically.")
                 }
                 
                 // Schedule deferred ML labeling if needed
@@ -1650,12 +1584,12 @@ class MediaViewModel : ViewModel() {
                 }
                 if (!_mediaPermissionsGranted.value && (initialSyncCompletedCached == false)) {
                     _initialSetupInProgress.value = true
-                    Log.d(
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                         "INIT_SETUP",
                         "[REFRESH-END] Permissions not granted, keeping setup in progress true"
                     )
                 }
-                Log.d(
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                     "SYNC_ENGINE",
                     "[REFRESH-END] isSyncing=false, isLoading=${_isLoading.value}, initialSetupInProgress=${_initialSetupInProgress.value}"
                 )
@@ -1883,7 +1817,7 @@ class MediaViewModel : ViewModel() {
                 }
             }
             
-            android.util.Log.d("MediaViewModel", "Hidden ${items.size} items from smart album: ${albumType.displayName}")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Hidden ${items.size} items from smart album: ${albumType.displayName}")
         } catch (e: Exception) {
             android.util.Log.e("MediaViewModel", "Error hiding items from smart album", e)
         }
@@ -2029,7 +1963,7 @@ class MediaViewModel : ViewModel() {
             val itemCount = pendingRestoreUris.size
             val success = repository.performRestore(context, pendingRestoreUris)
             if (success) {
-                android.util.Log.d("MediaViewModel", "Successfully restored $itemCount items")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Successfully restored $itemCount items")
                 
                 val itemType = if (itemCount == 1) "item" else "items"
                 _restoreSuccessMessage.value = "$itemCount $itemType restored"
@@ -2058,7 +1992,7 @@ class MediaViewModel : ViewModel() {
             val itemCount = pendingDeleteUris.size
             val success = repository.performPermanentDelete(context, pendingDeleteUris)
             if (success) {
-                android.util.Log.d("MediaViewModel", "Successfully deleted $itemCount items")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Successfully deleted $itemCount items")
                 
                 val itemType = if (itemCount == 1) "item" else "items"
                 _deleteSuccessMessage.value = "$itemCount $itemType permanently deleted"
@@ -2145,39 +2079,15 @@ class MediaViewModel : ViewModel() {
     
     // Favorites functions - ROOM-FIRST: Only write to database, let Flow streams re-emit
     fun toggleFavorite(mediaId: Long, newState: Boolean) {
-        val toggleStart = System.currentTimeMillis()
-        val toggleTime = try { 
-            java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")) 
-        } catch (e: Exception) { 
-            "??:??:??.???" 
-        }
-        
-        android.util.Log.d("FAVORITES_TOGGLE", "[$toggleTime] toggleFavorite called: mediaId=$mediaId, newState=$newState")
-        
         viewModelScope.launch {
             try {
                 if (newState) {
-                    // ADD TO FAVORITES
-                    android.util.Log.d("FAVORITES_TOGGLE", "  → Inserting into favorites table...")
                     database.favoriteDao().addFavorite(FavoriteEntity(mediaId))
-                    val addDuration = System.currentTimeMillis() - toggleStart
-                    
-                    android.util.Log.d("FAVORITES_TOGGLE", "✓ Added favorite id=$mediaId to DB in ${addDuration}ms")
-                    android.util.Log.d("FAVORITES_TOGGLE", "  → Room will emit new favorite IDs from getAllFavoriteIdsFlow()")
-                    android.util.Log.d("FAVORITES_TOGGLE", "  → favoritesFlow will recompute and re-emit")
                 } else {
-                    // REMOVE FROM FAVORITES
-                    android.util.Log.d("FAVORITES_TOGGLE", "  → Deleting from favorites table...")
                     database.favoriteDao().removeFavorite(mediaId)
-                    val removeDuration = System.currentTimeMillis() - toggleStart
-                    
-                    android.util.Log.d("FAVORITES_TOGGLE", "✓ Removed favorite id=$mediaId from DB in ${removeDuration}ms")
-                    android.util.Log.d("FAVORITES_TOGGLE", "  → Room will emit new favorite IDs from getAllFavoriteIdsFlow()")
-                    android.util.Log.d("FAVORITES_TOGGLE", "  → favoritesFlow will recompute and re-emit")
                 }
             } catch (e: Exception) {
-                val errorDuration = System.currentTimeMillis() - toggleStart
-                android.util.Log.e("FAVORITES_TOGGLE", "✗ DATABASE ERROR after ${errorDuration}ms: ${e.message}", e)
+                android.util.Log.e("FAVORITES_TOGGLE", "DATABASE ERROR: ${e.message}", e)
                 e.printStackTrace()
             }
         }
@@ -2247,10 +2157,10 @@ class MediaViewModel : ViewModel() {
         return if (::repository.isInitialized) {
             val items = _itemsToCopy.value
             if (items.isNotEmpty()) {
-                android.util.Log.d("MediaViewModel", "Copying ${items.size} items to ${targetAlbum.name}")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Copying ${items.size} items to ${targetAlbum.name}")
                 val success = repository.copyMediaToAlbum(items, targetAlbum)
                 
-                android.util.Log.d("MediaViewModel", "Copy operation result: $success")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Copy operation result: $success")
                 
                 if (success) {
                     // Show success message
@@ -2269,12 +2179,12 @@ class MediaViewModel : ViewModel() {
                     
                     // Force refresh with delay for MediaStore indexing
                     viewModelScope.launch {
-                        android.util.Log.d("MediaViewModel", "Waiting 800ms before refresh...")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Waiting 800ms before refresh...")
                         kotlinx.coroutines.delay(800)
-                        android.util.Log.d("MediaViewModel", "Refreshing after copy...")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refreshing after copy...")
                         // Refresh media lists to show new items
                         refresh(context)
-                        android.util.Log.d("MediaViewModel", "Refresh complete")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refresh complete")
                     }
                     
                     // Auto-dismiss success message after 2 seconds
@@ -2313,13 +2223,13 @@ class MediaViewModel : ViewModel() {
         return if (::repository.isInitialized) {
             val items = _itemsToMove.value
             if (items.isNotEmpty()) {
-                android.util.Log.d("MediaViewModel", "Moving ${items.size} items to ${targetAlbum.name}")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Moving ${items.size} items to ${targetAlbum.name}")
                 val result = repository.moveMediaToAlbum(items, targetAlbum)
                 
-                android.util.Log.d("MediaViewModel", "Move operation result: ${result.success}, message: ${result.message}")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Move operation result: ${result.success}, message: ${result.message}")
                 
                 if (result.success) {
-                    android.util.Log.d("MediaViewModel", "Move completed successfully")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Move completed successfully")
                     
                     // Show success message
                     val itemType = if (items.size == 1) {
@@ -2337,11 +2247,11 @@ class MediaViewModel : ViewModel() {
                     
                     // Force immediate refresh with longer delay for MediaStore to fully update
                     viewModelScope.launch {
-                        android.util.Log.d("MediaViewModel", "Waiting 600ms before refresh...")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Waiting 600ms before refresh...")
                         kotlinx.coroutines.delay(600)
-                        android.util.Log.d("MediaViewModel", "Refreshing after move...")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refreshing after move...")
                         refresh(context)
-                        android.util.Log.d("MediaViewModel", "Refresh complete")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refresh complete")
                     }
                     
                     // Auto-dismiss success message after 2 seconds
@@ -2471,10 +2381,10 @@ class MediaViewModel : ViewModel() {
                 // Room flows auto-emit → UI updates automatically
                 val now = SystemClock.elapsedRealtime()
                 if (now < suppressObserverUntilMs) {
-                    android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, sync suppressed")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, sync suppressed")
                     return@MediaContentObserver
                 }
-                android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, triggering sync")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, triggering sync")
                 refresh(context, showLoader = false)
                 // Schedule deferred ML labeling after refresh completes
                 scheduleDeferredLabelingIfNeeded(context)
@@ -2499,10 +2409,10 @@ class MediaViewModel : ViewModel() {
                 val unlabeledCount = mediaFlow.value.count { it.id !in processedIds }
                 
                 if (unlabeledCount > 0) {
-                    android.util.Log.d("MediaViewModel", "ML: Deferred labeling scheduled ($unlabeledCount unlabeled)")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "ML: Deferred labeling scheduled ($unlabeledCount unlabeled)")
                     com.prantiux.pixelgallery.ml.ImageLabelScheduler.scheduleDeferredLabeling(context)
                 } else {
-                    android.util.Log.d("MediaViewModel", "ML: No labeling needed (all media labeled)")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "ML: No labeling needed (all media labeled)")
                 }
             } catch (e: Exception) {
                 android.util.Log.e("MediaViewModel", "Error checking labeling status", e)
