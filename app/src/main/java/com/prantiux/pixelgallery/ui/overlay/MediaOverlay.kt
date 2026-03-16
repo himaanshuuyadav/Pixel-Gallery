@@ -75,6 +75,7 @@ import coil.request.ImageRequest
 import coil.size.Size
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -96,6 +97,8 @@ private enum class GestureMode {
     ZOOM
 }
 
+private const val MEDIA_OVERLAY_LOG = "MediaOverlay"
+
 @Composable
 fun MediaOverlay(
     viewModel: MediaViewModel,
@@ -112,6 +115,15 @@ fun MediaOverlay(
     val density = LocalDensity.current
     val view = LocalView.current
     val context = LocalContext.current
+    val pageWidthPx = remember(configuration.screenWidthDp, density.density) {
+        if (configuration.screenWidthDp > 0) {
+            configuration.screenWidthDp * density.density
+        } else {
+            1080f
+        }
+    }
+    val maxHorizontalOffset = remember(pageWidthPx) { pageWidthPx }
+    val navigationThreshold = remember(pageWidthPx) { pageWidthPx * 0.5f }
     
     // Collect gesture settings
     val swipeDownToClose by settingsDataStore.swipeDownToCloseFlow.collectAsState(initial = true)
@@ -186,18 +198,61 @@ fun MediaOverlay(
     val horizontalOffset = remember { Animatable(0f) }
     val verticalOffset = remember { Animatable(0f) }
     val detailsPanelProgress = remember { Animatable(0f) }
-    
+    var isNavigating by remember { mutableStateOf(false) }
+
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
     var showDetailsPanel by remember { mutableStateOf(false) }
+
+    val horizontalMoveDeltas = remember { Channel<Float>(capacity = Channel.UNLIMITED) }
+    val verticalUpMoveDeltas = remember { Channel<Float>(capacity = Channel.UNLIMITED) }
+    val verticalDownMoveDeltas = remember { Channel<Float>(capacity = Channel.UNLIMITED) }
+
+    LaunchedEffect(Unit) {
+        for (dx in horizontalMoveDeltas) {
+            if (isNavigating) {
+                continue
+            }
+            val clampedOffset = (horizontalOffset.value + dx).coerceIn(-maxHorizontalOffset, maxHorizontalOffset)
+            horizontalOffset.snapTo(clampedOffset)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        for (dy in verticalUpMoveDeltas) {
+            verticalOffset.snapTo(verticalOffset.value + dy)
+
+            // Calculate progress based on drag distance (threshold = 50% screen height)
+            val localScreenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
+            val progress = (abs(verticalOffset.value) / (localScreenHeight * 0.5f)).coerceIn(0f, 1f)
+            detailsPanelProgress.snapTo(progress)
+
+            // Hide controls immediately when gesture starts
+            if (progress > 0.01f) {
+                showControls = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        for (dy in verticalDownMoveDeltas) {
+            verticalOffset.snapTo(verticalOffset.value + dy)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            horizontalMoveDeltas.close()
+            verticalUpMoveDeltas.close()
+            verticalDownMoveDeltas.close()
+        }
+    }
     
     // Favorite states - track which items are favorited
     val favoriteStates = remember { mutableStateMapOf<Long, Boolean>().apply {
         mediaItems.forEach { item -> 
             put(item.id, item.isFavorite)
-            android.util.Log.d("OVERLAY_FAVORITE_INIT", "Initialized: [${item.id}] ${item.displayName} = isFavorite=${item.isFavorite}")
         }
-        android.util.Log.d("OVERLAY_FAVORITE_INIT", "Total favorites initialized: ${this.size}")
     } }
     
     // Favorite message pill state
@@ -317,6 +372,72 @@ fun MediaOverlay(
         onDismiss()
     }
 
+    val currentRequestDecodeSize = remember(configuration.screenWidthDp, configuration.screenHeightDp, density.density) {
+        val fallbackScreenWidthPx = 1080
+        val fallbackScreenHeightPx = 1920
+
+        val screenWidthPx = if (configuration.screenWidthDp > 0) {
+            (configuration.screenWidthDp * density.density).roundToInt()
+        } else {
+            fallbackScreenWidthPx
+        }
+
+        val screenHeightPx = if (configuration.screenHeightDp > 0) {
+            (configuration.screenHeightDp * density.density).roundToInt()
+        } else {
+            fallbackScreenHeightPx
+        }
+
+        val clampedScreenWidthPx = screenWidthPx.coerceIn(720, 3000)
+        val clampedScreenHeightPx = screenHeightPx.coerceIn(1280, 5000)
+
+        val targetWidth = (clampedScreenWidthPx * 2).coerceAtMost(4096)
+        val targetHeight = (clampedScreenHeightPx * 2).coerceAtMost(4096)
+
+        Size(targetWidth, targetHeight)
+    }
+
+    val requestImageForIndex: (Int) -> Unit = { index ->
+        mediaItems.getOrNull(index)?.takeIf { !it.isVideo }?.let { media ->
+            Log.d(MEDIA_OVERLAY_LOG, "IMAGE_REQUEST index=$index uri=${media.uri}")
+            val imageLoader = coil.Coil.imageLoader(context)
+            val request = ImageRequest.Builder(context)
+                .data(media.uri)
+                .size(currentRequestDecodeSize)
+                .memoryCacheKey(media.uri.toString())
+                .diskCacheKey(media.uri.toString())
+                .build()
+            imageLoader.enqueue(request)
+        }
+    }
+
+    val preloadNeighbors: (Int) -> Unit = { index ->
+        val prevIndex = index - 1
+        val nextIndex = index + 1
+        Log.d(MEDIA_OVERLAY_LOG, "PRELOAD prev=$prevIndex next=$nextIndex")
+
+        val imageLoader = coil.Coil.imageLoader(context)
+        mediaItems.getOrNull(prevIndex)?.takeIf { !it.isVideo }?.let { prev ->
+            val request = ImageRequest.Builder(context)
+                .data(prev.uri)
+                .size(currentRequestDecodeSize)
+                .memoryCacheKey(prev.uri.toString())
+                .diskCacheKey(prev.uri.toString())
+                .build()
+            imageLoader.enqueue(request)
+        }
+
+        mediaItems.getOrNull(nextIndex)?.takeIf { !it.isVideo }?.let { next ->
+            val request = ImageRequest.Builder(context)
+                .data(next.uri)
+                .size(currentRequestDecodeSize)
+                .memoryCacheKey(next.uri.toString())
+                .diskCacheKey(next.uri.toString())
+                .build()
+            imageLoader.enqueue(request)
+        }
+    }
+
     // Initialize state when overlay opens
     LaunchedEffect(overlayState.isVisible) {
         if (overlayState.isVisible) {
@@ -331,6 +452,8 @@ fun MediaOverlay(
             detailsPanelProgress.snapTo(0f)
             showDetailsPanel = false
             showControls = true
+            requestImageForIndex(currentIndex)
+            preloadNeighbors(currentIndex)
         }
     }
 
@@ -430,14 +553,6 @@ fun MediaOverlay(
     
     val toggleFavorite: () -> Unit = {
         mediaItems.getOrNull(currentIndex)?.let { item ->
-            // DETAILED LOGGING
-            val toggleTime = System.currentTimeMillis()
-            val beforeState = favoriteStates[item.id] ?: item.isFavorite
-            
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "User tapped star icon at index=$currentIndex")
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Item: [${item.id}] ${item.displayName}")
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Before: favoriteStates[${item.id}]=$beforeState, item.isFavorite=${item.isFavorite}")
-            
             // Haptic feedback
             view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
             
@@ -446,19 +561,12 @@ fun MediaOverlay(
             val newState = !currentState
             favoriteStates[item.id] = newState
             
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  New state: $beforeState → $newState")
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Calling viewModel.toggleFavorite(${item.id}, $newState)...")
-            
             // Persist to database via ViewModel
             viewModel.toggleFavorite(item.id, newState)
-            
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  ✓ ViewModel.toggleFavorite() completed in ${System.currentTimeMillis() - toggleTime}ms")
             
             // Show pill message
             favoriteMessage = if (newState) "Added to favourites" else "Removed from favourites"
             showFavoritePill = true
-            
-            android.util.Log.d("OVERLAY_FAVORITE_TOGGLE", "  Message: $favoriteMessage")
         }
     }
     
@@ -493,10 +601,90 @@ fun MediaOverlay(
         }
     }
 
+    val resetZoomStateForPageChange: (Int) -> Unit = { index ->
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+
+    val navigateNextPage: () -> Unit = navigateNext@{
+        if (isNavigating || currentIndex >= mediaItems.size - 1) {
+            return@navigateNext
+        }
+        isNavigating = true
+        scope.launch {
+            while (true) {
+                horizontalMoveDeltas.tryReceive().getOrNull() ?: break
+            }
+            horizontalOffset.stop()
+            horizontalOffset.snapTo(0f)
+
+            val oldIndex = currentIndex
+            val targetIndex = oldIndex + 1
+            requestImageForIndex(targetIndex)
+            currentIndex = targetIndex
+            resetZoomStateForPageChange(currentIndex)
+            viewModel.updateOverlayIndex(currentIndex)
+            Log.d(MEDIA_OVERLAY_LOG, "PAGE_NAV from=$oldIndex to=$currentIndex")
+            preloadNeighbors(currentIndex)
+            isNavigating = false
+        }
+    }
+
+    val navigatePreviousPage: () -> Unit = navigatePrev@{
+        if (isNavigating || currentIndex <= 0) {
+            return@navigatePrev
+        }
+        isNavigating = true
+        scope.launch {
+            while (true) {
+                horizontalMoveDeltas.tryReceive().getOrNull() ?: break
+            }
+            horizontalOffset.stop()
+            horizontalOffset.snapTo(0f)
+
+            val oldIndex = currentIndex
+            val targetIndex = oldIndex - 1
+            requestImageForIndex(targetIndex)
+            currentIndex = targetIndex
+            resetZoomStateForPageChange(currentIndex)
+            viewModel.updateOverlayIndex(currentIndex)
+            Log.d(MEDIA_OVERLAY_LOG, "PAGE_NAV from=$oldIndex to=$currentIndex")
+            preloadNeighbors(currentIndex)
+            isNavigating = false
+        }
+    }
+
     // Calculate screen dimensions
     // IMPORTANT: These values should match the coordinate space of thumbnailBounds
-    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenWidth = pageWidthPx
     val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
+
+    // Decode near viewport size (2x) for better memory/perf balance while keeping zoom quality.
+    val targetDecodeSize = remember(configuration.screenWidthDp, configuration.screenHeightDp, density.density) {
+        val fallbackScreenWidthPx = 1080
+        val fallbackScreenHeightPx = 1920
+
+        val screenWidthPx = if (configuration.screenWidthDp > 0) {
+            (configuration.screenWidthDp * density.density).roundToInt()
+        } else {
+            fallbackScreenWidthPx
+        }
+
+        val screenHeightPx = if (configuration.screenHeightDp > 0) {
+            (configuration.screenHeightDp * density.density).roundToInt()
+        } else {
+            fallbackScreenHeightPx
+        }
+
+        val clampedScreenWidthPx = screenWidthPx.coerceIn(720, 3000)
+        val clampedScreenHeightPx = screenHeightPx.coerceIn(1280, 5000)
+
+        val targetWidth = (clampedScreenWidthPx * 2).coerceAtMost(4096)
+        val targetHeight = (clampedScreenHeightPx * 2).coerceAtMost(4096)
+
+        Size(targetWidth, targetHeight)
+    }
     
     // Thumbnail bounds are captured in window coordinates, so we use them directly
     // without inset adjustment (they're already positioned relative to the window)
@@ -575,6 +763,11 @@ fun MediaOverlay(
                                     else -> GestureMode.NONE
                                 }
                                 gestureMode = currentGestureMode
+                                if (currentGestureMode == GestureMode.HORIZONTAL_SWIPE && horizontalOffset.isRunning) {
+                                    scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                                        horizontalOffset.stop()
+                                    }
+                                }
                             }
                         }
 
@@ -582,52 +775,40 @@ fun MediaOverlay(
                         // ✅ DO NOT CONSUME during MOVE - let deltas continue flowing
                         when (currentGestureMode) {
                             GestureMode.HORIZONTAL_SWIPE -> {
-                                // REMOVED: change.consume() - consumption kills dx/dy deltas
-                                scope.launch {
-                                    // Apply resistance at edges
-                                    var adjustedDx = dx
-                                    if (currentIndex == 0 && horizontalOffset.value + dx > 0f) {
-                                        // At first image, resist right swipe
-                                        adjustedDx *= 0.15f
-                                    } else if (currentIndex == mediaItems.size - 1 && horizontalOffset.value + dx < 0f) {
-                                        // At last image, resist left swipe
-                                        adjustedDx *= 0.15f
-                                    }
-                                    
-                                    // Calculate velocity for fast swipe detection
-                                    val currentTime = System.currentTimeMillis()
-                                    val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
-                                    velocityX = (adjustedDx / deltaTime) * 1000f  // pixels per second
-                                    lastMoveTime = currentTime
-                                    
-                                    horizontalOffset.snapTo(horizontalOffset.value + adjustedDx)
+                                if (isNavigating) {
+                                    continue
                                 }
+                                // REMOVED: change.consume() - consumption kills dx/dy deltas
+                                // Apply resistance at edges
+                                var adjustedDx = dx
+                                if (currentIndex == 0 && horizontalOffset.value + dx > 0f) {
+                                    // At first image, resist right swipe
+                                    adjustedDx *= 0.15f
+                                } else if (currentIndex == mediaItems.size - 1 && horizontalOffset.value + dx < 0f) {
+                                    // At last image, resist left swipe
+                                    adjustedDx *= 0.15f
+                                }
+                                
+                                // Calculate velocity for fast swipe detection
+                                val currentTime = System.currentTimeMillis()
+                                val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
+                                velocityX = (adjustedDx / deltaTime) * 1000f  // pixels per second
+                                lastMoveTime = currentTime
+                                
+                                horizontalMoveDeltas.trySend(adjustedDx)
                             }
                             
                             GestureMode.VERTICAL_UP -> {
                                 // Only process if swipe up to details is enabled
                                 if (swipeUpToDetails) {
-                                    scope.launch {
-                                        verticalOffset.snapTo(verticalOffset.value + dy)
-                                        
-                                        // Calculate progress based on drag distance (threshold = 50% screen height)
-                                        val progress = (abs(verticalOffset.value) / (screenHeight * 0.5f)).coerceIn(0f, 1f)
-                                        detailsPanelProgress.snapTo(progress)
-                                        
-                                        // Hide controls immediately when gesture starts
-                                        if (progress > 0.01f) {
-                                            showControls = false
-                                        }
-                                    }
+                                    verticalUpMoveDeltas.trySend(dy)
                                 }
                             }
                             
                             GestureMode.VERTICAL_DOWN -> {
                                 // Only track if enabled (either for closing overlay or closing details panel)
                                 if (swipeDownToClose || detailsPanelProgress.value > 0f) {
-                                    scope.launch {
-                                        verticalOffset.snapTo(verticalOffset.value + dy)
-                                    }
+                                    verticalDownMoveDeltas.trySend(dy)
                                     
                                     // Calculate vertical velocity for intent detection
                                     val currentTime = System.currentTimeMillis()
@@ -647,52 +828,49 @@ fun MediaOverlay(
                     when (currentGestureMode) {
                         GestureMode.HORIZONTAL_SWIPE -> {
                             // 4️⃣ Threshold uses distance OR velocity
-                            val distanceThreshold = screenWidth * 0.25f
                             val velocityThreshold = 1500f  // pixels per second
-                            
-                            // 8️⃣ LOG THRESHOLD CHECK
-                            
+
                             scope.launch {
+                                if (isNavigating) {
+                                    return@launch
+                                }
+
                                 // Fast swipe or sufficient distance
-                                if (abs(horizontalOffset.value) > distanceThreshold || abs(velocityX) > velocityThreshold) {
+                                val shouldNavigate = abs(horizontalOffset.value) > navigationThreshold || abs(velocityX) > velocityThreshold
+                                if (shouldNavigate) {
+                                    val currentOffset = horizontalOffset.value
                                     // Determine next index
-                                    val newIndex = if (horizontalOffset.value < 0 && currentIndex < mediaItems.size - 1) {
+                                    val newIndex = if (currentOffset < 0 && currentIndex < mediaItems.size - 1) {
                                         currentIndex + 1
-                                    } else if (horizontalOffset.value > 0 && currentIndex > 0) {
+                                    } else if (currentOffset > 0 && currentIndex > 0) {
                                         currentIndex - 1
                                     } else {
                                         currentIndex  // Stay at current if at boundary
                                     }
-                                    
-                                    
-                                    // Complete gesture - animate slide to completion
-                                    val targetOffset = if (horizontalOffset.value < 0) -screenWidth else screenWidth
-                                    
-                                    // Animate slide to next/prev
-                                    horizontalOffset.animateTo(
-                                        targetValue = targetOffset,
-                                        animationSpec = tween(
-                                            durationMillis = 250,
-                                            easing = FastOutSlowInEasing
-                                        )
-                                    )
-                                    
-                                    
-                                    // Update currentIndex AFTER animation completes
+
                                     if (newIndex != currentIndex) {
-                                        currentIndex = newIndex
-                                        viewModel.updateOverlayIndex(currentIndex)
+                                        if (newIndex > currentIndex) {
+                                            navigateNextPage()
+                                        } else {
+                                            navigatePreviousPage()
+                                        }
+                                    } else {
+                                        // Cancel swipe at boundary - use spring
+                                        horizontalOffset.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.95f,
+                                                stiffness = 900f
+                                            )
+                                        )
                                     }
-                                    
-                                    // Reset offset to center (this makes the new currentIndex appear at center)
-                                    horizontalOffset.snapTo(0f)
                                 } else {
-                                    // Snap back to center with simple tween
+                                    // Cancel swipe (insufficient distance/velocity) - use spring
                                     horizontalOffset.animateTo(
                                         targetValue = 0f,
-                                        animationSpec = tween(
-                                            durationMillis = 200,
-                                            easing = FastOutSlowInEasing
+                                        animationSpec = spring(
+                                            dampingRatio = 0.95f,
+                                            stiffness = 900f
                                         )
                                     )
                                 }
@@ -832,34 +1010,7 @@ fun MediaOverlay(
             // Render previous, current, and next images based on currentIndex
             val prevItem = mediaItems.getOrNull(currentIndex - 1)
             val nextItem = mediaItems.getOrNull(currentIndex + 1)
-            
-            
-            // Preload adjacent images into memory to prevent blink on swipe
-            LaunchedEffect(currentIndex) {
-                // Preload next and previous images
-                prevItem?.let { prev ->
-                    val imageLoader = coil.Coil.imageLoader(context)
-                    val request = ImageRequest.Builder(context)
-                        .data(prev.uri)
-                        .size(Size.ORIGINAL)  // Load full size
-                        .memoryCacheKey(prev.uri.toString())
-                        .diskCacheKey(prev.uri.toString())
-                        .build()
-                    imageLoader.enqueue(request)
-                }
-                
-                nextItem?.let { next ->
-                    val imageLoader = coil.Coil.imageLoader(context)
-                    val request = ImageRequest.Builder(context)
-                        .data(next.uri)
-                        .size(Size.ORIGINAL)  // Load full size
-                        .memoryCacheKey(next.uri.toString())
-                        .diskCacheKey(next.uri.toString())
-                        .build()
-                    imageLoader.enqueue(request)
-                }
-            }
-            
+
             // Render previous, current, and next images for smooth horizontal swipe
             Box(modifier = Modifier.fillMaxSize()) {
                 // Previous image - use stable key to prevent rebinding
@@ -868,7 +1019,7 @@ fun MediaOverlay(
                         SubcomposeAsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(prev.uri)
-                                .size(Size.ORIGINAL)
+                                .size(targetDecodeSize)
                                 .memoryCacheKey(prev.uri.toString())
                                 .diskCacheKey(prev.uri.toString())
                                 .crossfade(false)  // No crossfade to prevent blink
@@ -896,7 +1047,7 @@ fun MediaOverlay(
                     val painter = rememberAsyncImagePainter(
                         model = ImageRequest.Builder(context)
                             .data(item.uri)
-                            .size(Size.ORIGINAL)
+                            .size(targetDecodeSize)
                             .memoryCacheKey(item.uri.toString())
                             .diskCacheKey(item.uri.toString())
                             .build()
@@ -923,7 +1074,7 @@ fun MediaOverlay(
                         AsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(item.uri)
-                            .size(Size.ORIGINAL)
+                            .size(targetDecodeSize)
                             .memoryCacheKey(item.uri.toString())
                             .diskCacheKey(item.uri.toString())
                             .crossfade(false)  // Disable crossfade to prevent blink
@@ -1013,7 +1164,7 @@ fun MediaOverlay(
                         SubcomposeAsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(next.uri)
-                                .size(Size.ORIGINAL)
+                                .size(targetDecodeSize)
                                 .memoryCacheKey(next.uri.toString())
                                 .diskCacheKey(next.uri.toString())
                                 .crossfade(false)  // No crossfade to prevent blink
@@ -1163,14 +1314,6 @@ fun MediaOverlay(
                     // Right side: Favorite button (replaces three-dot menu)
                     if (!isTrashMode) {
                         val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
-                        
-                        // DEBUG LOG: Star icon state
-                        currentItem?.let { item ->
-                            android.util.Log.v("OVERLAY_STAR_ICON", "Star icon state for [${item.id}] ${item.displayName}")
-                            android.util.Log.v("OVERLAY_STAR_ICON", "  favoriteStates[${item.id}]=${favoriteStates[item.id]}")
-                            android.util.Log.v("OVERLAY_STAR_ICON", "  item.isFavorite=${item.isFavorite}")
-                            android.util.Log.v("OVERLAY_STAR_ICON", "  Final display: isFavorited=$isFavorited")
-                        }
                         
                         IconButton(onClick = toggleFavorite) {
                             FontIcon(
