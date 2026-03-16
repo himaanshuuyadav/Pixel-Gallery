@@ -98,12 +98,12 @@ fun DetailsBottomSheetContent(
     onEditMetadata: () -> Unit
 ) {
     // Log GPS data for debugging
-    android.util.Log.d("DetailsBottomSheet", "=== GPS DATA DEBUG ===")
-    android.util.Log.d("DetailsBottomSheet", "Media: ${mediaItem.displayName}")
-    android.util.Log.d("DetailsBottomSheet", "Latitude: ${mediaItem.latitude}")
-    android.util.Log.d("DetailsBottomSheet", "Longitude: ${mediaItem.longitude}")
-    android.util.Log.d("DetailsBottomSheet", "Location: ${mediaItem.location}")
-    android.util.Log.d("DetailsBottomSheet", "Has GPS: ${mediaItem.latitude != null && mediaItem.longitude != null}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DetailsBottomSheet", "=== GPS DATA DEBUG ===")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DetailsBottomSheet", "Media: ${mediaItem.displayName}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DetailsBottomSheet", "Latitude: ${mediaItem.latitude}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DetailsBottomSheet", "Longitude: ${mediaItem.longitude}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DetailsBottomSheet", "Location: ${mediaItem.location}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DetailsBottomSheet", "Has GPS: ${mediaItem.latitude != null && mediaItem.longitude != null}")
     
     Column(
         modifier = Modifier
