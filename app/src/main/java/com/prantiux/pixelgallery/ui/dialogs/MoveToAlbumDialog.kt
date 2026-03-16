@@ -41,7 +41,7 @@ fun MoveToAlbumDialog(
     val isLoading by viewModel.isLoading.collectAsState()
     
     // Debug log for album loading
-    android.util.Log.d("DIALOG_DEBUG", "Albums loaded in MoveToAlbumDialog: ${cachedAlbums.size}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DIALOG_DEBUG", "Albums loaded in MoveToAlbumDialog: ${cachedAlbums.size}")
     
     // Filter out albums in restricted directories (Android/)
     val albums = remember(cachedAlbums) {
@@ -62,9 +62,9 @@ fun MoveToAlbumDialog(
                 }
         }.also {
             if (restrictedAlbums.isNotEmpty()) {
-                android.util.Log.d("MoveToAlbumDialog", "Filtered out ${restrictedAlbums.size} restricted albums: ${restrictedAlbums.joinToString()}")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MoveToAlbumDialog", "Filtered out ${restrictedAlbums.size} restricted albums: ${restrictedAlbums.joinToString()}")
             }
-            android.util.Log.d("MoveToAlbumDialog", "Available albums for move: ${it.size}")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MoveToAlbumDialog", "Available albums for move: ${it.size}")
         }
     }
     
