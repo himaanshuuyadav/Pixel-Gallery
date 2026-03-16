@@ -4,17 +4,14 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.util.SparseIntArray
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.annotation.RequiresApi
 import androidx.compose.runtime.*
 import androidx.compose.runtime.withFrameNanos
-import androidx.core.app.FrameMetricsAggregator
 import androidx.core.view.WindowCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
@@ -24,8 +21,6 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import com.prantiux.pixelgallery.navigation.AppNavigation
-import com.prantiux.pixelgallery.startup.FrameDebug
-import com.prantiux.pixelgallery.startup.StartupTrace
 import com.prantiux.pixelgallery.ui.theme.PixelGalleryTheme
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import kotlinx.coroutines.Dispatchers
@@ -37,14 +32,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "MainActivity"
-private const val FRAME_DEBUG_TAG = "FrameDebug"
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MediaViewModel by viewModels()
     private var uiReady by mutableStateOf(false)
     private var deferredStartupScheduled = false
-    private var frameMetricsLoggerJob: Job? = null
-    private var frameMetricsAggregator: FrameMetricsAggregator? = null
     
     // Activity result launcher for trash request (Android 11+)
     private val trashRequestLauncher = registerForActivityResult(
@@ -86,11 +78,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        FrameDebug.installMainThreadBlockDetector()
-        StartupTrace.markStage("MainActivity started", once = true)
-
         val splashScreen = installSplashScreen()
-        StartupTrace.markStage("Splash installed", once = true)
         splashScreen.setKeepOnScreenCondition { !uiReady }
         splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
             splashScreenViewProvider.view
@@ -103,7 +91,6 @@ class MainActivity : ComponentActivity() {
                 .start()
         }
         super.onCreate(savedInstanceState)
-        StartupTrace.markStage("MainActivity.super.onCreate completed", once = true)
         
         // We need edge-to-edge for proper content padding with statusBarsPadding()
         // BUT we want solid bar colors, not transparent
@@ -149,13 +136,10 @@ class MainActivity : ComponentActivity() {
             var startupReady by remember { mutableStateOf(false) }
 
             LaunchedEffect(Unit) {
-                StartupTrace.markStage("Compose content set", once = true)
                 withFrameNanos { }
-                StartupTrace.markStage("First Compose UI frame rendered", once = true)
 
                 startupReady = true
                 scheduleDeferredStartupWork()
-                StartupTrace.markStage("Deferred startup tasks launched", once = true)
             }
 
             LaunchedEffect(startupReady) {
@@ -163,7 +147,6 @@ class MainActivity : ComponentActivity() {
                 // Wait one more frame so AppNavigation content is committed before splash exit.
                 withFrameNanos { }
                 uiReady = true
-                StartupTrace.markStage("Splash dismissed", once = true)
             }
 
             val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(this) }
@@ -246,7 +229,6 @@ class MainActivity : ComponentActivity() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     window.isNavigationBarContrastEnforced = false
                 }
-                android.util.Log.d(TAG, "===========================")
             }
             
             PixelGalleryTheme(
@@ -280,7 +262,6 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch(Dispatchers.Default) {
             viewModel.initialize(this@MainActivity)
-            StartupTrace.markStage("MediaViewModel initialized", once = true)
         }
 
         lifecycleScope.launch(Dispatchers.Default) {
@@ -307,7 +288,6 @@ class MainActivity : ComponentActivity() {
 
             withContext(Dispatchers.Main) {
                 coil.Coil.setImageLoader(imageLoader)
-                StartupTrace.markStage("Coil ImageLoader ready", once = true)
             }
         }
 
@@ -319,7 +299,6 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.IO) {
                 com.prantiux.pixelgallery.ml.ImageLabelScheduler.schedulePeriodicLabeling(this@MainActivity)
             }
-            StartupTrace.markStage("Periodic labeling scheduled", once = true)
         }
 
         com.prantiux.pixelgallery.ml.ImageLabelScheduler.getLabelingWorkInfo(this).observe(this) { workInfoList ->
@@ -343,7 +322,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        StartupTrace.markStage("Labeling observer attached", once = true)
     }
 
     private fun attachDeferredActivityLaunchers() {
@@ -378,72 +356,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            startFrameMetricsDiagnostics()
-        }
-    }
-
-    override fun onStop() {
-        stopFrameMetricsDiagnostics()
-        super.onStop()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    private fun startFrameMetricsDiagnostics() {
-        if (frameMetricsAggregator == null) {
-            frameMetricsAggregator = FrameMetricsAggregator(
-                FrameMetricsAggregator.TOTAL_DURATION or
-                    FrameMetricsAggregator.INPUT_DURATION or
-                    FrameMetricsAggregator.LAYOUT_MEASURE_DURATION or
-                    FrameMetricsAggregator.DRAW_DURATION or
-                    FrameMetricsAggregator.ANIMATION_DURATION
-            )
-        }
-
-        frameMetricsAggregator?.add(this)
-        frameMetricsLoggerJob?.cancel()
-        frameMetricsLoggerJob = lifecycleScope.launch {
-            while (true) {
-                delay(5000)
-                logFrameMetricsSnapshot()
-            }
-        }
-    }
-
-    private fun stopFrameMetricsDiagnostics() {
-        frameMetricsLoggerJob?.cancel()
-        frameMetricsLoggerJob = null
-        frameMetricsAggregator?.remove(this)
-    }
-
-    private fun logFrameMetricsSnapshot() {
-        val metrics = frameMetricsAggregator?.metrics ?: return
-        val total = summarizeMetric(metrics.getOrNull(FrameMetricsAggregator.TOTAL_INDEX))
-        val input = summarizeMetric(metrics.getOrNull(FrameMetricsAggregator.INPUT_INDEX))
-        val layout = summarizeMetric(metrics.getOrNull(FrameMetricsAggregator.LAYOUT_MEASURE_INDEX))
-        val draw = summarizeMetric(metrics.getOrNull(FrameMetricsAggregator.DRAW_INDEX))
-        val animation = summarizeMetric(metrics.getOrNull(FrameMetricsAggregator.ANIMATION_INDEX))
-
-        Log.d(
-            FRAME_DEBUG_TAG,
-            "FrameMetrics totalFrames=${total.first} slowFrames=${total.second} inputSlow=${input.second} layoutSlow=${layout.second} drawSlow=${draw.second} animationSlow=${animation.second}"
-        )
-    }
-
-    private fun summarizeMetric(metric: SparseIntArray?): Pair<Int, Int> {
-        if (metric == null) return 0 to 0
-        var totalFrames = 0
-        var slowFrames = 0
-        for (index in 0 until metric.size()) {
-            val durationMs = metric.keyAt(index)
-            val count = metric.valueAt(index)
-            totalFrames += count
-            if (durationMs > 16) {
-                slowFrames += count
-            }
-        }
-        return totalFrames to slowFrames
-    }
 }
