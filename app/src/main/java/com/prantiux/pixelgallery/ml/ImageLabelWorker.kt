@@ -41,43 +41,43 @@ class ImageLabelWorker(
     }
 
     override suspend fun doWork(): Result {
-        Log.d(TAG, "═══════════════════════════════════════")
-        Log.d(TAG, "🤖 ML IMAGE LABELING WORKER STARTED")
-        Log.d(TAG, "═══════════════════════════════════════")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "═══════════════════════════════════════")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "🤖 ML IMAGE LABELING WORKER STARTED")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "═══════════════════════════════════════")
         
         return try {
             val database = AppDatabase.getDatabase(applicationContext)
             val labelDao = database.mediaLabelDao()
             // Get all images from Room (Room-first)
-            Log.d(TAG, "📸 Loading images from Room...")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "📸 Loading images from Room...")
             val allImages = database.mediaDao().getAllImagesOnce().map { it.toMediaItem() }
             val totalImages = allImages.size
-            Log.d(TAG, "📊 Total images found: $totalImages")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "📊 Total images found: $totalImages")
             
             // Get already processed IDs
-            Log.d(TAG, "🔍 Checking already processed images...")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "🔍 Checking already processed images...")
             val processedIds = labelDao.getAllProcessedIds().toSet()
-            Log.d(TAG, "✅ Already labeled: ${processedIds.size} images")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "✅ Already labeled: ${processedIds.size} images")
             
             // Filter unprocessed images
             val unprocessedImages = allImages.filter { it.id !in processedIds }
-            Log.d(TAG, "⏳ Remaining to process: ${unprocessedImages.size} images")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "⏳ Remaining to process: ${unprocessedImages.size} images")
             
             if (unprocessedImages.isEmpty()) {
-                Log.d(TAG, "")
-                Log.d(TAG, "═══════════════════════════════════════")
-                Log.d(TAG, "🎉 ALL IMAGES ALREADY LABELED!")
-                Log.d(TAG, "📊 Total: $totalImages / $totalImages (100%)")
-                Log.d(TAG, "═══════════════════════════════════════")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "═══════════════════════════════════════")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "🎉 ALL IMAGES ALREADY LABELED!")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "📊 Total: $totalImages / $totalImages (100%)")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "═══════════════════════════════════════")
                 return Result.success(workDataOf(
                     KEY_PROGRESS to totalImages,
                     KEY_TOTAL to totalImages
                 ))
             }
             
-            Log.d(TAG, "")
-            Log.d(TAG, "📦 Processing ALL ${unprocessedImages.size} images continuously...")
-            Log.d(TAG, "───────────────────────────────────────")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "📦 Processing ALL ${unprocessedImages.size} images continuously...")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "───────────────────────────────────────")
             
             // Process ALL unprocessed images (no batching)
             val batch = unprocessedImages
@@ -94,9 +94,6 @@ class ImageLabelWorker(
                 val currentNum = index + 1
                 val totalCount = batch.size
                 try {
-                    // Log every image
-                    Log.d(TAG, "[$currentNum/$totalCount] ${mediaItem.displayName}")
-                    
                     // Load downscaled bitmap
                     val bitmap = loadDownscaledBitmap(mediaItem.uri.toString(), TARGET_IMAGE_SIZE)
                     
@@ -121,7 +118,6 @@ class ImageLabelWorker(
                             )
                         )
                         
-                        Log.d(TAG, "  ✅ $labelText")
                         successCount++
                         
                         // Update progress every 5 images for UI (not every single image)
@@ -132,7 +128,7 @@ class ImageLabelWorker(
                                 KEY_TOTAL to totalImages
                             ))
                             val progressPercent = (currentProcessed * 100.0 / totalImages).toInt()
-                            Log.d(TAG, "  📊 Progress: $currentProcessed / $totalImages ($progressPercent%)")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "  📊 Progress: $currentProcessed / $totalImages ($progressPercent%)")
                         }
                         
                         // Recycle bitmap
@@ -151,14 +147,14 @@ class ImageLabelWorker(
             val processedCount = processedIds.size + successCount
             val progressPercent = (processedCount.toFloat() / totalImages * 100).toInt()
             
-            Log.d(TAG, "")
-            Log.d(TAG, "═══════════════════════════════════════")
-            Log.d(TAG, "🎉 ML LABELING COMPLETE!")
-            Log.d(TAG, "  • Successfully labeled: $successCount new images")
-            Log.d(TAG, "  • Total labeled: $processedCount / $totalImages ($progressPercent%)")
-            Log.d(TAG, "  • Failed: ${unprocessedImages.size - successCount} images")
-            Log.d(TAG, "✅ Ready for object-based search")
-            Log.d(TAG, "═══════════════════════════════════════")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "═══════════════════════════════════════")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "🎉 ML LABELING COMPLETE!")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "  • Successfully labeled: $successCount new images")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "  • Total labeled: $processedCount / $totalImages ($progressPercent%)")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "  • Failed: ${unprocessedImages.size - successCount} images")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "✅ Ready for object-based search")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "═══════════════════════════════════════")
             
             Result.success(workDataOf(
                 KEY_PROGRESS to processedCount,
