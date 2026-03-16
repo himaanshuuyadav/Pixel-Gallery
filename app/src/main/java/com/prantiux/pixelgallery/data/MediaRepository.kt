@@ -161,7 +161,7 @@ class MediaRepository(private val context: Context) {
 
                 if (batch.size >= currentBatchTarget) {
                     emit(batch.toList())
-                    android.util.Log.d(GALLERY_PERF_TAG, "MediaStore streaming batch emitted size=$processedCount")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "MediaStore streaming batch emitted size=$processedCount")
                     batch.clear()
                     currentBatchTarget = batchSize
                 }
@@ -169,7 +169,7 @@ class MediaRepository(private val context: Context) {
 
             if (batch.isNotEmpty()) {
                 emit(batch.toList())
-                android.util.Log.d(GALLERY_PERF_TAG, "MediaStore streaming batch emitted size=$processedCount")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "MediaStore streaming batch emitted size=$processedCount")
             }
         }
     }.flowOn(Dispatchers.IO)
@@ -185,10 +185,10 @@ class MediaRepository(private val context: Context) {
                 val latLong = exif.latLong
                 
                 if (latLong != null) {
-                    android.util.Log.d("MediaRepository", "✓✓ EXIF GPS found: (${latLong[0]}, ${latLong[1]})")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "✓✓ EXIF GPS found: (${latLong[0]}, ${latLong[1]})")
                     Pair(latLong[0], latLong[1])
                 } else {
-                    android.util.Log.d("MediaRepository", "✗ No EXIF GPS data")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "✗ No EXIF GPS data")
                     Pair(null, null)
                 }
             } ?: Pair(null, null)
@@ -472,7 +472,7 @@ class MediaRepository(private val context: Context) {
     fun createDeleteRequestFromUris(uris: List<Uri>): android.app.PendingIntent? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
-                android.util.Log.d("MediaRepository", "Creating delete request for ${uris.size} items")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Creating delete request for ${uris.size} items")
                 MediaStore.createDeleteRequest(context.contentResolver, uris)
             } catch (e: Exception) {
                 android.util.Log.e("MediaRepository", "Failed to create delete request", e)
@@ -486,7 +486,7 @@ class MediaRepository(private val context: Context) {
                 }
                 null // Successfully deleted
             } catch (e: android.app.RecoverableSecurityException) {
-                android.util.Log.d("MediaRepository", "RecoverableSecurityException caught, returning action intent")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "RecoverableSecurityException caught, returning action intent")
                 e.userAction.actionIntent
             } catch (e: Exception) {
                 android.util.Log.e("MediaRepository", "Failed to delete on Android 10", e)
@@ -501,20 +501,20 @@ class MediaRepository(private val context: Context) {
     fun createTrashRequest(uris: List<Uri>): android.app.PendingIntent? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
-                android.util.Log.d("MediaRepository", "Creating trash request for ${uris.size} items: $uris")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Creating trash request for ${uris.size} items: $uris")
                 val pendingIntent = MediaStore.createTrashRequest(
                     context.contentResolver,
                     uris,
                     true  // true = move to trash, false = restore from trash
                 )
-                android.util.Log.d("MediaRepository", "Trash request created successfully")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Trash request created successfully")
                 pendingIntent
             } catch (e: Exception) {
                 android.util.Log.e("MediaRepository", "Error creating trash request", e)
                 null
             }
         } else {
-            android.util.Log.d("MediaRepository", "Trash request not supported on Android < 11")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Trash request not supported on Android < 11")
             null
         }
     }
@@ -533,7 +533,7 @@ class MediaRepository(private val context: Context) {
                 var allDeleted = true
                 uris.forEach { uri ->
                     val deleted = context.contentResolver.delete(uri, null, null)
-                    android.util.Log.d("MediaRepository", "Delete (old) URI: $uri, Deleted: $deleted")
+                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Delete (old) URI: $uri, Deleted: $deleted")
                     if (deleted == 0) allDeleted = false
                 }
                 allDeleted
@@ -572,7 +572,7 @@ class MediaRepository(private val context: Context) {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     suspend fun loadTrashedItems(context: Context): List<MediaItem> = withContext(Dispatchers.IO) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            android.util.Log.d("MediaRepository", "Trash not supported on this Android version")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Trash not supported on this Android version")
             return@withContext emptyList()
         }
         
@@ -622,7 +622,7 @@ class MediaRepository(private val context: Context) {
                 bundle,
                 null
             )?.use { cursor ->
-                android.util.Log.d("MediaRepository", "Trashed items query returned ${cursor.count} results")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Trashed items query returned ${cursor.count} results")
                 
                 val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
                 val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
@@ -679,12 +679,12 @@ class MediaRepository(private val context: Context) {
                     )
                 }
 
-                android.util.Log.d(
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                     "MediaRepository",
                     "Trashed items summary: total=${items.size}, images=$trashedImageCount, videos=$trashedVideoCount"
                 )
                 
-                android.util.Log.d("MediaRepository", "=== FINAL: ${items.size} valid trashed items (matching Google Files) ===")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "=== FINAL: ${items.size} valid trashed items (matching Google Files) ===")
             }
         } catch (e: Exception) {
             android.util.Log.e("MediaRepository", "Error loading trashed items", e)
@@ -775,20 +775,20 @@ class MediaRepository(private val context: Context) {
     ): Boolean = withContext(Dispatchers.IO) {
         var allSuccess = true
         
-        android.util.Log.d("MediaRepository", "=== COPY OPERATION START ===")
-        android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
-        android.util.Log.d("MediaRepository", "Items to copy: ${mediaItems.size}")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "=== COPY OPERATION START ===")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Items to copy: ${mediaItems.size}")
         
         // Get the actual relative path from the target album's existing media
         val targetRelativePath = if (Build.VERSION.SDK_INT >= 29) {
             if (targetAlbum.topMediaItems.isNotEmpty()) {
                 // Extract relative path from an existing item in the album
                 val samplePath = targetAlbum.topMediaItems.first().path
-                android.util.Log.d("MediaRepository", "Sample path from album: $samplePath")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Sample path from album: $samplePath")
                 
                 // Extract directory path (everything except the filename)
                 val directory = java.io.File(samplePath).parent
-                android.util.Log.d("MediaRepository", "Extracted directory: $directory")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Extracted directory: $directory")
                 
                 // Convert absolute path to relative path
                 val relativePath = when {
@@ -800,7 +800,7 @@ class MediaRepository(private val context: Context) {
                     }
                     else -> directory?.substringAfterLast("/") ?: "Pictures/${targetAlbum.name}"
                 }
-                android.util.Log.d("MediaRepository", "Computed relative path: $relativePath")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Computed relative path: $relativePath")
                 relativePath
             } else {
                 // Fallback to constructed path
@@ -809,7 +809,7 @@ class MediaRepository(private val context: Context) {
                     targetAlbum.name.contains("Screenshots", ignoreCase = true) -> "Pictures/Screenshots"
                     else -> "Pictures/${targetAlbum.name}"
                 }
-                android.util.Log.d("MediaRepository", "Using fallback path: $fallbackPath")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Using fallback path: $fallbackPath")
                 fallbackPath
             }
         } else {
@@ -818,10 +818,6 @@ class MediaRepository(private val context: Context) {
         
         mediaItems.forEach { item ->
             try {
-                android.util.Log.d("MediaRepository", "--- Copying: ${item.displayName} ---")
-                android.util.Log.d("MediaRepository", "Source path: ${item.path}")
-                android.util.Log.d("MediaRepository", "Source bucketName: ${item.bucketName}")
-                
                 // Get original timestamps from source media
                 var originalDateAdded = item.dateAdded
                 var originalDateModified = item.dateAdded
@@ -843,8 +839,6 @@ class MediaRepository(private val context: Context) {
                             if (dateTakenIndex >= 0) {
                                 originalDateTaken = cursor.getLong(dateTakenIndex)
                             }
-                            
-                            android.util.Log.d("MediaRepository", "Original timestamps - Added: $originalDateAdded, Modified: $originalDateModified, Taken: $originalDateTaken")
                         }
                     }
                 } catch (e: Exception) {
@@ -872,12 +866,9 @@ class MediaRepository(private val context: Context) {
                     }
                 }
                 
-                android.util.Log.d("MediaRepository", "Creating MediaStore entry at: $targetRelativePath")
                 val newUri = context.contentResolver.insert(contentUri, values)
                 
                 if (newUri != null) {
-                    android.util.Log.d("MediaRepository", "Created entry with URI: $newUri")
-                    
                     // Copy the actual file content
                     var bytesCopied = 0L
                     context.contentResolver.openInputStream(item.uri)?.use { inputStream ->
@@ -885,7 +876,6 @@ class MediaRepository(private val context: Context) {
                             bytesCopied = inputStream.copyTo(outputStream)
                         }
                     }
-                    android.util.Log.d("MediaRepository", "Copied $bytesCopied bytes")
                     
                     // Mark as completed and update timestamps
                     if (Build.VERSION.SDK_INT >= 29) {
@@ -895,7 +885,6 @@ class MediaRepository(private val context: Context) {
                         values.put(MediaStore.MediaColumns.DATE_ADDED, originalDateAdded)
                         values.put(MediaStore.MediaColumns.DATE_MODIFIED, originalDateModified)
                         context.contentResolver.update(newUri, values, null, null)
-                        android.util.Log.d("MediaRepository", "Marked as completed (IS_PENDING=0) and updated timestamps")
                         
                         // Verify timestamps were set correctly
                         try {
@@ -909,8 +898,6 @@ class MediaRepository(private val context: Context) {
                                     val actualDateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED))
                                     val actualDateModified = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED))
                                     val actualDateTaken = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN))
-                                    
-                                    android.util.Log.d("MediaRepository", "Verification - Actual timestamps: Added=$actualDateAdded (wanted $originalDateAdded), Modified=$actualDateModified (wanted $originalDateModified), Taken=$actualDateTaken (wanted $originalDateTaken)")
                                     
                                     if (actualDateAdded != originalDateAdded) {
                                         android.util.Log.w("MediaRepository", "DATE_ADDED not preserved (system-managed field)")
@@ -934,15 +921,10 @@ class MediaRepository(private val context: Context) {
                             context,
                             arrayOf(newUri.path),
                             null
-                        ) { _, _ ->
-                            android.util.Log.d("MediaRepository", "Media scanner completed")
-                        }
-                        android.util.Log.d("MediaRepository", "Media scanner triggered")
+                        ) { _, _ -> }
                     } catch (e: Exception) {
                         android.util.Log.w("MediaRepository", "Media scan broadcast failed", e)
                     }
-                    
-                    android.util.Log.d("MediaRepository", "✓ Successfully copied ${item.displayName} to ${targetAlbum.name}")
                 } else {
                     allSuccess = false
                     android.util.Log.e("MediaRepository", "✗ Failed to create MediaStore entry for: ${item.displayName}")
@@ -954,7 +936,7 @@ class MediaRepository(private val context: Context) {
             }
         }
         
-        android.util.Log.d("MediaRepository", "=== COPY OPERATION END (Success: $allSuccess) ===")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "=== COPY OPERATION END (Success: $allSuccess) ===")
         allSuccess
     }
     
@@ -966,18 +948,18 @@ class MediaRepository(private val context: Context) {
         mediaItems: List<MediaItem>,
         targetAlbum: Album
     ): MoveResult = withContext(Dispatchers.IO) {
-        android.util.Log.d("MediaRepository", "=== MOVE OPERATION START ===")
-        android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
-        android.util.Log.d("MediaRepository", "Items to move: ${mediaItems.size}")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "=== MOVE OPERATION START ===")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Target Album: ${targetAlbum.name}, ID: ${targetAlbum.id}")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Items to move: ${mediaItems.size}")
         
         // Get target directory path from album
         val targetRelativePath = if (Build.VERSION.SDK_INT >= 29) {
             if (targetAlbum.topMediaItems.isNotEmpty()) {
                 val samplePath = targetAlbum.topMediaItems.first().path
-                android.util.Log.d("MediaRepository", "Sample path from album: $samplePath")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Sample path from album: $samplePath")
                 
                 val directory = java.io.File(samplePath).parent
-                android.util.Log.d("MediaRepository", "Extracted directory: $directory")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Extracted directory: $directory")
                 
                 // Convert absolute path to relative path
                 val relativePath = when {
@@ -989,7 +971,7 @@ class MediaRepository(private val context: Context) {
                     }
                     else -> directory?.substringAfterLast("/") ?: "Pictures/${targetAlbum.name}"
                 }
-                android.util.Log.d("MediaRepository", "Computed relative path: $relativePath")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Computed relative path: $relativePath")
                 relativePath
             } else {
                 val fallbackPath = when {
@@ -997,7 +979,7 @@ class MediaRepository(private val context: Context) {
                     targetAlbum.name.contains("Screenshots", ignoreCase = true) -> "Pictures/Screenshots"
                     else -> "Pictures/${targetAlbum.name}"
                 }
-                android.util.Log.d("MediaRepository", "Using fallback path: $fallbackPath")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "Using fallback path: $fallbackPath")
                 fallbackPath
             }
         } else {
@@ -1009,9 +991,6 @@ class MediaRepository(private val context: Context) {
         
         mediaItems.forEach { item ->
             try {
-                android.util.Log.d("MediaRepository", "--- Moving: ${item.displayName} ---")
-                android.util.Log.d("MediaRepository", "Current path: ${item.path}")
-                
                 // Determine new file path
                 val newFilePath = if (Build.VERSION.SDK_INT >= 29) {
                     "/storage/emulated/0/$targetRelativePath/${item.displayName}"
@@ -1032,8 +1011,6 @@ class MediaRepository(private val context: Context) {
                     return@forEach
                 }
                 
-                android.util.Log.d("MediaRepository", "Target path: $newFilePath")
-                
                 // Try file system move first (instant, no copy)
                 val sourcePath = java.io.File(item.path)
                 val targetPath = java.io.File(newFilePath)
@@ -1049,7 +1026,6 @@ class MediaRepository(private val context: Context) {
                             java.nio.file.Paths.get(targetPath.absolutePath),
                             java.nio.file.StandardCopyOption.REPLACE_EXISTING
                         )
-                        android.util.Log.d("MediaRepository", "✓ File moved via NIO")
                         true
                     } catch (e: Exception) {
                         android.util.Log.w("MediaRepository", "NIO move failed, trying traditional: ${e.message}")
@@ -1081,22 +1057,16 @@ class MediaRepository(private val context: Context) {
                 val updated = context.contentResolver.update(item.uri, values, null, null)
                 
                 if (updated > 0) {
-                    android.util.Log.d("MediaRepository", "✓ MediaStore entry updated (rows: $updated)")
-                    
                     // Trigger media scanner for new location
                     try {
                         android.media.MediaScannerConnection.scanFile(
                             context,
                             arrayOf(newFilePath),
                             arrayOf(item.mimeType)
-                        ) { path, uri ->
-                            android.util.Log.d("MediaRepository", "Media scanner completed for: $path")
-                        }
+                        ) { _, _ -> }
                     } catch (e: Exception) {
                         android.util.Log.w("MediaRepository", "Media scanner failed", e)
                     }
-                    
-                    android.util.Log.d("MediaRepository", "✓ Successfully moved ${item.displayName} to ${targetAlbum.name}")
                 } else {
                     android.util.Log.e("MediaRepository", "✗ Failed to update MediaStore entry")
                     // Try to move file back
@@ -1120,7 +1090,7 @@ class MediaRepository(private val context: Context) {
             android.util.Log.e("MediaRepository", "Failed to move ${failedItems.size} files: ${failedItems.joinToString()}")
         }
         
-        android.util.Log.d("MediaRepository", "=== MOVE OPERATION END (Success: $allSuccess) ===")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaRepository", "=== MOVE OPERATION END (Success: $allSuccess) ===")
         MoveResult(
             success = allSuccess,
             message = if (allSuccess) "All files moved" else "Some files failed to move"
