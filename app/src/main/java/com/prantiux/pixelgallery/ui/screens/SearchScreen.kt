@@ -95,7 +95,7 @@ fun SearchScreen(
     val isSearching by viewModel.isSearching.collectAsState()
     
     // CALLING TAB LOG
-    android.util.Log.d("SCREEN_TAB", "SearchScreen collected ${searchResultsRaw.size} results for query='$searchQuery'")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SCREEN_TAB", "SearchScreen collected ${searchResultsRaw.size} results for query='$searchQuery'")
     
     // ROOM-FIRST: Compute search result structure from raw media list
     val searchResults = remember(searchResultsRaw) {
