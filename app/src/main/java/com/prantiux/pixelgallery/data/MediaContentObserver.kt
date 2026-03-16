@@ -94,7 +94,7 @@ class MediaContentObserver(
                 contentObserver!!
             )
             
-            Log.d(TAG, "MediaStore observer registered successfully")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "MediaStore observer registered successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error registering MediaStore observer", e)
         }
