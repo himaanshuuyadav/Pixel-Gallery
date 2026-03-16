@@ -36,12 +36,9 @@ fun FavoritesScreen(
         "??:??:??.???"
     }
     
-    android.util.Log.d("SCREEN_TAB", "[$collectionTime] FavoritesScreen collected ${favoriteItems.size} favorites from favoritesFlow")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SCREEN_TAB", "[$collectionTime] FavoritesScreen collected ${favoriteItems.size} favorites from favoritesFlow")
     if (favoriteItems.isNotEmpty()) {
-        android.util.Log.d("SCREEN_TAB", "  Items: ${favoriteItems.take(3).map { "${it.id}: ${it.displayName}" }.joinToString(", ")}${if (favoriteItems.size > 3) ", ..." else ""}")
-        favoriteItems.forEach { item ->
-            android.util.Log.d("SCREEN_TAB", "  - [${item.id}] ${item.displayName} (isFavorite=${item.isFavorite})")
-        }
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SCREEN_TAB", "  Items: ${favoriteItems.take(3).map { "${it.id}: ${it.displayName}" }.joinToString(", ")}${if (favoriteItems.size > 3) ", ..." else ""}")
     }
     
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
