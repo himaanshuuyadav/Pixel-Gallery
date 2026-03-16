@@ -311,7 +311,7 @@ fun RecycleBinContent(
                                         // Show checkbox only in selection mode
                                         if (capturedIsSelectionMode) {
                                             val allSelected = group.items.all { capturedSelectedItems.contains(it) }
-                                            android.util.Log.d("RecycleBinScreen", "Selection mode - checkbox for ${group.daysLeftRange}: allSelected=$allSelected")
+                                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("RecycleBinScreen", "Selection mode - checkbox for ${group.daysLeftRange}: allSelected=$allSelected")
                                             Box(
                                                 modifier = Modifier
                                                     .size(24.dp)
