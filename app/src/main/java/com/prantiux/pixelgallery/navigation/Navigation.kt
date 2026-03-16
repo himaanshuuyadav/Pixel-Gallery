@@ -420,7 +420,7 @@ fun AppNavigation(
             ContextCompat.checkSelfPermission(context, permission) ==
                     android.content.pm.PackageManager.PERMISSION_GRANTED
         }
-        Log.d("ONBOARDING", "Permission check at startup: $allGranted")
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "Permission check at startup: $allGranted")
         mutableStateOf(allGranted)
     }
     
@@ -428,7 +428,7 @@ fun AppNavigation(
     if (!permissionsGranted) {
         OnboardingScreen(
             onPermissionGranted = {
-                Log.d("ONBOARDING", "Permission granted from OnboardingScreen, proceeding to gallery")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "Permission granted from OnboardingScreen, proceeding to gallery")
                 permissionsGranted = true
             }
         )
@@ -473,7 +473,7 @@ fun AppNavigation(
     androidx.compose.runtime.LaunchedEffect(currentRoute) {
         if (currentRoute == previousRoute) return@LaunchedEffect
         if (currentRoute != null) {
-            android.util.Log.d("TabSwitch", "$previousRoute → $currentRoute")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("TabSwitch", "$previousRoute → $currentRoute")
             previousRoute = currentRoute
         }
         when (currentRoute) {
