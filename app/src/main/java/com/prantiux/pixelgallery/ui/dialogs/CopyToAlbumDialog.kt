@@ -41,7 +41,7 @@ fun CopyToAlbumDialog(
     val isLoading by viewModel.isLoading.collectAsState()
     
     // Debug log for album loading
-    android.util.Log.d("DIALOG_DEBUG", "Albums loaded in CopyToAlbumDialog: ${cachedAlbums.size}")
+    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("DIALOG_DEBUG", "Albums loaded in CopyToAlbumDialog: ${cachedAlbums.size}")
     
     // Filter out albums in restricted directories (Android/)
     val albums = remember(cachedAlbums) {
@@ -62,9 +62,9 @@ fun CopyToAlbumDialog(
                 }
         }.also {
             if (restrictedAlbums.isNotEmpty()) {
-                android.util.Log.d("CopyToAlbumDialog", "Filtered out ${restrictedAlbums.size} restricted albums: ${restrictedAlbums.joinToString()}")
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("CopyToAlbumDialog", "Filtered out ${restrictedAlbums.size} restricted albums: ${restrictedAlbums.joinToString()}")
             }
-            android.util.Log.d("CopyToAlbumDialog", "Available albums for copy: ${it.size}")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("CopyToAlbumDialog", "Available albums for copy: ${it.size}")
         }
     }
     
