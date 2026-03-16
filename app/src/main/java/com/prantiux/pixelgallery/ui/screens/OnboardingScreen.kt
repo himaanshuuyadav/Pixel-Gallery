@@ -68,11 +68,11 @@ fun OnboardingScreen(
         val allGranted = results.values.all { it }
         
         if (allGranted) {
-            android.util.Log.d("ONBOARDING", "All permissions granted from launcher")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "All permissions granted from launcher")
             isChecking = false
             onPermissionGranted()
         } else {
-            android.util.Log.d("ONBOARDING", "Some permissions denied: $results")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "Some permissions denied: $results")
             showSettingsPrompt = true
             isChecking = false
         }
@@ -81,7 +81,7 @@ fun OnboardingScreen(
     // Check permissions on composition
     LaunchedEffect(Unit) {
         if (checkPermissions()) {
-            android.util.Log.d("ONBOARDING", "Permissions already granted")
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "Permissions already granted")
             onPermissionGranted()
         }
     }
@@ -179,7 +179,7 @@ fun OnboardingScreen(
                 Button(
                     onClick = {
                         isChecking = true
-                        android.util.Log.d("ONBOARDING", "Grant Access button clicked")
+                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "Grant Access button clicked")
                         permissionLauncher.launch(permissions.toTypedArray())
                     },
                     modifier = Modifier
@@ -225,7 +225,7 @@ fun OnboardingScreen(
                     )
                     Button(
                         onClick = {
-                            android.util.Log.d("ONBOARDING", "Opening app settings")
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("ONBOARDING", "Opening app settings")
                             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                 data = Uri.fromParts("package", context.packageName, null)
                             }
