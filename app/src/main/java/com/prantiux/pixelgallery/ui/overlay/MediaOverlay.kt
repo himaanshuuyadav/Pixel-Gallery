@@ -49,7 +49,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -98,6 +100,7 @@ private enum class GestureMode {
 }
 
 private const val MEDIA_OVERLAY_LOG = "MediaOverlay"
+private const val OVERLAY_DEBUG_TAG = "OverlayDebug"
 
 @Composable
 fun MediaOverlay(
@@ -122,6 +125,7 @@ fun MediaOverlay(
             1080f
         }
     }
+    val pageWidth = pageWidthPx
     val maxHorizontalOffset = remember(pageWidthPx) { pageWidthPx }
     val navigationThreshold = remember(pageWidthPx) { pageWidthPx * 0.5f }
     
@@ -411,7 +415,13 @@ fun MediaOverlay(
         }
     }
 
-    val preloadNeighbors: (Int) -> Unit = { index ->
+    val preloadNeighbors: (Int) -> Unit = preload@{ index ->
+        if (mediaItems.getOrNull(index)?.isVideo == true) {
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                Log.d(OVERLAY_DEBUG_TAG, "Skipping image preload for video index=$index")
+            }
+            return@preload
+        }
         val prevIndex = index - 1
         val nextIndex = index + 1
         Log.d(MEDIA_OVERLAY_LOG, "PRELOAD prev=$prevIndex next=$nextIndex")
@@ -440,6 +450,9 @@ fun MediaOverlay(
 
     // Initialize state when overlay opens
     LaunchedEffect(overlayState.isVisible) {
+        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+            Log.d(OVERLAY_DEBUG_TAG, "Overlay visible: ${overlayState.isVisible}")
+        }
         if (overlayState.isVisible) {
             currentIndex = overlayState.selectedIndex
             displayIndex = overlayState.selectedIndex
@@ -459,6 +472,15 @@ fun MediaOverlay(
 
     // Current media item (use currentIndex for rendering to prevent blink)
     val currentItem = mediaItems.getOrNull(currentIndex)
+
+    LaunchedEffect(currentItem?.id, currentItem?.isVideo) {
+        if (!com.prantiux.pixelgallery.BuildConfig.DEBUG || currentItem == null) return@LaunchedEffect
+        if (currentItem.isVideo) {
+            Log.d(OVERLAY_DEBUG_TAG, "Rendering VIDEO")
+        } else {
+            Log.d(OVERLAY_DEBUG_TAG, "Rendering IMAGE")
+        }
+    }
     
     // Action handlers (defined after currentItem)
     val shareItem: () -> Unit = {
@@ -607,7 +629,15 @@ fun MediaOverlay(
         offsetY = 0f
     }
 
-    val navigateNextPage: () -> Unit = navigateNext@{
+    val settleDurationForVelocity: (Float) -> Int = { velocity ->
+        when {
+            abs(velocity) > 8000f -> 60
+            abs(velocity) > 4000f -> 100
+            else -> 160
+        }
+    }
+
+    val navigateNextPage: (Float) -> Unit = navigateNext@{ velocityX ->
         if (isNavigating || currentIndex >= mediaItems.size - 1) {
             return@navigateNext
         }
@@ -617,21 +647,30 @@ fun MediaOverlay(
                 horizontalMoveDeltas.tryReceive().getOrNull() ?: break
             }
             horizontalOffset.stop()
-            horizontalOffset.snapTo(0f)
 
             val oldIndex = currentIndex
             val targetIndex = oldIndex + 1
             requestImageForIndex(targetIndex)
+
+            val safeVelocity = velocityX.coerceIn(-15000f, 15000f)
+            val duration = settleDurationForVelocity(safeVelocity)
+            horizontalOffset.animateTo(
+                targetValue = -pageWidth,
+                animationSpec = tween(durationMillis = duration, easing = FastOutSlowInEasing),
+                initialVelocity = safeVelocity
+            )
+
             currentIndex = targetIndex
             resetZoomStateForPageChange(currentIndex)
             viewModel.updateOverlayIndex(currentIndex)
             Log.d(MEDIA_OVERLAY_LOG, "PAGE_NAV from=$oldIndex to=$currentIndex")
             preloadNeighbors(currentIndex)
+            horizontalOffset.snapTo(0f)
             isNavigating = false
         }
     }
 
-    val navigatePreviousPage: () -> Unit = navigatePrev@{
+    val navigatePreviousPage: (Float) -> Unit = navigatePrev@{ velocityX ->
         if (isNavigating || currentIndex <= 0) {
             return@navigatePrev
         }
@@ -641,16 +680,25 @@ fun MediaOverlay(
                 horizontalMoveDeltas.tryReceive().getOrNull() ?: break
             }
             horizontalOffset.stop()
-            horizontalOffset.snapTo(0f)
 
             val oldIndex = currentIndex
             val targetIndex = oldIndex - 1
             requestImageForIndex(targetIndex)
+
+            val safeVelocity = velocityX.coerceIn(-15000f, 15000f)
+            val duration = settleDurationForVelocity(safeVelocity)
+            horizontalOffset.animateTo(
+                targetValue = pageWidth,
+                animationSpec = tween(durationMillis = duration, easing = FastOutSlowInEasing),
+                initialVelocity = safeVelocity
+            )
+
             currentIndex = targetIndex
             resetZoomStateForPageChange(currentIndex)
             viewModel.updateOverlayIndex(currentIndex)
             Log.d(MEDIA_OVERLAY_LOG, "PAGE_NAV from=$oldIndex to=$currentIndex")
             preloadNeighbors(currentIndex)
+            horizontalOffset.snapTo(0f)
             isNavigating = false
         }
     }
@@ -707,6 +755,19 @@ fun MediaOverlay(
         detailsPanelProgress.value < 0.01f &&
         closeProgress == 0f
 
+    // Protected UI zones where parent overlay gestures should not start.
+    var topBarBounds by remember { mutableStateOf<Rect?>(null) }
+    var bottomBarBounds by remember { mutableStateOf<Rect?>(null) }
+    var videoControlsBounds by remember { mutableStateOf<Rect?>(null) }
+    var isAnyVideoFullscreen by remember { mutableStateOf(false) }
+
+    val latestTopBarBounds by rememberUpdatedState(topBarBounds)
+    val latestBottomBarBounds by rememberUpdatedState(bottomBarBounds)
+    val latestVideoControlsBounds by rememberUpdatedState(videoControlsBounds)
+    val latestControlsVisible by rememberUpdatedState(controlsVisible)
+    val latestIsAnyVideoFullscreen by rememberUpdatedState(isAnyVideoFullscreen)
+    val latestIsCurrentItemVideo by rememberUpdatedState(currentItem?.isVideo == true)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -715,6 +776,20 @@ fun MediaOverlay(
                 awaitEachGesture {
                     
                     val down = awaitFirstDown(requireUnconsumed = false)
+
+                    // Ignore global overlay gestures when drag starts inside protected UI zones.
+                    val protectBars = latestControlsVisible && !latestIsAnyVideoFullscreen
+                    val protectVideoControls = latestIsCurrentItemVideo && latestControlsVisible && !latestIsAnyVideoFullscreen
+                    val inProtectedZone =
+                        (protectBars &&
+                            (latestTopBarBounds?.contains(down.position) == true ||
+                                latestBottomBarBounds?.contains(down.position) == true)) ||
+                            (protectVideoControls && latestVideoControlsBounds?.contains(down.position) == true)
+
+                    if (inProtectedZone) {
+                        waitForUpOrCancellation()
+                        return@awaitEachGesture
+                    }
                     
                     // Only process when scale = 1f
                     if (scale != 1f) {
@@ -788,6 +863,11 @@ fun MediaOverlay(
                                     // At last image, resist left swipe
                                     adjustedDx *= 0.15f
                                 }
+
+                                val currentOffset = horizontalOffset.value
+                                val progress = (abs(currentOffset) / pageWidth).coerceIn(0f, 1f)
+                                val friction = 1f - (progress * progress)
+                                adjustedDx *= friction
                                 
                                 // Calculate velocity for fast swipe detection
                                 val currentTime = System.currentTimeMillis()
@@ -850,9 +930,9 @@ fun MediaOverlay(
 
                                     if (newIndex != currentIndex) {
                                         if (newIndex > currentIndex) {
-                                            navigateNextPage()
+                                            navigateNextPage(velocityX)
                                         } else {
-                                            navigatePreviousPage()
+                                            navigatePreviousPage(velocityX)
                                         }
                                     } else {
                                         // Cancel swipe at boundary - use spring
@@ -1008,8 +1088,8 @@ fun MediaOverlay(
         // Media image
         currentItem?.let { item ->
             // Render previous, current, and next images based on currentIndex
-            val prevItem = mediaItems.getOrNull(currentIndex - 1)
-            val nextItem = mediaItems.getOrNull(currentIndex + 1)
+            val prevItem = mediaItems.getOrNull(currentIndex - 1)?.takeIf { !it.isVideo }
+            val nextItem = mediaItems.getOrNull(currentIndex + 1)?.takeIf { !it.isVideo }
 
             // Render previous, current, and next images for smooth horizontal swipe
             Box(modifier = Modifier.fillMaxSize()) {
@@ -1042,7 +1122,8 @@ fun MediaOverlay(
                 }
                 
                 // Current image - use stable key to prevent rebinding on index change
-                key(item.id) {  // Stable key prevents unnecessary recomposition
+                if (!item.isVideo) {
+                    key(item.id) {  // Stable key prevents unnecessary recomposition
                     // Get image dimensions to determine orientation for smart reveal
                     val painter = rememberAsyncImagePainter(
                         model = ImageRequest.Builder(context)
@@ -1188,9 +1269,6 @@ fun MediaOverlay(
             }
         }
         
-        // Track fullscreen state across all components
-        var isAnyVideoFullscreen by remember { mutableStateOf(false) }
-        
         // Video player overlay (when video is playing)
         exoPlayer?.let { player ->
             if (currentItem?.isVideo == true) {
@@ -1255,6 +1333,9 @@ fun MediaOverlay(
                         onFullscreenChange = { isFullscreen ->
                             isVideoFullscreen = isFullscreen
                             isAnyVideoFullscreen = isFullscreen
+                        },
+                        onControlsBoundsChanged = { bounds ->
+                            videoControlsBounds = bounds
                         }
                     )
                 }
@@ -1279,6 +1360,9 @@ fun MediaOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.Black)
+                    .onGloballyPositioned { coordinates ->
+                        topBarBounds = coordinates.boundsInRoot()
+                    }
                     .statusBarsPadding()  // Content respects status bar inset
             ) {
                 Row(
@@ -1345,6 +1429,9 @@ fun MediaOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.Black)
+                    .onGloballyPositioned { coordinates ->
+                        bottomBarBounds = coordinates.boundsInRoot()
+                    }
                     .navigationBarsPadding()  // Content respects navigation bar inset
             ) {
                 Row(
@@ -1742,6 +1829,8 @@ fun MediaOverlay(
     }
 }
 
+}
+
 /**
  * Custom video controls overlay with Material 3 design
  */
@@ -1750,7 +1839,8 @@ private fun CustomVideoControls(
     exoPlayer: ExoPlayer,
     isPlaying: Boolean,
     onPlayPauseClick: () -> Unit,
-    onFullscreenChange: (Boolean) -> Unit = {}
+    onFullscreenChange: (Boolean) -> Unit = {},
+    onControlsBoundsChanged: (Rect) -> Unit = {}
 ) {
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -1807,6 +1897,9 @@ private fun CustomVideoControls(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
+                .onGloballyPositioned { coordinates ->
+                    onControlsBoundsChanged(coordinates.boundsInRoot())
+                }
                 .padding(bottom = bottomBarHeight) // Attached to bottom bar, no spacing
                 .pointerInput(isFullscreen) {
                     // Block ALL gestures in this area (video controls zone)
