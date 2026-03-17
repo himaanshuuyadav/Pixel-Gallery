@@ -105,6 +105,8 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
     object DebugSetting : Screen("debug_setting", "Debug")
 }
 
+private const val OVERLAY_DEBUG_TAG = "OverlayDebug"
+
 private object HierarchicalNavMotion {
     private const val DURATION_MS = 280
     private const val ENTER_ALPHA = 0.9f
@@ -514,75 +516,11 @@ fun AppNavigation(
             
             // Media overlay state
             val overlayState by viewModel.overlayState.collectAsState()
-            
-            // ROOM-FIRST: Use Room flows for overlay media (single source of truth)
-            val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
-            val allMediaUnfilteredForOverlay by viewModel.allMediaUnfilteredFlow.collectAsState()
-            
-            // ROOM-FIRST: Album media from pure DAO for overlay (no in-memory filtering!)
-            val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
-            
-            // ROOM-FIRST: Use Room-based search flow for overlay
-            val searchQuery = overlayState.searchQuery ?: ""
-            val searchResults by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
-            
-            // ROOM-FIRST: Use Room-based favorites flow for overlay
-            val favoriteItems by viewModel.favoritesFlow.collectAsState()
-            
-            // Get context for smart album loading
-            val context = androidx.compose.ui.platform.LocalContext.current
-            
-            val isAlbumOverlay = overlayState.mediaType == "album" || overlayState.mediaType == "smartalbum"
-            val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
+            val isOverlayVisible = overlayState.isVisible
 
-            // Filter media based on overlay state (album or all media)
-            val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, sortedMediaForOverlay, albumMediaForOverlay, searchResults, favoriteItems) {
-                when (overlayState.mediaType) {
-                    "album", "smartalbum" -> {
-                        if (isSmartAlbumOverlay) {
-                            // Smart album - needs async loading, return empty for now
-                            // Will be populated by LaunchedEffect below
-                            emptyList()
-                        } else {
-                            // Regular album - already sorted in ViewModel flow
-                            albumMediaForOverlay
-                        }
-                    }
-                    "search" -> {
-                        // ROOM-FIRST: searchResults is now a simple List<MediaItem> from Room
-                        searchResults
-                    }
-                    "favorites" -> favoriteItems
-                    else -> sortedMediaForOverlay  // Use ViewModel's sorted media for photos overlay
-                }
-            }
-            
-            // Smart album media state (loaded asynchronously)
-            var smartAlbumOverlayMedia by remember { mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>?>(null) }
-            val coroutineScope = rememberCoroutineScope()
-            
-            // Load smart album media if overlay is showing a smart album
-            androidx.compose.runtime.LaunchedEffect(overlayState.mediaType, overlayState.albumId, allMediaUnfilteredForOverlay) {
-                if (isSmartAlbumOverlay) {
-                    coroutineScope.launch {
-                        val sortedSmartMedia = withContext(Dispatchers.Default) {
-                            SmartAlbumGenerator.getMediaForSmartAlbum(
-                                context,
-                                overlayState.albumId,
-                                allMediaUnfilteredForOverlay
-                            ).sortedByDescending { it.dateAdded }
-                        }
-                        smartAlbumOverlayMedia = sortedSmartMedia
-                    }
-                }
-            }
-            
-            // Final media list with smart album support
-            val finalOverlayMediaItems = remember(overlayMediaItems, smartAlbumOverlayMedia, overlayState.mediaType, overlayState.albumId) {
-                if (isSmartAlbumOverlay) {
-                    smartAlbumOverlayMedia ?: emptyList()
-                } else {
-                    overlayMediaItems
+            androidx.compose.runtime.LaunchedEffect(isOverlayVisible) {
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                    Log.d(OVERLAY_DEBUG_TAG, "Overlay visible: $isOverlayVisible")
                 }
             }
 
@@ -890,10 +828,80 @@ fun AppNavigation(
                 }
             }
             
-            // Media overlay (always present, visibility controlled by state)
-            // Wrapped in layout {} to prevent overlay from affecting photo grid scroll position
+            // Media overlay (compose and collect data only while visible)
             // Skip if trash mode (RecycleBinScreen shows its own overlay)
-            if (overlayState.mediaType != "trash") {
+            if (isOverlayVisible && overlayState.mediaType != "trash") {
+                // ROOM-FIRST: Use Room flows for overlay media (single source of truth)
+                val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
+                val allMediaUnfilteredForOverlay by viewModel.allMediaUnfilteredFlow.collectAsState()
+
+                // ROOM-FIRST: Album media from pure DAO for overlay (no in-memory filtering!)
+                val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
+
+                // ROOM-FIRST: Use Room-based search flow for overlay
+                val searchQuery = overlayState.searchQuery ?: ""
+                val searchResults by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
+
+                // ROOM-FIRST: Use Room-based favorites flow for overlay
+                val favoriteItems by viewModel.favoritesFlow.collectAsState()
+
+                // Get context for smart album loading
+                val overlayContext = androidx.compose.ui.platform.LocalContext.current
+
+                val isAlbumOverlay = overlayState.mediaType == "album" || overlayState.mediaType == "smartalbum"
+                val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
+
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                    androidx.compose.runtime.DisposableEffect(Unit) {
+                        Log.d(OVERLAY_DEBUG_TAG, "Starting overlay data collection")
+                        onDispose {
+                            Log.d(OVERLAY_DEBUG_TAG, "Stopping overlay work")
+                        }
+                    }
+                }
+
+                // Filter media based on overlay state (album or all media)
+                val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, sortedMediaForOverlay, albumMediaForOverlay, searchResults, favoriteItems) {
+                    when (overlayState.mediaType) {
+                        "album", "smartalbum" -> {
+                            if (isSmartAlbumOverlay) {
+                                emptyList()
+                            } else {
+                                albumMediaForOverlay
+                            }
+                        }
+                        "search" -> searchResults
+                        "favorites" -> favoriteItems
+                        else -> sortedMediaForOverlay
+                    }
+                }
+
+                // Smart album media state (loaded asynchronously)
+                var smartAlbumOverlayMedia by remember { mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>?>(null) }
+
+                // Load smart album media only while overlay is visible
+                androidx.compose.runtime.LaunchedEffect(isOverlayVisible, overlayState.mediaType, overlayState.albumId, allMediaUnfilteredForOverlay) {
+                    if (!isOverlayVisible) return@LaunchedEffect
+                    if (isSmartAlbumOverlay) {
+                        val sortedSmartMedia = withContext(Dispatchers.Default) {
+                            SmartAlbumGenerator.getMediaForSmartAlbum(
+                                overlayContext,
+                                overlayState.albumId,
+                                allMediaUnfilteredForOverlay
+                            ).sortedByDescending { it.dateAdded }
+                        }
+                        smartAlbumOverlayMedia = sortedSmartMedia
+                    }
+                }
+
+                val finalOverlayMediaItems = remember(overlayMediaItems, smartAlbumOverlayMedia, overlayState.mediaType, overlayState.albumId) {
+                    if (isSmartAlbumOverlay) {
+                        smartAlbumOverlayMedia ?: emptyList()
+                    } else {
+                        overlayMediaItems
+                    }
+                }
+
                 androidx.compose.ui.layout.Layout(
                     content = {
                         com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
@@ -918,7 +926,6 @@ fun AppNavigation(
             }
 
             // Animate navbar hide/show when overlay is visible or scrollbar is being dragged
-            val isOverlayVisible = overlayState.isVisible
             val isScrollbarDragging by viewModel.isScrollbarDragging.collectAsState()
             
             // Copy to Album Dialog
