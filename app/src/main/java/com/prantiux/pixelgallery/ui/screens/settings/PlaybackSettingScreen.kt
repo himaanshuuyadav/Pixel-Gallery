@@ -20,7 +20,6 @@ fun PlaybackSettingScreen(
     var loopVideos by remember { mutableStateOf(false) }
     var keepScreenOn by remember { mutableStateOf(true) }
     var muteByDefault by remember { mutableStateOf(false) }
-    var showControlsOnTap by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     
     // Load playback settings
@@ -60,14 +59,6 @@ fun PlaybackSettingScreen(
         scope.launch {
             settingsDataStore.muteByDefaultFlow.collect { enabled ->
                 muteByDefault = enabled
-            }
-        }
-    }
-    
-    LaunchedEffect(Unit) {
-        scope.launch {
-            settingsDataStore.showControlsOnTapFlow.collect { enabled ->
-                showControlsOnTap = enabled
             }
         }
     }
@@ -176,30 +167,5 @@ fun PlaybackSettingScreen(
             )
         }
         
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        
-        // Controls category
-        item {
-            CategoryHeader("Controls")
-        }
-        
-        // Show controls on tap
-        item {
-            GroupedSettingToggle(
-                title = "Show controls on tap",
-                subtitle = "Display playback controls when tapped",
-                iconUnicode = FontIcons.Settings,
-                checked = showControlsOnTap,
-                onCheckedChange = { 
-                    showControlsOnTap = it
-                    scope.launch {
-                        settingsDataStore.saveShowControlsOnTap(it)
-                    }
-                },
-                position = SettingPosition.SINGLE
-            )
-        }
     }
 }
