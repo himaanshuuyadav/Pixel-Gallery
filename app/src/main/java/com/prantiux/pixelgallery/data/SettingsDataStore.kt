@@ -43,7 +43,6 @@ class SettingsDataStore(private val context: Context) {
         private val LOOP_VIDEOS_KEY = booleanPreferencesKey("loop_videos")
         private val KEEP_SCREEN_ON_KEY = booleanPreferencesKey("keep_screen_on")
         private val MUTE_BY_DEFAULT_KEY = booleanPreferencesKey("mute_by_default")
-        private val SHOW_CONTROLS_ON_TAP_KEY = booleanPreferencesKey("show_controls_on_tap")
         private val ALBUM_ORDER_MODE_KEY = stringPreferencesKey("album_order_mode")
         private val MAIN_ALBUM_ORDER_KEY = stringPreferencesKey("main_album_order")
         private val OTHER_ALBUM_ORDER_KEY = stringPreferencesKey("other_album_order")
@@ -478,23 +477,6 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveMuteByDefault(enabled: Boolean) {
         context.settingsDataStore.edit { preferences ->
             preferences[MUTE_BY_DEFAULT_KEY] = enabled
-        }
-    }
-    
-    /**
-     * Get show controls on tap state as Flow
-     */
-    val showControlsOnTapFlow: Flow<Boolean> = context.settingsDataStore.data
-        .map { preferences ->
-            preferences[SHOW_CONTROLS_ON_TAP_KEY] ?: true
-        }
-    
-    /**
-     * Save show controls on tap preference
-     */
-    suspend fun saveShowControlsOnTap(enabled: Boolean) {
-        context.settingsDataStore.edit { preferences ->
-            preferences[SHOW_CONTROLS_ON_TAP_KEY] = enabled
         }
     }
 
