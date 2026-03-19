@@ -3,18 +3,13 @@
 package com.prantiux.pixelgallery.ui.overlay
 
 import android.app.Activity
-import android.app.WallpaperManager
-import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.View
-import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -24,14 +19,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.CornerSize
-import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -39,7 +29,6 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -60,7 +49,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
@@ -86,8 +74,6 @@ import kotlin.math.roundToInt
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.ui.components.DetailsBottomSheetContent
-import com.prantiux.pixelgallery.ui.animation.SharedElementBounds
-import androidx.compose.ui.unit.IntSize
 
 
 // Gesture direction locking
@@ -99,8 +85,40 @@ private enum class GestureMode {
     ZOOM
 }
 
-private const val MEDIA_OVERLAY_LOG = "MediaOverlay"
-private const val OVERLAY_DEBUG_TAG = "OverlayDebug"
+object OverlayConstants {
+    const val MIN_ZOOM_SCALE = 1f
+    const val MAX_ZOOM_SCALE = 5f
+    const val TAP_SLOP_PX = 10f
+    const val VERTICAL_CLOSE_THRESHOLD_PX = 150f
+}
+
+private fun clampOffset(
+    offsetX: Float,
+    offsetY: Float,
+    scale: Float,
+    containerWidth: Float,
+    containerHeight: Float,
+    imageWidth: Float,
+    imageHeight: Float
+): Pair<Float, Float> {
+    val scaledWidth = imageWidth * scale
+    val scaledHeight = imageHeight * scale
+
+    val maxOffsetX = kotlin.math.max(0f, (scaledWidth - containerWidth) / 2f)
+    val maxOffsetY = kotlin.math.max(0f, (scaledHeight - containerHeight) / 2f)
+
+    val clampedX = offsetX.coerceIn(-maxOffsetX, maxOffsetX)
+    val clampedY = offsetY.coerceIn(-maxOffsetY, maxOffsetY)
+    return clampedX to clampedY
+}
+
+private fun calculateScale(current: Float, zoom: Float): Float {
+    return (current * zoom).coerceIn(OverlayConstants.MIN_ZOOM_SCALE, OverlayConstants.MAX_ZOOM_SCALE)
+}
+
+private fun isTap(down: Offset, up: Offset): Boolean {
+    return (up - down).getDistance() < OverlayConstants.TAP_SLOP_PX
+}
 
 @Composable
 fun MediaOverlay(
@@ -141,7 +159,6 @@ fun MediaOverlay(
     val loopVideos by settingsDataStore.loopVideosFlow.collectAsState(initial = false)
     val keepScreenOn by settingsDataStore.keepScreenOnFlow.collectAsState(initial = true)
     val muteByDefault by settingsDataStore.muteByDefaultFlow.collectAsState(initial = false)
-    val showControlsOnTap by settingsDataStore.showControlsOnTapFlow.collectAsState(initial = true)
     
     // Set solid black colors for system bars during media overlay using modern API
     SideEffect {
@@ -170,11 +187,8 @@ fun MediaOverlay(
     // Current index state
     var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
     
-    // Track the index being displayed during transition (prevents blink)
-    var displayIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
-    
     // Zoom state
-    var scale by remember { mutableFloatStateOf(1f) }
+    var scale by remember { mutableFloatStateOf(OverlayConstants.MIN_ZOOM_SCALE) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
     
@@ -364,7 +378,7 @@ fun MediaOverlay(
     
     // Close progress for downward swipe (0f = not dragging, 1f = at threshold)
     val closeProgress = if (gestureMode == GestureMode.VERTICAL_DOWN) {
-        (abs(verticalOffset.value) / 150f).coerceIn(0f, 1f)
+        (abs(verticalOffset.value) / OverlayConstants.VERTICAL_CLOSE_THRESHOLD_PX).coerceIn(0f, 1f)
     } else {
         0f
     }
@@ -403,7 +417,6 @@ fun MediaOverlay(
 
     val requestImageForIndex: (Int) -> Unit = { index ->
         mediaItems.getOrNull(index)?.takeIf { !it.isVideo }?.let { media ->
-            Log.d(MEDIA_OVERLAY_LOG, "IMAGE_REQUEST index=$index uri=${media.uri}")
             val imageLoader = coil.Coil.imageLoader(context)
             val request = ImageRequest.Builder(context)
                 .data(media.uri)
@@ -417,14 +430,10 @@ fun MediaOverlay(
 
     val preloadNeighbors: (Int) -> Unit = preload@{ index ->
         if (mediaItems.getOrNull(index)?.isVideo == true) {
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-                Log.d(OVERLAY_DEBUG_TAG, "Skipping image preload for video index=$index")
-            }
             return@preload
         }
         val prevIndex = index - 1
         val nextIndex = index + 1
-        Log.d(MEDIA_OVERLAY_LOG, "PRELOAD prev=$prevIndex next=$nextIndex")
 
         val imageLoader = coil.Coil.imageLoader(context)
         mediaItems.getOrNull(prevIndex)?.takeIf { !it.isVideo }?.let { prev ->
@@ -450,13 +459,9 @@ fun MediaOverlay(
 
     // Initialize state when overlay opens
     LaunchedEffect(overlayState.isVisible) {
-        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-            Log.d(OVERLAY_DEBUG_TAG, "Overlay visible: ${overlayState.isVisible}")
-        }
         if (overlayState.isVisible) {
             currentIndex = overlayState.selectedIndex
-            displayIndex = overlayState.selectedIndex
-            scale = 1f
+            scale = OverlayConstants.MIN_ZOOM_SCALE
             offsetX = 0f
             offsetY = 0f
             gestureMode = GestureMode.NONE
@@ -472,15 +477,6 @@ fun MediaOverlay(
 
     // Current media item (use currentIndex for rendering to prevent blink)
     val currentItem = mediaItems.getOrNull(currentIndex)
-
-    LaunchedEffect(currentItem?.id, currentItem?.isVideo) {
-        if (!com.prantiux.pixelgallery.BuildConfig.DEBUG || currentItem == null) return@LaunchedEffect
-        if (currentItem.isVideo) {
-            Log.d(OVERLAY_DEBUG_TAG, "Rendering VIDEO")
-        } else {
-            Log.d(OVERLAY_DEBUG_TAG, "Rendering IMAGE")
-        }
-    }
     
     // Action handlers (defined after currentItem)
     val shareItem: () -> Unit = {
@@ -506,19 +502,11 @@ fun MediaOverlay(
                 viewModel.enterSelectionMode(item)
                 viewModel.deleteSelectedItems(context) { success ->
                     if (success) {
-                        // After successful deletion, slide to next item
-                        val nextIndex = if (currentIndex < mediaItems.size - 1) {
-                            currentIndex // Stay at same index, next item shifts into position
-                        } else {
-                            (currentIndex - 1).coerceAtLeast(0) // Go to previous if was last
-                        }
-                        
                         // If no more items, close overlay
                         if (mediaItems.size <= 1) {
                             onDismiss()
                         } else {
                             // Slide to next item without closing
-                            displayIndex = nextIndex
                             viewModel.exitSelectionMode()
                         }
                     }
@@ -597,8 +585,8 @@ fun MediaOverlay(
         if (currentItem?.isVideo != true && doubleTapToZoom) {
             scope.launch {
                 // Calculate target scale based on zoom level setting
-                val targetScale = if (scale > 1f) {
-                    1f  // Zoom out to fit
+                val targetScale = if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
+                    OverlayConstants.MIN_ZOOM_SCALE  // Zoom out to fit
                 } else {
                     when (doubleTapZoomLevel) {
                         "2x" -> 2f
@@ -607,8 +595,8 @@ fun MediaOverlay(
                         else -> 2f
                     }
                 }
-                val targetOffsetX = if (targetScale == 1f) 0f else offsetX
-                val targetOffsetY = if (targetScale == 1f) 0f else offsetY
+                val targetOffsetX = if (targetScale == OverlayConstants.MIN_ZOOM_SCALE) 0f else offsetX
+                val targetOffsetY = if (targetScale == OverlayConstants.MIN_ZOOM_SCALE) 0f else offsetY
                 
                 animate(
                     initialValue = scale,
@@ -623,8 +611,8 @@ fun MediaOverlay(
         }
     }
 
-    val resetZoomStateForPageChange: (Int) -> Unit = { index ->
-        scale = 1f
+    val resetZoomStateForPageChange: (Int) -> Unit = { _ ->
+        scale = OverlayConstants.MIN_ZOOM_SCALE
         offsetX = 0f
         offsetY = 0f
     }
@@ -663,7 +651,6 @@ fun MediaOverlay(
             currentIndex = targetIndex
             resetZoomStateForPageChange(currentIndex)
             viewModel.updateOverlayIndex(currentIndex)
-            Log.d(MEDIA_OVERLAY_LOG, "PAGE_NAV from=$oldIndex to=$currentIndex")
             preloadNeighbors(currentIndex)
             horizontalOffset.snapTo(0f)
             isNavigating = false
@@ -696,7 +683,6 @@ fun MediaOverlay(
             currentIndex = targetIndex
             resetZoomStateForPageChange(currentIndex)
             viewModel.updateOverlayIndex(currentIndex)
-            Log.d(MEDIA_OVERLAY_LOG, "PAGE_NAV from=$oldIndex to=$currentIndex")
             preloadNeighbors(currentIndex)
             horizontalOffset.snapTo(0f)
             isNavigating = false
@@ -704,7 +690,7 @@ fun MediaOverlay(
     }
 
     // Calculate screen dimensions
-    // IMPORTANT: These values should match the coordinate space of thumbnailBounds
+    // IMPORTANT: These values should stay in the same coordinate space as gesture math
     val screenWidth = pageWidthPx
     val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
 
@@ -741,7 +727,7 @@ fun MediaOverlay(
     val backgroundAlpha = when {
         gestureMode == GestureMode.VERTICAL_DOWN -> {
             // During swipe down, fade out based on drag distance
-            1f * (1f - closeProgress)
+            1f - closeProgress
         }
         else -> {
             // Normal state: full opacity
@@ -760,6 +746,8 @@ fun MediaOverlay(
     var bottomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var videoControlsBounds by remember { mutableStateOf<Rect?>(null) }
     var isAnyVideoFullscreen by remember { mutableStateOf(false) }
+    var lastTapTimeMs by remember { mutableLongStateOf(0L) }
+    var lastTapPosition by remember { mutableStateOf(Offset.Zero) }
 
     val latestTopBarBounds by rememberUpdatedState(topBarBounds)
     val latestBottomBarBounds by rememberUpdatedState(bottomBarBounds)
@@ -790,11 +778,6 @@ fun MediaOverlay(
                         waitForUpOrCancellation()
                         return@awaitEachGesture
                     }
-                    
-                    // Only process when scale = 1f
-                    if (scale != 1f) {
-                        return@awaitEachGesture
-                    }
 
                     var currentGestureMode = GestureMode.NONE
                     var accumulatedDx = 0f
@@ -802,6 +785,8 @@ fun MediaOverlay(
                     var lastMoveTime = System.currentTimeMillis()
                     var velocityX = 0f
                     var velocityY = 0f
+                    var upPosition = down.position
+                    var isMultiTouch = false
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -809,14 +794,14 @@ fun MediaOverlay(
                         // Check if finger released
                         val change = event.changes.firstOrNull() ?: break
                         if (!change.pressed) {
-                            // ✅ Consume on pointer UP
-                            change.consume()
+                            upPosition = change.position
                             break
                         }
 
                         // Detect multi-touch for zoom
                         if (event.changes.size > 1) {
                             currentGestureMode = GestureMode.ZOOM
+                            isMultiTouch = true
                             // Let zoom handler consume
                             break
                         }
@@ -827,9 +812,14 @@ fun MediaOverlay(
                         accumulatedDx += dx
                         accumulatedDy += dy
 
+                        // When zoomed, do not run swipe direction lock; only allow tap resolution on release.
+                        if (scale != OverlayConstants.MIN_ZOOM_SCALE) {
+                            continue
+                        }
+
                         // 🔒 Direction lock - NO CONSUMPTION YET
                         if (currentGestureMode == GestureMode.NONE) {
-                            val threshold = 10f
+                            val threshold = OverlayConstants.TAP_SLOP_PX
                             if (abs(accumulatedDx) > threshold || abs(accumulatedDy) > threshold) {
                                 currentGestureMode = when {
                                     abs(accumulatedDx) > abs(accumulatedDy) -> GestureMode.HORIZONTAL_SWIPE
@@ -904,6 +894,34 @@ fun MediaOverlay(
                         }
                     }
 
+                    val isTapGesture = !isMultiTouch && isTap(down.position, upPosition)
+                    if (isTapGesture) {
+                        val touchPosition = down.position
+                        val inBlockedZone =
+                            (latestTopBarBounds?.contains(touchPosition) == true) ||
+                                (latestBottomBarBounds?.contains(touchPosition) == true) ||
+                                (latestVideoControlsBounds?.contains(touchPosition) == true)
+
+                        if (!inBlockedZone) {
+                            val now = System.currentTimeMillis()
+                            val isDoubleTap =
+                                (now - lastTapTimeMs) <= 300L &&
+                                    (touchPosition - lastTapPosition).getDistance() < 48f
+
+                            if (isDoubleTap) {
+                                handleDoubleTap()
+                                lastTapTimeMs = 0L
+                            } else {
+                                showControls = !showControls
+                                lastTapTimeMs = now
+                                lastTapPosition = touchPosition
+                            }
+                        }
+
+                        gestureMode = GestureMode.NONE
+                        return@awaitEachGesture
+                    }
+
                     // 5️⃣ Release logic - decide complete or snap back
                     when (currentGestureMode) {
                         GestureMode.HORIZONTAL_SWIPE -> {
@@ -965,26 +983,22 @@ fun MediaOverlay(
                                     if (detailsPanelProgress.value >= 0.3f) {
                                         // Complete gesture - lock details panel at 100%
                                         showDetailsPanel = true
-                                        launch {
-                                            detailsPanelProgress.animateTo(
-                                                targetValue = 1f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
+                                        detailsPanelProgress.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
                                             )
-                                        }
+                                        )
                                     } else {
                                         // Snap back - collapse details
-                                        launch {
-                                            detailsPanelProgress.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
+                                        detailsPanelProgress.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
                                             )
-                                        }
+                                        )
                                         showDetailsPanel = false
                                         showControls = true
                                     }
@@ -1008,35 +1022,31 @@ fun MediaOverlay(
                                     
                                     if (shouldCloseDetails) {
                                         // Complete close - collapse details
-                                        launch {
-                                            detailsPanelProgress.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
+                                        detailsPanelProgress.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
                                             )
-                                        }
+                                        )
                                         showDetailsPanel = false
                                         showControls = true
                                     } else {
                                         // Snap back to open
-                                        launch {
-                                            detailsPanelProgress.animateTo(
-                                                targetValue = 1f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
+                                        detailsPanelProgress.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
                                             )
-                                        }
+                                        )
                                         showDetailsPanel = true
                                     }
                                     verticalOffset.snapTo(0f)
                                 }
                             } else if (swipeDownToClose) {
                                 // Details panel is closed, proceed with image close only if enabled
-                                val threshold = 150f
+                                val threshold = OverlayConstants.VERTICAL_CLOSE_THRESHOLD_PX
                                 
                                 
                                 scope.launch {
@@ -1134,14 +1144,7 @@ fun MediaOverlay(
                             .build()
                     )
                     
-                    // Calculate image aspect ratio (width / height)
                     val imageSize = painter.intrinsicSize
-                    val imageAspectRatio = if (imageSize.width > 0 && imageSize.height > 0) {
-                        imageSize.width / imageSize.height
-                    } else {
-                        screenWidth / screenHeight  // Fallback to screen aspect
-                    }
-                    val isHorizontalImage = imageAspectRatio > 1.0f  // Width > Height
                     
                     // Display image fullscreen
                     Box(
@@ -1167,16 +1170,6 @@ fun MediaOverlay(
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(Unit) {
-                                // Double-tap detection for images (before single tap)
-                                detectTapGestures(
-                                    onDoubleTap = { handleDoubleTap() },
-                                    onTap = {
-                                        // Single tap to toggle UI
-                                        showControls = !showControls
-                                    }
-                                )
-                            }
                             .graphicsLayer {
                                 transformOrigin = TransformOrigin(0.5f, 0.5f)
                                 
@@ -1208,7 +1201,7 @@ fun MediaOverlay(
                                     }
                                     
                                     // Zoom transforms
-                                    if (scale > 1f) {
+                                    if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
                                         this.scaleX *= scale
                                         this.scaleY *= scale
                                         this.translationX += offsetX
@@ -1218,20 +1211,45 @@ fun MediaOverlay(
                             }
                         .pointerInput(Unit) {
                             // Pinch zoom (highest priority) - disabled for videos
-                            if (item.isVideo != true) {
+                            if (!item.isVideo) {
                                 detectTransformGestures { _, pan, zoom, _ ->
-                                    val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                    scale = newScale
-                                        
-                                        if (scale > 1f) {
-                                            gestureMode = GestureMode.ZOOM
-                                            offsetX += pan.x
-                                            offsetY += pan.y
-                                        } else {
-                                            offsetX = 0f
-                                            offsetY = 0f
-                                            gestureMode = GestureMode.NONE
-                                        }
+                                    val newScale = calculateScale(scale, zoom)
+
+                                    // Calculate displayed image size in Fit mode, then clamp pan in scaled bounds.
+                                    val rawImageWidth = if (imageSize.width > 0f) imageSize.width else screenWidth
+                                    val rawImageHeight = if (imageSize.height > 0f) imageSize.height else screenHeight
+                                    val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                                    val fittedImageWidth = rawImageWidth * fitScale
+                                    val fittedImageHeight = rawImageHeight * fitScale
+
+                                    if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
+                                        gestureMode = GestureMode.ZOOM
+
+                                        // Keep pan speed perceptually constant as zoom increases.
+                                        val adjustedPanX = pan.x * newScale
+                                        val adjustedPanY = pan.y * newScale
+                                        val proposedOffsetX = offsetX + adjustedPanX
+                                        val proposedOffsetY = offsetY + adjustedPanY
+
+                                        val (clampedOffsetX, clampedOffsetY) = clampOffset(
+                                            offsetX = proposedOffsetX,
+                                            offsetY = proposedOffsetY,
+                                            scale = newScale,
+                                            containerWidth = screenWidth,
+                                            containerHeight = screenHeight,
+                                            imageWidth = fittedImageWidth,
+                                            imageHeight = fittedImageHeight
+                                        )
+
+                                        scale = newScale
+                                        offsetX = clampedOffsetX
+                                        offsetY = clampedOffsetY
+                                    } else {
+                                        scale = OverlayConstants.MIN_ZOOM_SCALE
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                        gestureMode = GestureMode.NONE
+                                    }
                                 }
                             }
                         }
@@ -1901,19 +1919,6 @@ private fun CustomVideoControls(
                     onControlsBoundsChanged(coordinates.boundsInRoot())
                 }
                 .padding(bottom = bottomBarHeight) // Attached to bottom bar, no spacing
-                .pointerInput(isFullscreen) {
-                    // Block ALL gestures in this area (video controls zone)
-                    // In fullscreen, also block to prevent any interaction
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            // Consume all pointer events to prevent ANY gestures from passing through
-                            event.changes.forEach { change ->
-                                change.consume()
-                            }
-                        }
-                    }
-                }
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
