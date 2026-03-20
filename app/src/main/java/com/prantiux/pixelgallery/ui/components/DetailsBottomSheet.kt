@@ -5,6 +5,8 @@ package com.prantiux.pixelgallery.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -115,8 +117,8 @@ fun DetailsBottomSheetContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)  // Takes remaining space, scrollable
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                  .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
         // Header Row
         item {
@@ -135,10 +137,10 @@ fun DetailsBottomSheetContent(
                 )
                 
                 // Optional action icon (share)
-                IconButton(onClick = { /* Share action */ }) {
+                IconButton(onClick = onEditMetadata) {
                     FontIcon(
-                        unicode = FontIcons.Share,
-                        contentDescription = "Share",
+                        unicode = FontIcons.Edit,
+                        contentDescription = "Edit metadata",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         size = 22.sp
                     )
@@ -146,9 +148,41 @@ fun DetailsBottomSheetContent(
             }
         }
         
-        // Metadata Card (Main Info)
+        val dateFormat = SimpleDateFormat("MMM dd, yyyy • h:mm a", Locale.getDefault())
+        val formattedDate = dateFormat.format(Date(mediaItem.dateAdded * 1000))
+
+        // Grouped metadata cards (Settings-style)
         item {
-            MetadataCard(mediaItem = mediaItem)
+            DetailInfoCard(
+                icon = FontIcons.Image,
+                label = "Name",
+                value = mediaItem.displayName,
+                position = DetailCardPosition.TOP
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        item {
+            DetailInfoCard(
+                icon = FontIcons.CalendarToday,
+                label = "Date Taken",
+                value = formattedDate,
+                position = DetailCardPosition.MIDDLE
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        item {
+            SpecsInfoCard(
+                mediaItem = mediaItem,
+                position = DetailCardPosition.BOTTOM
+            )
         }
         
         // Location Section (ONLY if GPS data exists)
@@ -164,6 +198,10 @@ fun DetailsBottomSheetContent(
         
         // File Path Card
         item {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        item {
             FilePathCard(filePath = mediaItem.path)
         }
         
@@ -173,162 +211,46 @@ fun DetailsBottomSheetContent(
         }
     }
         
-        // Sticky button at bottom - always visible above system nav
-        Button(
-            onClick = onEditMetadata,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 12.dp, bottom = 16.dp)
-                .height(48.dp),
-            shape = MaterialTheme.shapes.medium,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ),
-            elevation = ButtonDefaults.buttonElevation(
-                defaultElevation = 2.dp,
-                pressedElevation = 4.dp
-            )
-        ) {
-            Text(
-                text = "Edit Metadata",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Medium
-            )
-        }
     }
 }
 
-/**
- * Metadata Card Component
- * Displays file name, date, and specs in a clean card layout
- */
-@Composable
-private fun MetadataCard(mediaItem: MediaItem) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Name Row
-            MetadataRow(
-                icon = FontIcons.Image,
-                label = "Name",
-                value = mediaItem.displayName,
-                showDivider = true
-            )
-            
-            // Date Taken Row
-            val dateFormat = SimpleDateFormat("MMM dd, yyyy • h:mm a", Locale.getDefault())
-            val formattedDate = dateFormat.format(Date(mediaItem.dateAdded * 1000))
-            
-            MetadataRow(
-                icon = FontIcons.CalendarToday,
-                label = "Date Taken",
-                value = formattedDate,
-                showDivider = true
-            )
-            
-            // Specs Row (pills)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FontIcon(
-                    unicode = FontIcons.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    size = 20.sp
-                )
-                
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Specs",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium
-                    )
-                    
-                    // Pills container
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        // File size pill
-                        val sizeKB = mediaItem.size / 1024
-                        val sizeFormatted = if (sizeKB > 1024) {
-                            String.format("%.1f MB", sizeKB / 1024.0)
-                        } else {
-                            "$sizeKB KB"
-                        }
-                        SpecPill(text = sizeFormatted)
-                        
-                        // Megapixels pill (for images)
-                        if (!mediaItem.isVideo && mediaItem.width > 0 && mediaItem.height > 0) {
-                            val megapixels = (mediaItem.width * mediaItem.height) / 1_000_000.0
-                            SpecPill(text = String.format("%.1f MP", megapixels))
-                        }
-                        
-                        // Resolution pill
-                        if (mediaItem.width > 0 && mediaItem.height > 0) {
-                            SpecPill(text = "${mediaItem.width} × ${mediaItem.height}")
-                        }
-                    }
-                }
-            }
-        }
-    }
+private enum class DetailCardPosition {
+    TOP, MIDDLE, BOTTOM, SINGLE
 }
 
-/**
- * Metadata Row Component
- * Single row with icon, label, and value
- */
 @Composable
-private fun MetadataRow(
+private fun DetailInfoCard(
     icon: String,
     label: String,
     value: String,
-    showDivider: Boolean = false
+    position: DetailCardPosition
 ) {
-    Column {
+    Surface(
+        shape = detailCardShape(position),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Leading icon
             FontIcon(
                 unicode = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                size = 20.sp
+                size = 24.sp,
+                tint = MaterialTheme.colorScheme.primary
             )
-            
-            // Label and value stacked
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = value,
@@ -339,14 +261,76 @@ private fun MetadataRow(
                 )
             }
         }
-        
-        // Optional divider
-        if (showDivider) {
-            HorizontalDivider(
-                modifier = Modifier.padding(start = 32.dp, top = 12.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    }
+}
+
+@Composable
+private fun SpecsInfoCard(
+    mediaItem: MediaItem,
+    position: DetailCardPosition
+) {
+    val sizeKB = mediaItem.size / 1024
+    val sizeFormatted = if (sizeKB > 1024) {
+        String.format("%.1f MB", sizeKB / 1024.0)
+    } else {
+        "$sizeKB KB"
+    }
+
+    Surface(
+        shape = detailCardShape(position),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            FontIcon(
+                unicode = FontIcons.Info,
+                contentDescription = null,
+                size = 24.sp,
+                tint = MaterialTheme.colorScheme.primary
             )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Specs",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    SpecPill(text = sizeFormatted)
+                    if (!mediaItem.isVideo && mediaItem.width > 0 && mediaItem.height > 0) {
+                        val megapixels = (mediaItem.width * mediaItem.height) / 1_000_000.0
+                        SpecPill(text = String.format("%.1f MP", megapixels))
+                    }
+                    if (mediaItem.width > 0 && mediaItem.height > 0) {
+                        SpecPill(text = "${mediaItem.width} × ${mediaItem.height}")
+                    }
+                }
+            }
         }
+    }
+}
+
+private fun detailCardShape(position: DetailCardPosition): RoundedCornerShape {
+    return when (position) {
+        DetailCardPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
+        DetailCardPosition.MIDDLE -> RoundedCornerShape(12.dp)
+        DetailCardPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
+        DetailCardPosition.SINGLE -> RoundedCornerShape(24.dp)
     }
 }
 
@@ -489,19 +473,16 @@ private fun LocationCard(
  */
 @Composable
 private fun FilePathCard(filePath: String) {
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        shape = detailCardShape(DetailCardPosition.SINGLE),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Folder icon
@@ -509,7 +490,7 @@ private fun FilePathCard(filePath: String) {
                 unicode = FontIcons.Folder,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                size = 20.sp
+                size = 24.sp
             )
             
             // Path text
@@ -519,15 +500,15 @@ private fun FilePathCard(filePath: String) {
             ) {
                 Text(
                     text = "File Location",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = filePath,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
