@@ -1759,7 +1759,7 @@ class MediaViewModel : ViewModel() {
     
     // Called when user cancels the trash request
     fun onDeleteCancelled() {
-        // Just close the dialog, keep selection mode active
+        exitSelectionMode()
     }
     
     // Get trash request for Android 11+ (returns PendingIntent to launch)
