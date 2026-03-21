@@ -15,13 +15,16 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.ripple
 import androidx.compose.material3.toShape
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.*
@@ -152,29 +155,10 @@ fun MediaOverlay(
     val keepScreenOn by settingsDataStore.keepScreenOnFlow.collectAsState(initial = true)
     val muteByDefault by settingsDataStore.muteByDefaultFlow.collectAsState(initial = false)
     
-    // Set solid black colors for system bars during media overlay using modern API
-    SideEffect {
-        val window = (view.context as? Activity)?.window
-        if (window != null) {
-            // Use modern WindowInsetsController API for appearance
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                window.insetsController?.setSystemBarsAppearance(
-                    0,  // Dark content (light icons/text)
-                    android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or 
-                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-                )
-            }
-            // Set colors - suppress deprecation warning as these APIs are still the standard way
-            // Note: Deprecated in Java but still needed for all API levels
-            @Suppress("DEPRECATION")
-            window.statusBarColor = android.graphics.Color.BLACK
-            @Suppress("DEPRECATION")
-            window.navigationBarColor = android.graphics.Color.BLACK
-        }
-    }
-    
     // Check if this is trash mode
     val isTrashMode = overlayState.mediaType == "trash"
+    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val barColor = if (isDarkTheme) Color.Black else Color.White
 
     // Current index state
     var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
@@ -212,13 +196,38 @@ fun MediaOverlay(
 
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
+    var showBars by remember { mutableStateOf(true) }
     var isVideoFullscreen by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    val isDetailsOpen = detailsPanelProgress.value > 0.5f
 
-    LaunchedEffect(showControls) {
-        if (showControls) {
-            delay(3000L)
-            showControls = false
+    val windowInsetsController = remember(view) {
+        WindowInsetsControllerCompat(
+            (view.context as Activity).window,
+            view
+        )
+    }
+
+    LaunchedEffect(showBars, isDetailsOpen) {
+        val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+        if (showBars || isDetailsOpen) {
+            windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
+            windowInsetsController.isAppearanceLightStatusBars = !isDarkTheme
+            windowInsetsController.isAppearanceLightNavigationBars = !isDarkTheme
+            @Suppress("DEPRECATION")
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        } else {
+            windowInsetsController.hide(WindowInsetsCompat.Type.systemBars())
+            windowInsetsController.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -270,16 +279,17 @@ fun MediaOverlay(
 
     LaunchedEffect(Unit) {
         for (dy in verticalUpMoveDeltas) {
-            val resistanceFactor = 1f - (detailsPanelProgress.value * 0.5f)
-            val adjustedDy = dy * resistanceFactor
-            verticalOffset.snapTo(verticalOffset.value + adjustedDy)
+            verticalOffset.snapTo(verticalOffset.value + dy)
 
-            // Calculate progress based on drag distance (threshold = 50% screen height)
             val rawProgress = abs(verticalOffset.value) / (screenHeight * 0.5f)
-            val progress = rawProgress.coerceIn(0f, 1f)
-            detailsPanelProgress.snapTo(progress)
+            val clampedRaw = rawProgress.coerceIn(0f, 1f)
 
-            // Smoothly transition controls as details panel progresses.
+            // Ease-in curve: slow start, increasing resistance toward end
+            val easedProgress = Math.pow(clampedRaw.toDouble(), 1.6).toFloat()
+                .coerceIn(0f, 1f)
+
+            detailsPanelProgress.snapTo(easedProgress)
+
             showControls = detailsPanelProgress.value < 0.1f
         }
     }
@@ -740,15 +750,35 @@ fun MediaOverlay(
             // During swipe down, fade out based on drag distance
             1f - closeProgress
         }
-        else -> {
-            // Normal state: full opacity
-            1f
+        else -> 1f
+    }
+
+    // In light theme, scrim transitions between surface color (controls visible)
+    // and black (controls hidden) — matching Google Photos cinema mode behaviour.
+    // In dark theme, scrim is always black.
+    val scrimColor by animateColorAsState(
+        targetValue = when {
+            isDarkTheme -> Color.Black
+            showBars -> Color.White
+            else -> Color.Black
+        },
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "scrimColor"
+    )
+
+    // Controls visibility based on gesture
+    // Hide bars when zoomed in
+    val isZoomed = scale > OverlayConstants.MIN_ZOOM_SCALE
+    LaunchedEffect(isZoomed) {
+        if (isZoomed) {
+            showBars = false
+            showControls = false
         }
     }
 
-    // Controls visibility based on gesture
-    val isDetailsOpen = detailsPanelProgress.value > 0.5f
+
     val controlsVisible = showControls && 
+        showBars &&
         gestureMode != GestureMode.VERTICAL_UP &&
         !isDetailsOpen &&
         closeProgress == 0f
@@ -924,7 +954,10 @@ fun MediaOverlay(
                                 handleDoubleTap()
                                 lastTapTimeMs = 0L
                             } else {
-                                showControls = !showControls
+                                if (!isDetailsOpen) {
+                                    showBars = !showBars
+                                    showControls = showBars
+                                }
                                 lastTapTimeMs = now
                                 lastTapPosition = touchPosition
                             }
@@ -986,7 +1019,7 @@ fun MediaOverlay(
                                 }
                             }
                         }
-                        
+
                         GestureMode.VERTICAL_UP -> {
                             // Only process if swipe up to details is enabled
                             if (swipeUpToDetails) {
@@ -1086,7 +1119,7 @@ fun MediaOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = backgroundAlpha))
+                .background(scrimColor.copy(alpha = backgroundAlpha))
         )
 
         // Media image
@@ -1318,7 +1351,7 @@ fun MediaOverlay(
                 }
             }
         }
-        val detailsTopBarLayerVisible = (detailsPanelProgress.value > 0.5f) && !isAnyVideoFullscreen
+        val detailsTopBarLayerVisible = isDetailsOpen && !isAnyVideoFullscreen
         if (detailsTopBarLayerVisible) {
             val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             Box(
@@ -1329,9 +1362,12 @@ fun MediaOverlay(
                     .background(
                         brush = Brush.verticalGradient(
                             colorStops = arrayOf(
-                                0f to Color.Black,
-                                0.5f to Color.Black,
-                                1f to Color.Transparent
+                                0.0f to barColor,
+                                0.45f to barColor,
+                                0.65f to barColor.copy(alpha = 0.85f),
+                                0.8f to barColor.copy(alpha = 0.5f),
+                                0.92f to barColor.copy(alpha = 0.15f),
+                                1.0f to Color.Transparent
                             )
                         )
                     )
@@ -1340,9 +1376,33 @@ fun MediaOverlay(
 
         // Top header (animated) - hide during fullscreen
         AnimatedVisibility(
-            visible = controlsVisible && !isAnyVideoFullscreen,
-            enter = fadeIn() + slideInVertically { -it },
-            exit = fadeOut() + slideOutVertically { -it },
+            visible = showBars && !isAnyVideoFullscreen && !isDetailsOpen,
+            enter = fadeIn(
+                animationSpec = tween(
+                    durationMillis = 150,
+                    delayMillis = 0,
+                    easing = FastOutSlowInEasing
+                )
+            ) + slideInVertically(
+                animationSpec = tween(
+                    durationMillis = 180,
+                    delayMillis = 0,
+                    easing = FastOutSlowInEasing
+                )
+            ) { -it },
+            exit = fadeOut(
+                animationSpec = tween(
+                    durationMillis = 120,
+                    delayMillis = 30,
+                    easing = FastOutLinearInEasing
+                )
+            ) + slideOutVertically(
+                animationSpec = tween(
+                    durationMillis = 140,
+                    delayMillis = 30,
+                    easing = FastOutLinearInEasing
+                )
+            ) { -it },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .graphicsLayer {
@@ -1351,63 +1411,110 @@ fun MediaOverlay(
                     translationY = -closeProgress * 100f
                 }
         ) {
-            // Background extends behind status bar
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black)
-                    .onGloballyPositioned { coordinates ->
-                        topBarBounds = coordinates.boundsInRoot()
-                    }
-                    .statusBarsPadding()  // Content respects status bar inset
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                // Background extends behind status bar
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left side: Location + Date/Time stacked
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        // Date + Time
-                        Text(
-                            text = remember(currentItem?.dateAdded) {
-                                currentItem?.let {
-                                    java.text.SimpleDateFormat(
-                                        "MMM d, yyyy • h:mm a",
-                                        java.util.Locale.getDefault()
-                                    ).format(java.util.Date(it.dateAdded * 1000))
-                                } ?: ""
-                            },
-                            color = Color.White.copy(alpha = 0.9f),
-                            style = MaterialTheme.typography.bodySmall
+                        .background(
+                            brush = if (isZoomed) {
+                                Brush.verticalGradient(
+                                    colorStops = arrayOf(
+                                        0.0f to barColor.copy(alpha = 0.3f),
+                                        0.75f to barColor.copy(alpha = 0.3f),
+                                        0.78f to barColor.copy(alpha = 0.28f),
+                                        0.86f to barColor.copy(alpha = 0.16f),
+                                        0.93f to barColor.copy(alpha = 0.05f),
+                                        0.98f to barColor.copy(alpha = 0.01f),
+                                        1.0f to Color.Transparent
+                                    )
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    colors = listOf(barColor, barColor)
+                                )
+                            }
                         )
-                    }
-                    
-                    // Right side: Favorite button (replaces three-dot menu)
-                    if (!isTrashMode) {
-                        val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
-                        
-                        IconButton(onClick = toggleFavorite) {
-                            FontIcon(
-                                unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
-                                contentDescription = if (isFavorited) "Remove from favorites" else "Add to favorites",
-                                tint = if (isFavorited) Color(0xFFFFD700) else Color.White
+                        .onGloballyPositioned { coordinates ->
+                            topBarBounds = coordinates.boundsInRoot()
+                        }
+                        .statusBarsPadding()  // Content respects status bar inset
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left side: Location + Date/Time stacked
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            // Date + Time
+                            Text(
+                                text = remember(currentItem?.dateAdded) {
+                                    currentItem?.let {
+                                        java.text.SimpleDateFormat(
+                                            "MMM d, yyyy • h:mm a",
+                                            java.util.Locale.getDefault()
+                                        ).format(java.util.Date(it.dateAdded * 1000))
+                                    } ?: ""
+                                },
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                                style = MaterialTheme.typography.bodySmall
                             )
+                        }
+
+                        // Right side: Favorite button (replaces three-dot menu)
+                        if (!isTrashMode) {
+                            val isFavorited = currentItem?.let { favoriteStates[it.id] ?: it.isFavorite } ?: false
+
+                            IconButton(onClick = toggleFavorite) {
+                                FontIcon(
+                                    unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
+                                    contentDescription = if (isFavorited) "Remove from favorites" else "Add to favorites",
+                                    tint = if (isFavorited) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
+
             }
         }
 
         // Bottom controls (animated)
         AnimatedVisibility(
-            visible = controlsVisible,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it },
+            visible = showBars && !isDetailsOpen,
+            enter = fadeIn(
+                animationSpec = tween(
+                    durationMillis = 150,
+                    delayMillis = 40,
+                    easing = FastOutSlowInEasing
+                )
+            ) + slideInVertically(
+                animationSpec = tween(
+                    durationMillis = 180,
+                    delayMillis = 40,
+                    easing = FastOutSlowInEasing
+                )
+            ) { it },
+            exit = fadeOut(
+                animationSpec = tween(
+                    durationMillis = 120,
+                    delayMillis = 0,
+                    easing = FastOutLinearInEasing
+                )
+            ) + slideOutVertically(
+                animationSpec = tween(
+                    durationMillis = 140,
+                    delayMillis = 0,
+                    easing = FastOutLinearInEasing
+                )
+            ) { it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .graphicsLayer {
@@ -1416,263 +1523,375 @@ fun MediaOverlay(
                     translationY = closeProgress * 100f
                 }
         ) {
-            // Background extends behind navigation bar
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black)
-                    .onGloballyPositioned { coordinates ->
-                        bottomBarBounds = coordinates.boundsInRoot()
-                    }
-                    .navigationBarsPadding()  // Content respects navigation bar inset
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                // Background extends behind navigation bar
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (isTrashMode) {
-                        // Trash mode: Only Restore and Delete
-                        IconButton(onClick = restoreItem) {
-                            FontIcon(
-                                unicode = FontIcons.Refresh,
-                                contentDescription = "Restore",
-                                tint = Color.White
-                            )
-                        }
-                        
-                        IconButton(onClick = deleteItem) {
-                            FontIcon(
-                                unicode = FontIcons.Delete,
-                                contentDescription = "Delete permanently",
-                                tint = Color.White
-                            )
-                        }
-                    } else {
-                        // Normal mode: Edit → Share → Delete → Hamburger Menu
-                        
-                        // Edit
-                        IconButton(onClick = editItem) {
-                            FontIcon(
-                                unicode = FontIcons.Edit,
-                                contentDescription = "Edit",
-                                tint = Color.White
-                            )
-                        }
-                        
-                        // Share
-                        IconButton(onClick = shareItem) {
-                            FontIcon(
-                                unicode = FontIcons.Share,
-                                contentDescription = "Share",
-                                tint = Color.White
-                            )
-                        }
-                        
-                        // Delete
-                        IconButton(onClick = deleteItem) {
-                            FontIcon(
-                                unicode = FontIcons.Delete,
-                                contentDescription = "Delete",
-                                tint = Color.White
-                            )
-                        }
-                        
-                        // Hamburger Menu (more options)
-                        Box {
-                            IconButton(onClick = { menuExpanded = true }) {
-                                FontIcon(
-                                    unicode = FontIcons.Menu,
-                                    contentDescription = "More options",
-                                    tint = Color.White
+                        .background(
+                            brush = if (isZoomed) {
+                                Brush.verticalGradient(
+                                    colorStops = arrayOf(
+                                        0.0f to Color.Transparent,
+                                        0.02f to barColor.copy(alpha = 0.01f),
+                                        0.07f to barColor.copy(alpha = 0.05f),
+                                        0.14f to barColor.copy(alpha = 0.16f),
+                                        0.22f to barColor.copy(alpha = 0.28f),
+                                        0.25f to barColor.copy(alpha = 0.3f),
+                                        1.0f to barColor.copy(alpha = 0.3f)
+                                    )
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    colors = listOf(barColor, barColor)
                                 )
                             }
-                            // Dropdown menu
-                            DropdownMenu(
-                                expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false },
-                                modifier = Modifier.widthIn(min = 220.dp),
-                                offset = DpOffset(x = (-8).dp, y = (-8).dp),
-                                shape = SmoothCornerShape(20.dp, 60),
-                                containerColor = Color.Black.copy(alpha = 0.95f)
+                        )
+                        .onGloballyPositioned { coordinates ->
+                            bottomBarBounds = coordinates.boundsInRoot()
+                        }
+                        .navigationBarsPadding()  // Content respects navigation bar inset
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isTrashMode) {
+                            // Trash mode: Only Restore and Delete
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(bounded = false, radius = 32.dp)
+                                    ) { restoreItem() }
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
                             ) {
-                                // 1. Set as wallpaper
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            Surface(
-                                                shape = MaterialShapes.Cookie7Sided.toShape(),
-                                                color = Color.White.copy(alpha = 0.15f),
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.fillMaxSize()
-                                                ) {
-                                                    FontIcon(
-                                                        unicode = FontIcons.Image,
-                                                        contentDescription = null,
-                                                        tint = Color.White,
-                                                        size = 20.sp
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                "Set as wallpaper",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                                                color = Color.White
-                                            )
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        setAsWallpaper()
-                                    },
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                FontIcon(
+                                    unicode = FontIcons.Refresh,
+                                    contentDescription = "Restore",
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
-                                // 2. Copy to album
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            Surface(
-                                                shape = MaterialShapes.Cookie7Sided.toShape(),
-                                                color = Color.White.copy(alpha = 0.15f),
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.fillMaxSize()
-                                                ) {
-                                                    FontIcon(
-                                                        unicode = FontIcons.Copy,
-                                                        contentDescription = null,
-                                                        tint = Color.White,
-                                                        size = 20.sp
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                "Copy to album",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                                                color = Color.White
-                                            )
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        // Show copy to album dialog with current item
-                                        viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem))
-                                    },
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Restore",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                                // 3. Move to album
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            Surface(
-                                                shape = MaterialShapes.Cookie7Sided.toShape(),
-                                                color = Color.White.copy(alpha = 0.15f),
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.fillMaxSize()
-                                                ) {
-                                                    FontIcon(
-                                                        unicode = FontIcons.Move,
-                                                        contentDescription = null,
-                                                        tint = Color.White,
-                                                        size = 20.sp
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                "Move to album",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                                                color = Color.White
-                                            )
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        // Show move to album dialog with current item
-                                        viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem))
-                                    },
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            }
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(bounded = false, radius = 32.dp)
+                                    ) { deleteItem() }
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                FontIcon(
+                                    unicode = FontIcons.Delete,
+                                    contentDescription = "Delete permanently",
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
-                                // 4. Details
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            Surface(
-                                                shape = MaterialShapes.Cookie7Sided.toShape(),
-                                                color = Color.White.copy(alpha = 0.15f),
-                                                modifier = Modifier.size(40.dp)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Delete",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            // Normal mode: Edit -> Share -> Delete -> Hamburger Menu
+
+                            // Edit
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(bounded = false, radius = 32.dp)
+                                    ) { editItem() }
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                FontIcon(
+                                    unicode = FontIcons.Edit,
+                                    contentDescription = "Edit",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Edit",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Share
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(bounded = false, radius = 32.dp)
+                                    ) { shareItem() }
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                FontIcon(
+                                    unicode = FontIcons.Share,
+                                    contentDescription = "Share",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Share",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Delete
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(bounded = false, radius = 32.dp)
+                                    ) { deleteItem() }
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                FontIcon(
+                                    unicode = FontIcons.Delete,
+                                    contentDescription = "Delete",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Delete",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Hamburger Menu (more options)
+                            Box {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = ripple(bounded = false, radius = 32.dp)
+                                        ) { menuExpanded = true }
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                ) {
+                                    FontIcon(
+                                        unicode = FontIcons.Menu,
+                                        contentDescription = "More options",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "More",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                    // Dropdown menu
+                                    DropdownMenu(
+                                        expanded = menuExpanded,
+                                        onDismissRequest = { menuExpanded = false },
+                                        modifier = Modifier.widthIn(min = 220.dp),
+                                        offset = DpOffset(x = (-8).dp, y = (-8).dp),
+                                        shape = SmoothCornerShape(20.dp, 60),
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                    ) {
+                                    // 1. Set as wallpaper
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
                                             ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.fillMaxSize()
+                                                Surface(
+                                                    shape = MaterialShapes.Cookie7Sided.toShape(),
+                                                    color = Color.White.copy(alpha = 0.15f),
+                                                    modifier = Modifier.size(40.dp)
                                                 ) {
-                                                    FontIcon(
-                                                        unicode = FontIcons.Info,
-                                                        contentDescription = null,
-                                                        tint = Color.White,
-                                                        size = 20.sp
-                                                    )
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        FontIcon(
+                                                            unicode = FontIcons.Image,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurface,
+                                                            size = 20.sp
+                                                        )
+                                                    }
                                                 }
-                                            }
-                                            Text(
-                                                "Details",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                                                color = Color.White
-                                            )
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        showControls = false
-                                        scope.launch {
-                                            detailsPanelProgress.animateTo(
-                                                targetValue = 1f,
-                                                animationSpec = spring(
-                                                    dampingRatio = 0.8f,
-                                                    stiffness = 380f
+                                                Text(
+                                                    "Set as wallpaper",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                    color = Color.White
                                                 )
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            menuExpanded = false
+                                            setAsWallpaper()
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                    // 2. Copy to album
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                Surface(
+                                                    shape = MaterialShapes.Cookie7Sided.toShape(),
+                                                    color = Color.White.copy(alpha = 0.15f),
+                                                    modifier = Modifier.size(40.dp)
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        FontIcon(
+                                                            unicode = FontIcons.Copy,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurface,
+                                                            size = 20.sp
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    "Copy to album",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            menuExpanded = false
+                                            // Show copy to album dialog with current item
+                                            viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem))
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                    // 3. Move to album
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                Surface(
+                                                    shape = MaterialShapes.Cookie7Sided.toShape(),
+                                                    color = Color.White.copy(alpha = 0.15f),
+                                                    modifier = Modifier.size(40.dp)
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        FontIcon(
+                                                            unicode = FontIcons.Move,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurface,
+                                                            size = 20.sp
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    "Move to album",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            menuExpanded = false
+                                            // Show move to album dialog with current item
+                                            viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem))
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                    // 4. Details
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                Surface(
+                                                    shape = MaterialShapes.Cookie7Sided.toShape(),
+                                                    color = Color.White.copy(alpha = 0.15f),
+                                                    modifier = Modifier.size(40.dp)
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        FontIcon(
+                                                            unicode = FontIcons.Info,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurface,
+                                                            size = 20.sp
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    "Details",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            menuExpanded = false
+                                            showControls = false
+                                            scope.launch {
+                                                detailsPanelProgress.animateTo(
+                                                    targetValue = 1f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = 0.8f,
+                                                        stiffness = 380f
+                                                    )
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                    }
                             }
                         }
                     }
