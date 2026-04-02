@@ -1,7 +1,11 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
 
 package com.prantiux.pixelgallery.ui.components
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -20,7 +24,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -55,18 +58,16 @@ fun MediaThumbnail(
     isSelected: Boolean,
     isSelectionMode: Boolean,
     shape: Shape,
-    onClick: (androidx.compose.ui.geometry.Rect?) -> Unit,
+    onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
     badgeType: String = "Duration with icon",
     badgeEnabled: Boolean = true,
-    thumbnailQuality: String = "Standard"
+    thumbnailQuality: String = "Standard",
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
-    
-    // Capture thumbnail bounds for shared element animation
-    var thumbnailBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-    
     // Selection state tracking (logging removed for performance)
     
     // Different animation for selection vs deselection for better visibility
@@ -134,6 +135,60 @@ fun MediaThumbnail(
             else -> coil.size.Size(512, 512)  // Default to Standard
         }
         
+        val imageModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                android.util.Log.d(
+                    "SharedElement",
+                    "MediaThumbnail id=${item.id}: sharedBounds ACTIVE"
+                )
+            }
+            with(sharedTransitionScope) {
+                Modifier
+                    .fillMaxSize()
+                    .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
+                    .sharedBounds(
+                        sharedContentState = rememberSharedContentState(
+                            key = "media_${item.id}"
+                        ),
+                        animatedVisibilityScope = animatedVisibilityScope,
+                        // Fade source thumbnail out quickly so duplicate-layer overlap is brief.
+                        exit = fadeOut(
+                            animationSpec = tween(
+                                durationMillis = 90,
+                                easing = LinearEasing
+                            )
+                        ),
+                        boundsTransform = { _, _ ->
+                            tween(durationMillis = 320, easing = FastOutSlowInEasing)
+                        },
+                        clipInOverlayDuringTransition = OverlayClip(innerShape),
+                        resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
+                    )
+                    .clip(innerShape)
+                    .combinedClickable(
+                        onClick = { onClick() },
+                        onLongClick = onLongClick
+                    )
+            }
+        } else {
+            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                android.util.Log.d(
+                    "SharedElement",
+                    "MediaThumbnail id=${item.id}: sharedBounds INACTIVE " +
+                        "(scope=${sharedTransitionScope != null}, " +
+                        "visScope=${animatedVisibilityScope != null})"
+                )
+            }
+            Modifier
+                .fillMaxSize()
+                .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
+                .clip(innerShape)
+                .combinedClickable(
+                    onClick = { onClick() },
+                    onLongClick = onLongClick
+                )
+        }
+
         AsyncImage(
             model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                 .data(item.uri)
@@ -141,30 +196,7 @@ fun MediaThumbnail(
                 .crossfade(true)
                 .build(),
             contentDescription = item.displayName,
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    if (isSelected) {
-                        Modifier.padding(borderWidth)
-                    } else Modifier
-                )
-                .clip(innerShape)
-                .onGloballyPositioned { coordinates ->
-                    // Capture bounds in window coordinates for animation
-                    val layoutCoordinates = coordinates
-                    val position = layoutCoordinates.localToWindow(androidx.compose.ui.geometry.Offset.Zero)
-                    val size = layoutCoordinates.size
-                    thumbnailBounds = androidx.compose.ui.geometry.Rect(
-                        left = position.x,
-                        top = position.y,
-                        right = position.x + size.width,
-                        bottom = position.y + size.height
-                    )
-                }
-                .combinedClickable(
-                    onClick = { onClick(thumbnailBounds) },
-                    onLongClick = onLongClick
-                ),
+            modifier = imageModifier,
             contentScale = ContentScale.Crop
         )
         
