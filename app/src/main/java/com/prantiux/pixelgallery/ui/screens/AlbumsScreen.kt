@@ -96,6 +96,8 @@ fun AlbumsScreen(
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     viewModel: MediaViewModel,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
