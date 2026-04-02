@@ -24,6 +24,8 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 fun FavoritesScreen(
     viewModel: MediaViewModel,
     onNavigateBack: () -> Unit,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     // ROOM-FIRST: Use Room-based favorites flow
@@ -105,21 +107,14 @@ fun FavoritesScreen(
                     badgeType = badgeType,
                     badgeEnabled = badgeEnabled,
                     thumbnailQuality = thumbnailQuality,
-                    onClick = { bounds ->
+                    sharedTransitionScope = sharedTransitionScope,
+                    animatedVisibilityScope = animatedVisibilityScope,
+                    onClick = {
                         val index = favoriteItems.indexOf(item)
-                        val thumbnailBounds = bounds?.let {
-                            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
-                                left = it.left,
-                                top = it.top,
-                                width = it.width,
-                                height = it.height
-                            )
-                        }
                         viewModel.showMediaOverlay(
                             mediaType = "favorites",
                             albumId = "",
-                            selectedIndex = index,
-                            thumbnailBounds = thumbnailBounds
+                            selectedIndex = index
                         )
                     },
                     onLongClick = {}
