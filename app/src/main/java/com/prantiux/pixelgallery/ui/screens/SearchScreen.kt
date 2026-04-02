@@ -79,6 +79,8 @@ data class AlbumInfo(val name: String, val count: Int, val thumbnailUri: android
 fun SearchScreen(
     viewModel: MediaViewModel, 
     navController: androidx.navigation.NavController,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val context = LocalContext.current
@@ -828,24 +830,17 @@ fun SearchScreen(
                                     badgeType = badgeType,
                                     badgeEnabled = badgeEnabled,
                                     thumbnailQuality = thumbnailQuality,
-                                    onClick = { bounds ->
+                                    sharedTransitionScope = sharedTransitionScope,
+                                    animatedVisibilityScope = animatedVisibilityScope,
+                                    onClick = {
                                         // Save search to recent searches
                                         viewModel.addRecentSearch(searchQuery)
                                         
-                                        val thumbnailBounds = bounds?.let {
-                                            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
-                                                left = it.left,
-                                                top = it.top,
-                                                width = it.width,
-                                                height = it.height
-                                            )
-                                        }
                                         viewModel.showMediaOverlay(
                                             mediaType = "search",
                                             albumId = "search_results",
                                             selectedIndex = index,
-                                            searchQuery = searchQuery,
-                                            thumbnailBounds = thumbnailBounds
+                                            searchQuery = searchQuery
                                         )
                                     },
                                     onLongClick = {},
