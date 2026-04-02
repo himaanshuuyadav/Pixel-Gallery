@@ -329,8 +329,7 @@ class MediaViewModel : ViewModel() {
         val mediaType: String = "photos",
         val albumId: String = "all",
         val selectedIndex: Int = 0,
-        val searchQuery: String? = null,
-        val thumbnailBounds: com.prantiux.pixelgallery.ui.animation.SharedElementBounds? = null
+        val searchQuery: String? = null
     )
 
     private val _overlayState = MutableStateFlow(MediaOverlayState())
@@ -1639,16 +1638,14 @@ class MediaViewModel : ViewModel() {
         mediaType: String,
         albumId: String,
         selectedIndex: Int,
-        searchQuery: String? = null,
-        thumbnailBounds: com.prantiux.pixelgallery.ui.animation.SharedElementBounds? = null
+        searchQuery: String? = null
     ) {
         _overlayState.value = MediaOverlayState(
             isVisible = true,
             mediaType = mediaType,
             albumId = albumId,
             selectedIndex = selectedIndex,
-            searchQuery = searchQuery,
-            thumbnailBounds = thumbnailBounds
+            searchQuery = searchQuery
         )
     }
 
@@ -2064,16 +2061,14 @@ class MediaViewModel : ViewModel() {
     
     // Trash overlay functions
     fun showTrashMediaOverlay(
-        selectedIndex: Int,
-        thumbnailBounds: com.prantiux.pixelgallery.ui.animation.SharedElementBounds? = null
+        selectedIndex: Int
     ) {
         _overlayState.value = MediaOverlayState(
             isVisible = true,
             mediaType = "trash",
             albumId = "",
             selectedIndex = selectedIndex,
-            searchQuery = null,
-            thumbnailBounds = thumbnailBounds
+            searchQuery = null
         )
     }
     
