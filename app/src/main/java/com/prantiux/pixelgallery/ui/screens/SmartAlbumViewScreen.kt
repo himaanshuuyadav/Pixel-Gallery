@@ -41,6 +41,8 @@ fun SmartAlbumViewScreen(
     albumId: String,
     onNavigateBack: () -> Unit,
     onNavigateToViewer: (Int) -> Unit,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     // ROOM-FIRST: Use unfiltered media flow for smart albums (independent of Photos View filters)
@@ -137,7 +139,9 @@ fun SmartAlbumViewScreen(
                         mediaType = "smartalbum",
                         albumId = albumId,
                         index = index,
-                        showFavorite = true
+                        showFavorite = true,
+                        sharedTransitionScope = sharedTransitionScope,
+                        animatedVisibilityScope = animatedVisibilityScope
                     )
                 }
             }
