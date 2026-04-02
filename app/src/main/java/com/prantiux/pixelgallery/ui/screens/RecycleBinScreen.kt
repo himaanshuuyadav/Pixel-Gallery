@@ -367,21 +367,12 @@ fun RecycleBinContent(
                                     badgeType = capturedBadgeType,
                                     badgeEnabled = capturedBadgeEnabled,
                                     thumbnailQuality = capturedThumbnailQuality,
-                                    onClick = { bounds ->
+                                    onClick = {
                                         if (isSelectionMode) {
                                             viewModel.toggleTrashSelection(item)
                                         } else {
-                                            val thumbnailBounds = bounds?.let {
-                                                com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
-                                                    left = it.left,
-                                                    top = it.top,
-                                                    width = it.width,
-                                                    height = it.height
-                                                )
-                                            }
                                             viewModel.showTrashMediaOverlay(
-                                                selectedIndex = trashedItems.indexOf(item),
-                                                thumbnailBounds = thumbnailBounds
+                                                selectedIndex = trashedItems.indexOf(item)
                                             )
                                         }
                                     },
