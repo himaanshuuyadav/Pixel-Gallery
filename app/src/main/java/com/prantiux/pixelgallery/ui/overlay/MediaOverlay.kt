@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalAnimationApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
+@file:OptIn(ExperimentalAnimationApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 
 package com.prantiux.pixelgallery.ui.overlay
 
@@ -11,6 +11,9 @@ import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -45,9 +48,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -123,10 +128,10 @@ fun MediaOverlay(
     mediaItems: List<MediaItem>,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
     videoPositionDataStore: com.prantiux.pixelgallery.data.VideoPositionDataStore,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
     onDismiss: () -> Unit
 ) {
-    if (!overlayState.isVisible) return
-
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -192,11 +197,24 @@ fun MediaOverlay(
     val horizontalOffset = remember { Animatable(0f) }
     val verticalOffset = remember { Animatable(0f) }
     val detailsPanelProgress = remember { Animatable(0f) }
+    val imageZIndex = remember { Animatable(1f) }  // For smooth z-order transition during bar entrance
     var isNavigating by remember { mutableStateOf(false) }
 
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
     var showBars by remember { mutableStateOf(true) }
+    var barsRevealUnlocked by remember { mutableStateOf(true) }
+    var isDismissing by remember { mutableStateOf(false) }
+    var openingProgress by remember { mutableStateOf(1f) }
+
+    val animatedOpeningProgress by animateFloatAsState(
+        targetValue = openingProgress,
+        animationSpec = tween(
+            durationMillis = 180,
+            easing = FastOutSlowInEasing
+        ),
+        label = "openingProgress"
+    )
     var isVideoFullscreen by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     val isDetailsOpen = detailsPanelProgress.value > 0.5f
@@ -208,9 +226,18 @@ fun MediaOverlay(
         )
     }
 
-    LaunchedEffect(showBars, isDetailsOpen) {
-        val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
-        if (showBars || isDetailsOpen) {
+    SideEffect {
+        val window = (view.context as? Activity)?.window
+            ?: return@SideEffect
+        if (isDismissing) {
+            windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
+            windowInsetsController.isAppearanceLightStatusBars = !isDarkTheme
+            windowInsetsController.isAppearanceLightNavigationBars = !isDarkTheme
+            @Suppress("DEPRECATION")
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        } else if (showBars || isDetailsOpen) {
             windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
             windowInsetsController.isAppearanceLightStatusBars = !isDarkTheme
             windowInsetsController.isAppearanceLightNavigationBars = !isDarkTheme
@@ -463,6 +490,7 @@ fun MediaOverlay(
 
     // When sheet is closed, back gesture closes overlay
     BackHandler(enabled = overlayState.isVisible && !isSheetOpen) {
+        isDismissing = true
         onDismiss()
     }
 
@@ -511,6 +539,11 @@ fun MediaOverlay(
     // Initialize state when overlay opens
     LaunchedEffect(overlayState.isVisible) {
         if (overlayState.isVisible) {
+            isDismissing = false
+            barsRevealUnlocked = true
+            showControls = false
+            imageZIndex.snapTo(0f)
+            openingProgress = 1f
             currentIndex = overlayState.selectedIndex
             scale = OverlayConstants.MIN_ZOOM_SCALE
             offsetX = 0f
@@ -519,9 +552,10 @@ fun MediaOverlay(
             horizontalOffset.snapTo(0f)
             verticalOffset.snapTo(0f)
             detailsPanelProgress.snapTo(0f)
-            showControls = true
             requestImageForIndex(currentIndex)
             preloadNeighbors(currentIndex)
+            showControls = true
+            imageZIndex.snapTo(0f)
         }
     }
 
@@ -744,27 +778,25 @@ fun MediaOverlay(
     // Thumbnail bounds are captured in window coordinates, so we use them directly
     // without inset adjustment (they're already positioned relative to the window)
 
+    // Read verticalOffset.value unconditionally so snapshot subscription
+    // is always active — this ensures recomposition fires every frame
+    // during the gesture regardless of current gestureMode
+    val currentVerticalOffset = verticalOffset.value
+    val rawCloseProgress = (abs(currentVerticalOffset) /
+        OverlayConstants.VERTICAL_CLOSE_THRESHOLD_PX).coerceIn(0f, 1f)
+
     // Background scrim alpha - based on gesture state only
     val backgroundAlpha = when {
-        gestureMode == GestureMode.VERTICAL_DOWN -> {
-            // During swipe down, fade out based on drag distance
-            1f - closeProgress
-        }
+        isDismissing -> 0f
+        gestureMode == GestureMode.VERTICAL_DOWN ->
+            1f - rawCloseProgress
         else -> 1f
     }
 
     // In light theme, scrim transitions between surface color (controls visible)
     // and black (controls hidden) — matching Google Photos cinema mode behaviour.
     // In dark theme, scrim is always black.
-    val scrimColor by animateColorAsState(
-        targetValue = when {
-            isDarkTheme -> Color.Black
-            showBars -> Color.White
-            else -> Color.Black
-        },
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "scrimColor"
-    )
+    val scrimColor = Color.Black
 
     // Controls visibility based on gesture
     // Hide bars when zoomed in
@@ -1074,8 +1106,8 @@ fun MediaOverlay(
                                 
                                 scope.launch {
                                     if (abs(verticalOffset.value) > threshold) {
-                                        // Complete close gesture
                                         showControls = false
+                                        isDismissing = true
                                         onDismiss()
                                     } else {
                                         // Snap back
@@ -1129,7 +1161,7 @@ fun MediaOverlay(
             val nextItem = mediaItems.getOrNull(currentIndex + 1)?.takeIf { !it.isVideo }
 
             // Render previous, current, and next images for smooth horizontal swipe
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize().zIndex(imageZIndex.value)) {
                 // Previous image - use stable key to prevent rebinding
                 prevItem?.let { prev ->
                     key(prev.id) {  // Stable key prevents recomposition
@@ -1165,22 +1197,66 @@ fun MediaOverlay(
                             mutableStateOf(androidx.compose.ui.geometry.Size.Zero)
                         }
 
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(item.uri)
-                                    .size(targetDecodeSize)
-                                    .memoryCacheKey(item.uri.toString())
-                                    .diskCacheKey(item.uri.toString())
-                                    .crossfade(false)
-                                    .build(),
-                                contentDescription = item.displayName,
-                                contentScale = ContentScale.Fit,
-                                onSuccess = { state ->
-                                    val painter = state.painter
-                                    imageIntrinsicSize = painter.intrinsicSize
-                                },
-                                modifier = Modifier
+                        val sharedModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                                android.util.Log.d(
+                                    "SharedElement",
+                                    "MediaOverlay: sharedBounds ACTIVE for item id=${currentItem?.id}"
+                                )
+                            }
+                            with(sharedTransitionScope) {
+                                Modifier.fillMaxSize().sharedBounds(
+                                    sharedContentState = rememberSharedContentState(
+                                        key = "media_${currentItem?.id}"
+                                    ),
+                                    animatedVisibilityScope = animatedVisibilityScope,
+                                    boundsTransform = { _, _ ->
+                                        tween(durationMillis = 320, easing = FastOutSlowInEasing)
+                                    },
+                                    clipInOverlayDuringTransition = OverlayClip(RoundedCornerShape(0.dp)),
+                                    resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
+                                )
+                            }
+                        } else {
+                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
+                                android.util.Log.d(
+                                    "SharedElement",
+                                    "MediaOverlay: sharedBounds INACTIVE " +
+                                        "(scope=${sharedTransitionScope != null}, " +
+                                        "visScope=${animatedVisibilityScope != null})"
+                                )
+                            }
+                            Modifier.fillMaxSize()
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset {
+                                    IntOffset(
+                                        x = 0,
+                                        y = if (gestureMode == GestureMode.VERTICAL_DOWN &&
+                                            detailsPanelProgress.value == 0f) {
+                                            currentVerticalOffset.roundToInt()
+                                        } else 0
+                                    )
+                                }
+                        ) {
+                            Box(modifier = sharedModifier) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(item.uri)
+                                        .size(targetDecodeSize)
+                                        .memoryCacheKey(item.uri.toString())
+                                        .diskCacheKey(item.uri.toString())
+                                        .crossfade(false)
+                                        .build(),
+                                    contentDescription = item.displayName,
+                                    contentScale = ContentScale.Fit,
+                                    onSuccess = { state ->
+                                        imageIntrinsicSize = state.painter.intrinsicSize
+                                    },
+                                    modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
                                         transformOrigin = TransformOrigin(0.5f, 0.5f)
@@ -1206,9 +1282,13 @@ fun MediaOverlay(
                                                 this.scaleX = 1f - scaleAmount
                                                 this.scaleY = 1f - scaleAmount
                                             }
-                                            this.translationY = verticalOffset.value
+                                            this.translationY = if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                                                0f
+                                            } else {
+                                                verticalOffset.value
+                                            }
                                             if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                                val scaleAmount = 0.15f * closeProgress
+                                                val scaleAmount = 0.25f * closeProgress
                                                 this.scaleX = 1f - scaleAmount
                                                 this.scaleY = 1f - scaleAmount
                                             }
@@ -1259,6 +1339,7 @@ fun MediaOverlay(
                             )
                         }
                     }
+                }
                 }
                 
                 // Next image - use stable key to prevent rebinding
@@ -1376,20 +1457,17 @@ fun MediaOverlay(
 
         // Top header (animated) - hide during fullscreen
         AnimatedVisibility(
-            visible = showBars && !isAnyVideoFullscreen && !isDetailsOpen,
+            visible = barsRevealUnlocked && showControls && showBars && !isAnyVideoFullscreen &&
+                !isDetailsOpen && !isDismissing &&
+                gestureMode != GestureMode.VERTICAL_DOWN &&
+                currentVerticalOffset <= 0f,
             enter = fadeIn(
                 animationSpec = tween(
-                    durationMillis = 150,
+                    durationMillis = 200,
                     delayMillis = 0,
                     easing = FastOutSlowInEasing
                 )
-            ) + slideInVertically(
-                animationSpec = tween(
-                    durationMillis = 180,
-                    delayMillis = 0,
-                    easing = FastOutSlowInEasing
-                )
-            ) { -it },
+            ),
             exit = fadeOut(
                 animationSpec = tween(
                     durationMillis = 120,
@@ -1488,20 +1566,16 @@ fun MediaOverlay(
 
         // Bottom controls (animated)
         AnimatedVisibility(
-            visible = showBars && !isDetailsOpen,
+            visible = barsRevealUnlocked && showControls && showBars && !isDetailsOpen &&
+                !isDismissing && gestureMode != GestureMode.VERTICAL_DOWN &&
+                currentVerticalOffset <= 0f,
             enter = fadeIn(
                 animationSpec = tween(
-                    durationMillis = 150,
-                    delayMillis = 40,
+                    durationMillis = 200,
+                    delayMillis = 0,
                     easing = FastOutSlowInEasing
                 )
-            ) + slideInVertically(
-                animationSpec = tween(
-                    durationMillis = 180,
-                    delayMillis = 40,
-                    easing = FastOutSlowInEasing
-                )
-            ) { it },
+            ),
             exit = fadeOut(
                 animationSpec = tween(
                     durationMillis = 120,
