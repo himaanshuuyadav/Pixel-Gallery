@@ -1,12 +1,16 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalMaterial3ExpressiveApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 
 package com.prantiux.pixelgallery.navigation
 
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -29,6 +33,8 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -204,6 +211,7 @@ private object HierarchicalNavMotion {
         }
     }
 }
+
 // Tab switching and startup animations have been removed.
 // - Startup: AnimatedRootContent renders content immediately
 
@@ -504,7 +512,8 @@ fun AppNavigation(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { _ ->
         AnimatedRootContent(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            SharedTransitionLayout {
+                Box(modifier = Modifier.fillMaxSize()) {
             // Global navigation bar background - MUST be first to render behind all content
             Box(
                 modifier = Modifier
@@ -517,6 +526,12 @@ fun AppNavigation(
             // Media overlay state
             val overlayState by viewModel.overlayState.collectAsState()
             val isOverlayVisible = overlayState.isVisible
+            var finalOverlayMediaItems by remember {
+                mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>>(emptyList())
+            }
+            val overlayScopeHolder = remember {
+                mutableStateOf<AnimatedVisibilityScope?>(null)
+            }
 
             androidx.compose.runtime.LaunchedEffect(isOverlayVisible) {
                 if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
@@ -584,72 +599,147 @@ fun AppNavigation(
                 label = "searchTranslationX"
             )
 
+            // Media overlay data collection - only when visible (performance)
+            // Skip if trash mode (RecycleBinScreen shows its own overlay)
+            if (isOverlayVisible && overlayState.mediaType != "trash") {
+                val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
+                val allMediaUnfilteredForOverlay by viewModel.allMediaUnfilteredFlow.collectAsState()
+                val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
+                val searchQuery = overlayState.searchQuery ?: ""
+                val searchResults by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
+                val favoriteItems by viewModel.favoritesFlow.collectAsState()
+                val overlayContext = androidx.compose.ui.platform.LocalContext.current
+                val isAlbumOverlay = overlayState.mediaType == "album" || overlayState.mediaType == "smartalbum"
+                val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
+                var smartAlbumOverlayMedia by remember { mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>?>(null) }
+
+                val overlayMediaItems = remember(
+                    overlayState.mediaType,
+                    overlayState.albumId,
+                    sortedMediaForOverlay,
+                    albumMediaForOverlay,
+                    searchResults,
+                    favoriteItems,
+                    isSmartAlbumOverlay
+                ) {
+                    if (isSmartAlbumOverlay) {
+                        emptyList()
+                    } else {
+                        when (overlayState.mediaType) {
+                            "album", "smartalbum" -> albumMediaForOverlay
+                            "search" -> searchResults
+                            "favorites" -> favoriteItems
+                            else -> sortedMediaForOverlay
+                        }
+                    }
+                }
+
+                androidx.compose.runtime.LaunchedEffect(
+                    isOverlayVisible,
+                    overlayState.mediaType,
+                    overlayState.albumId,
+                    allMediaUnfilteredForOverlay
+                ) {
+                    if (!isOverlayVisible) return@LaunchedEffect
+                    if (isSmartAlbumOverlay) {
+                        val sortedSmartMedia = withContext(Dispatchers.Default) {
+                            SmartAlbumGenerator.getMediaForSmartAlbum(
+                                overlayContext,
+                                overlayState.albumId,
+                                allMediaUnfilteredForOverlay
+                            ).sortedByDescending { it.dateAdded }
+                        }
+                        smartAlbumOverlayMedia = sortedSmartMedia
+                    }
+                }
+
+                finalOverlayMediaItems = remember(
+                    overlayMediaItems,
+                    smartAlbumOverlayMedia,
+                    overlayState.mediaType,
+                    overlayState.albumId,
+                    isSmartAlbumOverlay
+                ) {
+                    if (isSmartAlbumOverlay) {
+                        smartAlbumOverlayMedia ?: emptyList()
+                    } else {
+                        overlayMediaItems
+                    }
+                }
+            }
+
             Box(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(1f)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(photosAlpha)
-                            .graphicsLayer {
-                                translationX = photosTranslationX * density.density
-                            }
-                            .zIndex(if (activeRoute == Screen.Photos.route) 1f else 0f)
-                    ) {
-                        PhotosScreen(
-                            viewModel = viewModel,
-                            onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
-                        )
-                    }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(photosAlpha)
+                                .graphicsLayer {
+                                    translationX = photosTranslationX * density.density
+                                }
+                                .zIndex(if (activeRoute == Screen.Photos.route) 1f else 0f)
+                        ) {
+                            PhotosScreen(
+                                viewModel = viewModel,
+                                sharedTransitionScope = this@SharedTransitionLayout,
+                                animatedVisibilityScope = overlayScopeHolder.value,
+                                onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                            )
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(albumsAlpha)
-                            .graphicsLayer {
-                                translationX = albumsTranslationX * density.density
-                            }
-                            .zIndex(if (activeRoute == Screen.Albums.route) 1f else 0f)
-                    ) {
-                        AlbumsScreen(
-                            onNavigateToAlbum = { albumId ->
-                                navController.navigate(Screen.AlbumDetail.createRoute(albumId))
-                            },
-                            onNavigateToAllAlbums = {
-                                navController.navigate(Screen.AllAlbums.route)
-                            },
-                            onNavigateToRecycleBin = {
-                                navController.navigate(Screen.RecycleBin.route)
-                            },
-                            onNavigateToFavorites = {
-                                navController.navigate(Screen.Favorites.route)
-                            },
-                            onNavigateToSettings = {
-                                navController.navigate(Screen.Settings.route)
-                            },
-                            viewModel = viewModel
-                        )
-                    }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(albumsAlpha)
+                                .graphicsLayer {
+                                    translationX = albumsTranslationX * density.density
+                                }
+                                .zIndex(if (activeRoute == Screen.Albums.route) 1f else 0f)
+                        ) {
+                            AlbumsScreen(
+                                onNavigateToAlbum = { albumId ->
+                                    navController.navigate(Screen.AlbumDetail.createRoute(albumId))
+                                },
+                                onNavigateToAllAlbums = {
+                                    navController.navigate(Screen.AllAlbums.route)
+                                },
+                                onNavigateToRecycleBin = {
+                                    navController.navigate(Screen.RecycleBin.route)
+                                },
+                                onNavigateToFavorites = {
+                                    navController.navigate(Screen.Favorites.route)
+                                },
+                                onNavigateToSettings = {
+                                    navController.navigate(Screen.Settings.route)
+                                },
+                                viewModel = viewModel,
+                                sharedTransitionScope = this@SharedTransitionLayout,
+                                animatedVisibilityScope = overlayScopeHolder.value
+                            )
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(searchAlpha)
-                            .graphicsLayer {
-                                translationX = searchTranslationX * density.density
-                            }
-                            .zIndex(if (activeRoute == Screen.Search.route) 1f else 0f)
-                    ) {
-                        SearchScreen(
-                            viewModel = viewModel,
-                            navController = navController,
-                            settingsDataStore = settingsDataStore
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(searchAlpha)
+                                .graphicsLayer {
+                                    translationX = searchTranslationX * density.density
+                                }
+                                .zIndex(if (activeRoute == Screen.Search.route) 1f else 0f)
+                        ) {
+                            SearchScreen(
+                                viewModel = viewModel,
+                                navController = navController,
+                                sharedTransitionScope = this@SharedTransitionLayout,
+                                animatedVisibilityScope = overlayScopeHolder.value,
+                                settingsDataStore = settingsDataStore
+                            )
+                        }
                     }
-                }
 
                 Box(
                     modifier = Modifier
@@ -712,6 +802,8 @@ fun AppNavigation(
                             FavoritesScreen(
                                 viewModel = viewModel,
                                 onNavigateBack = { navController.popBackStack() },
+                                sharedTransitionScope = this@SharedTransitionLayout,
+                                animatedVisibilityScope = overlayScopeHolder.value,
                                 settingsDataStore = settingsDataStore
                             )
                         }
@@ -807,6 +899,8 @@ fun AppNavigation(
                             albumId = albumId,
                             onNavigateBack = { navController.popBackStack() },
                             onNavigateToViewer = { },
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = overlayScopeHolder.value,
                             settingsDataStore = settingsDataStore
                         )
                     }
@@ -821,108 +915,50 @@ fun AppNavigation(
                                 albumId = albumId,
                                 onNavigateBack = { navController.popBackStack() },
                                 onNavigateToViewer = { },
+                                sharedTransitionScope = this@SharedTransitionLayout,
+                                animatedVisibilityScope = overlayScopeHolder.value,
                                 settingsDataStore = settingsDataStore
                             )
                         }
                     }
                 }
             }
-            
-            // Media overlay (compose and collect data only while visible)
-            // Skip if trash mode (RecycleBinScreen shows its own overlay)
-            if (isOverlayVisible && overlayState.mediaType != "trash") {
-                // ROOM-FIRST: Use Room flows for overlay media (single source of truth)
-                val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
-                val allMediaUnfilteredForOverlay by viewModel.allMediaUnfilteredFlow.collectAsState()
 
-                // ROOM-FIRST: Album media from pure DAO for overlay (no in-memory filtering!)
-                val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
-
-                // ROOM-FIRST: Use Room-based search flow for overlay
-                val searchQuery = overlayState.searchQuery ?: ""
-                val searchResults by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
-
-                // ROOM-FIRST: Use Room-based favorites flow for overlay
-                val favoriteItems by viewModel.favoritesFlow.collectAsState()
-
-                // Get context for smart album loading
-                val overlayContext = androidx.compose.ui.platform.LocalContext.current
-
-                val isAlbumOverlay = overlayState.mediaType == "album" || overlayState.mediaType == "smartalbum"
-                val isSmartAlbumOverlay = isAlbumOverlay && SmartAlbumGenerator.isSmartAlbum(overlayState.albumId)
-
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-                    androidx.compose.runtime.DisposableEffect(Unit) {
-                        Log.d(OVERLAY_DEBUG_TAG, "Starting overlay data collection")
-                        onDispose {
-                            Log.d(OVERLAY_DEBUG_TAG, "Stopping overlay work")
-                        }
-                    }
-                }
-
-                // Filter media based on overlay state (album or all media)
-                val overlayMediaItems = remember(overlayState.mediaType, overlayState.albumId, overlayState.searchQuery, sortedMediaForOverlay, albumMediaForOverlay, searchResults, favoriteItems) {
-                    when (overlayState.mediaType) {
-                        "album", "smartalbum" -> {
-                            if (isSmartAlbumOverlay) {
-                                emptyList()
-                            } else {
-                                albumMediaForOverlay
+            if (isOverlayVisible) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    event.changes.forEach { it.consume() }
+                                }
                             }
                         }
-                        "search" -> searchResults
-                        "favorites" -> favoriteItems
-                        else -> sortedMediaForOverlay
-                    }
-                }
+                )
+            }
 
-                // Smart album media state (loaded asynchronously)
-                var smartAlbumOverlayMedia by remember { mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>?>(null) }
-
-                // Load smart album media only while overlay is visible
-                androidx.compose.runtime.LaunchedEffect(isOverlayVisible, overlayState.mediaType, overlayState.albumId, allMediaUnfilteredForOverlay) {
-                    if (!isOverlayVisible) return@LaunchedEffect
-                    if (isSmartAlbumOverlay) {
-                        val sortedSmartMedia = withContext(Dispatchers.Default) {
-                            SmartAlbumGenerator.getMediaForSmartAlbum(
-                                overlayContext,
-                                overlayState.albumId,
-                                allMediaUnfilteredForOverlay
-                            ).sortedByDescending { it.dateAdded }
-                        }
-                        smartAlbumOverlayMedia = sortedSmartMedia
-                    }
-                }
-
-                val finalOverlayMediaItems = remember(overlayMediaItems, smartAlbumOverlayMedia, overlayState.mediaType, overlayState.albumId) {
-                    if (isSmartAlbumOverlay) {
-                        smartAlbumOverlayMedia ?: emptyList()
-                    } else {
-                        overlayMediaItems
-                    }
-                }
-
-                androidx.compose.ui.layout.Layout(
-                    content = {
-                        com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
-                            viewModel = viewModel,
-                            overlayState = overlayState,
-                            mediaItems = finalOverlayMediaItems,
-                            settingsDataStore = settingsDataStore,
-                            videoPositionDataStore = videoPositionDataStore,
-                            onDismiss = { viewModel.hideMediaOverlay() }
-                        )
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) { measurables, constraints ->
-                    // Measure overlay independently
-                    val placeable = measurables.firstOrNull()?.measure(constraints)
-                    
-                    // Layout at full size without affecting parent
-                    layout(constraints.maxWidth, constraints.maxHeight) {
-                        placeable?.place(0, 0)
-                    }
-                }
+            AnimatedVisibility(
+                visible = isOverlayVisible && overlayState.mediaType != "trash",
+                // enter = fadeIn(animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing)),
+                // exit = fadeOut(animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing))
+                enter = EnterTransition.None,
+                exit = ExitTransition.None
+            ) {
+                // Shared-element transition disabled: keep scope holder unlinked.
+                // overlayScopeHolder.value = this@AnimatedVisibility
+                com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
+                    viewModel = viewModel,
+                    overlayState = overlayState,
+                    mediaItems = finalOverlayMediaItems,
+                    settingsDataStore = settingsDataStore,
+                    videoPositionDataStore = videoPositionDataStore,
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    // animatedVisibilityScope = this@AnimatedVisibility,
+                    animatedVisibilityScope = null,
+                    onDismiss = { viewModel.hideMediaOverlay() }
+                )
             }
 
             // Animate navbar hide/show when overlay is visible or scrollbar is being dragged
@@ -950,7 +986,7 @@ fun AppNavigation(
             
             val navBarAnimProgress by animateFloatAsState(
                 targetValue = if (isOverlayVisible || isScrollbarDragging) 0f else 1f,
-                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                animationSpec = tween(durationMillis = 150, easing = FastOutLinearInEasing),
                 label = "navBarAnimation"
             )
             
@@ -1250,15 +1286,17 @@ fun AppNavigation(
                                     onClick = {
                                         showMoreMenu = false
                                         // Hide selected items from this smart album
-                                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                            viewModel.hideFromSmartAlbum(context, currentAlbumId, selectedItems.toList())
-                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                viewModel.exitSelectionMode()
-                                                android.widget.Toast.makeText(
-                                                    context,
-                                                    "Hidden ${selectedItems.size} ${if (selectedItems.size == 1) "item" else "items"} from this label",
-                                                    android.widget.Toast.LENGTH_SHORT
-                                                ).show()
+                                        currentAlbumId?.let { albumId ->
+                                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                                viewModel.hideFromSmartAlbum(context, albumId, selectedItems.toList())
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                    viewModel.exitSelectionMode()
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "Hidden ${selectedItems.size} ${if (selectedItems.size == 1) "item" else "items"} from this label",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
                                             }
                                         }
                                     },
@@ -1272,7 +1310,8 @@ fun AppNavigation(
         }
     }
 }
+
 }
 
-
+}
 
