@@ -59,6 +59,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 @Composable
 fun PhotosScreen(
     viewModel: MediaViewModel,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -101,6 +103,8 @@ fun PhotosScreen(
             sortMode = sortMode,
             onSortModeChanged = { viewModel.setSortMode(it) },
             viewModel = viewModel,
+            sharedTransitionScope = sharedTransitionScope,
+            animatedVisibilityScope = animatedVisibilityScope,
             onNavigateToSettings = onNavigateToSettings
         )
     } else {
@@ -119,6 +123,8 @@ fun PhotosContent(
     sortMode: SortMode,
     onSortModeChanged: (SortMode) -> Unit,
     viewModel: MediaViewModel,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -449,23 +455,16 @@ fun PhotosContent(
                                 badgeType = badgeType,
                                 badgeEnabled = badgeEnabled,
                                 thumbnailQuality = thumbnailQuality,
-                                onClick = { bounds ->
+                                sharedTransitionScope = sharedTransitionScope,
+                                animatedVisibilityScope = animatedVisibilityScope,
+                                onClick = {
                                     if (isSelectionMode) {
                                         viewModel.toggleSelection(item)
                                     } else {
-                                        val thumbnailBounds = bounds?.let {
-                                            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
-                                                left = it.left,
-                                                top = it.top,
-                                                width = it.width,
-                                                height = it.height
-                                            )
-                                        }
                                         viewModel.showMediaOverlay(
                                             mediaType = "photos",
                                             albumId = "all",
-                                            selectedIndex = globalIndex,
-                                            thumbnailBounds = thumbnailBounds
+                                            selectedIndex = globalIndex
                                         )
                                     }
                                 },
