@@ -46,7 +46,6 @@ fun handleMediaItemClick(
     mediaType: String,
     albumId: String,
     index: Int,
-    bounds: androidx.compose.ui.geometry.Rect? = null,
     view: View? = null
 ) {
     if (isSelectionMode) {
@@ -56,19 +55,10 @@ fun handleMediaItemClick(
     } else {
         // Normal mode: open overlay with animation and haptic
         view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-        val thumbnailBounds = bounds?.let {
-            com.prantiux.pixelgallery.ui.animation.SharedElementBounds(
-                left = it.left,
-                top = it.top,
-                width = it.width,
-                height = it.height
-            )
-        }
         viewModel.showMediaOverlay(
             mediaType = mediaType,
             albumId = albumId,
-            selectedIndex = index,
-            thumbnailBounds = thumbnailBounds
+            selectedIndex = index
         )
     }
 }
@@ -164,7 +154,9 @@ fun SelectableMediaItem(
     albumId: String,
     index: Int,
     modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
-    showFavorite: Boolean = true
+    showFavorite: Boolean = true,
+    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope? = null,
+    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope? = null
 ) {
     val isSelected = isItemSelected(item, selectedItems)
     
@@ -173,7 +165,7 @@ fun SelectableMediaItem(
         isSelected = isSelected,
         isSelectionMode = isSelectionMode,
         shape = shape,
-        onClick = { bounds ->
+        onClick = {
             handleMediaItemClick(
                 isSelectionMode = isSelectionMode,
                 item = item,
@@ -181,7 +173,7 @@ fun SelectableMediaItem(
                 mediaType = mediaType,
                 albumId = albumId,
                 index = index,
-                bounds = bounds
+                view = view
             )
         },
         onLongClick = {
@@ -193,6 +185,8 @@ fun SelectableMediaItem(
             )
         },
         modifier = modifier,
-        showFavorite = showFavorite
+        showFavorite = showFavorite,
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope
     )
 }
