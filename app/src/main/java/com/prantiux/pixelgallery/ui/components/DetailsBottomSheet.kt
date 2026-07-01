@@ -2,6 +2,7 @@
 
 package com.prantiux.pixelgallery.ui.components
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -114,6 +115,7 @@ fun DetailsBottomSheetContent(
     ) {
         // Scrollable content area
         LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)  // Takes remaining space, scrollable
@@ -325,13 +327,15 @@ private fun SpecsInfoCard(
     }
 }
 
-private fun detailCardShape(position: DetailCardPosition): RoundedCornerShape {
-    return when (position) {
-        DetailCardPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-        DetailCardPosition.MIDDLE -> RoundedCornerShape(12.dp)
-        DetailCardPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        DetailCardPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+private fun detailCardShape(position: DetailCardPosition): androidx.compose.foundation.shape.RoundedCornerShape {
+    return com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            DetailCardPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            DetailCardPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            DetailCardPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            DetailCardPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
 }
 
 /**

@@ -211,12 +211,14 @@ private fun AlbumCheckboxCard(
     onCheckedChange: (Boolean) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
 
     val handleCheckedChange: (Boolean) -> Unit = { newValue ->
         if (newValue != isChecked) {
@@ -228,7 +230,7 @@ private fun AlbumCheckboxCard(
     Surface(
         onClick = { handleCheckedChange(!isChecked) },
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(

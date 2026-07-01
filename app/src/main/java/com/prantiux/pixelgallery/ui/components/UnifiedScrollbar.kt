@@ -153,7 +153,14 @@ fun UnifiedScrollbar(
         }
         
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val scrollableRatio = if (isDraggingScrollbar) 0.95f else 0.7f
+            val scrollableRatio by animateFloatAsState(
+                targetValue = if (isDraggingScrollbar) 0.95f else 0.7f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessLow
+                ),
+                label = "scrollableRatio"
+            )
             val maxOffsetPx = maxHeight * scrollableRatio
             val density = LocalDensity.current
             val scrollHeight = with(density) { maxHeight.toPx() * scrollableRatio }
@@ -233,7 +240,7 @@ fun UnifiedScrollbar(
                                         onKeyChanged = { lastSnappedKey = it },
                                         onHaptic = { 
                                             view.performHapticFeedback(
-                                                HapticFeedbackConstants.CLOCK_TICK,
+                                                HapticFeedbackConstants.TEXT_HANDLE_MOVE,
                                                 HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
                                             )
                                         },
@@ -253,7 +260,7 @@ fun UnifiedScrollbar(
                                         onKeyChanged = { lastSnappedKey = it },
                                         onHaptic = {
                                             view.performHapticFeedback(
-                                                HapticFeedbackConstants.CLOCK_TICK,
+                                                HapticFeedbackConstants.TEXT_HANDLE_MOVE,
                                                 HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
                                             )
                                         },
@@ -442,13 +449,22 @@ fun ScrollbarOverlayText(
     isVisible: Boolean,
     modifier: Modifier = Modifier
 ) {
-    if (isVisible && text.isNotEmpty()) {
+    // Smooth fade animation for the overlay text
+    val alpha by animateFloatAsState(
+        targetValue = if (isVisible && text.isNotEmpty()) 1f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "overlayAlpha"
+    )
+
+    if (alpha > 0f) {
         Text(
             text = text,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.displayMedium.copy(
+                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithTimeFont
+            ),
+            fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = modifier
+            modifier = modifier.alpha(alpha)
         )
     }
 }

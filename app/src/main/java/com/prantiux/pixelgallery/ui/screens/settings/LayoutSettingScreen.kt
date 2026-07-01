@@ -23,6 +23,7 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.viewmodel.GridType
 import com.prantiux.pixelgallery.data.SettingsDataStore
+import com.prantiux.pixelgallery.ui.utils.bounceClick
 import kotlinx.coroutines.launch
 
 @Composable
@@ -74,19 +75,10 @@ fun LayoutSettingScreen(
         }
     }
     
-    // Save setting on back
-    BackHandler {
-        viewModel.setGridType(selectedGridType)
-        onBackClick()
-    }
-    
     SubPageScaffold(
         title = "Layout",
         subtitle = "Choose how to group your photos",
-        onNavigateBack = {
-            viewModel.setGridType(selectedGridType)
-            onBackClick()
-        }
+        onNavigateBack = onBackClick
     ) {
         // Category header
         item {
@@ -101,7 +93,10 @@ fun LayoutSettingScreen(
                 iconUnicode = FontIcons.Today,
                 isSelected = selectedGridType == GridType.DAY,
                 position = SettingPosition.TOP,
-                onClick = { selectedGridType = GridType.DAY }
+                onClick = { 
+                    selectedGridType = GridType.DAY
+                    viewModel.setGridType(GridType.DAY) 
+                }
             )
         }
         
@@ -113,7 +108,10 @@ fun LayoutSettingScreen(
                 iconUnicode = FontIcons.CalendarMonth,
                 isSelected = selectedGridType == GridType.MONTH,
                 position = SettingPosition.BOTTOM,
-                onClick = { selectedGridType = GridType.MONTH }
+                onClick = { 
+                    selectedGridType = GridType.MONTH 
+                    viewModel.setGridType(GridType.MONTH)
+                }
             )
         }
         
@@ -330,23 +328,25 @@ private fun TabOption(
 ) {
     val haptic = LocalHapticFeedback.current
     // Apply rounded corners based on position
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(0.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(16.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
     
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .clickable {
+            .bounceClick(onClick = {
                 if (!isSelected) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
                 onClick()
-            }
+            })
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceContainerHighest
@@ -394,23 +394,25 @@ private fun GridTypeOption(
     onClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
     
     Surface(
         onClick = {
-            if (!isSelected) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            }
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onClick()
         },
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        modifier = Modifier.fillMaxWidth()
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .bounceClick()
+            .fillMaxWidth()
     ) {
         Row(
             modifier = Modifier

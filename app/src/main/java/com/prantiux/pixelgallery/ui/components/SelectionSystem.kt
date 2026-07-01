@@ -46,19 +46,19 @@ fun handleMediaItemClick(
     mediaType: String,
     albumId: String,
     index: Int,
-    view: View? = null
-) {
+    view: View) {
     if (isSelectionMode) {
         // Selection mode: toggle selection with haptic
-        view?.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        viewModel.toggleSelection(item)
+        view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
+        viewModel.toggleSelection(item.id)
     } else {
         // Normal mode: open overlay with animation and haptic
-        view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
         viewModel.showMediaOverlay(
             mediaType = mediaType,
             albumId = albumId,
-            selectedIndex = index
+            selectedIndex = index,
+            selectedItemId = item.id
         )
     }
 }
@@ -81,7 +81,7 @@ fun handleMediaItemLongPress(
 ) {
     if (!isSelectionMode) {
         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-        viewModel.enterSelectionMode(item)
+        viewModel.enterSelectionMode(item.id)
     }
 }
 
@@ -92,9 +92,9 @@ fun handleMediaItemLongPress(
  */
 fun isItemSelected(
     item: MediaItem,
-    selectedItems: Set<MediaItem>
+    selectedItems: Set<Long>
 ): Boolean {
-    return selectedItems.contains(item)
+    return selectedItems.contains(item.id)
 }
 
 /**
@@ -146,7 +146,7 @@ object SelectionConfig {
 fun SelectableMediaItem(
     item: MediaItem,
     isSelectionMode: Boolean,
-    selectedItems: Set<MediaItem>,
+    selectedItems: Set<Long>,
     viewModel: MediaViewModel,
     view: View,
     shape: androidx.compose.ui.graphics.Shape,
@@ -154,10 +154,7 @@ fun SelectableMediaItem(
     albumId: String,
     index: Int,
     modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
-    showFavorite: Boolean = true,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope? = null,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope? = null
-) {
+    showFavorite: Boolean = true) {
     val isSelected = isItemSelected(item, selectedItems)
     
     MediaThumbnail(
@@ -185,8 +182,5 @@ fun SelectableMediaItem(
             )
         },
         modifier = modifier,
-        showFavorite = showFavorite,
-        sharedTransitionScope = sharedTransitionScope,
-        animatedVisibilityScope = animatedVisibilityScope
-    )
+        showFavorite = showFavorite)
 }

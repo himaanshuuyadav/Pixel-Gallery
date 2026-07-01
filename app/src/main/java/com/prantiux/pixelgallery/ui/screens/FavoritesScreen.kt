@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.screens
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -24,8 +25,6 @@ import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 fun FavoritesScreen(
     viewModel: MediaViewModel,
     onNavigateBack: () -> Unit,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     // ROOM-FIRST: Use Room-based favorites flow
@@ -107,8 +106,6 @@ fun FavoritesScreen(
                     badgeType = badgeType,
                     badgeEnabled = badgeEnabled,
                     thumbnailQuality = thumbnailQuality,
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope,
                     onClick = {
                         val index = favoriteItems.indexOf(item)
                         viewModel.showMediaOverlay(

@@ -7,6 +7,7 @@ import com.prantiux.pixelgallery.data.MediaLabelEntity
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchResultFilter
+import com.prantiux.pixelgallery.data.toMediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -104,11 +105,12 @@ object SmartAlbumGenerator {
                     parsedLabels.filter { it.label in albumType.labels }
                         .maxOfOrNull { it.confidence } ?: 0f
                 }
+                val coverUriString = topItem?.mediaId?.let { database.mediaDao().getMediaByIdOnce(it)?.uri }
                 
                 Album(
                     id = albumType.id,
                     name = albumType.displayName,
-                    coverUri = null, // Will be resolved from media items
+                    coverUri = coverUriString?.let { android.net.Uri.parse(it) },
                     itemCount = matchingLabels.size,
                     bucketDisplayName = albumType.displayName,
                     isMainAlbum = false,
@@ -125,8 +127,7 @@ object SmartAlbumGenerator {
      */
     suspend fun getMediaForSmartAlbum(
         context: Context,
-        smartAlbumId: String,
-        allMediaItems: List<MediaItem>
+        smartAlbumId: String
     ): List<MediaItem> = withContext(Dispatchers.IO) {
         val albumType = SmartAlbumType.fromId(smartAlbumId) ?: return@withContext emptyList()
         val database = AppDatabase.getDatabase(context)
@@ -141,12 +142,9 @@ object SmartAlbumGenerator {
             emptyList()
         }
         
-        if (matchingLabels.isEmpty()) {
-            return@withContext emptyList()
-        }
+        val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
         
-        // Apply confidence filtering using existing SearchResultFilter
-        val filteredResults = matchingLabels.mapNotNull { labelEntity ->
+        val validMediaIds = matchingLabels.mapNotNull { labelEntity ->
             val parsedLabels = SearchResultFilter.parseLabelsWithConfidence(labelEntity.labelsWithConfidence)
             
             // Check if any of the album's labels match with sufficient confidence
@@ -154,11 +152,13 @@ object SmartAlbumGenerator {
                 albumType.labels.contains(label.label) && label.confidence >= albumType.minConfidence
             }
             
-            if (hasMatchingLabel) {
-                // Find the matching media item
-                allMediaItems.find { it.id == labelEntity.mediaId }
-            } else null
+            if (hasMatchingLabel) labelEntity.mediaId else null
         }
+        
+        if (validMediaIds.isEmpty()) return@withContext emptyList()
+        
+        val entities = database.mediaDao().getMediaByIds(validMediaIds)
+        val filteredResults = entities.map { it.toMediaItem(favIds.contains(it.id)) }
         
         // Apply negative signal filtering for Animals & Food
         when (albumType) {

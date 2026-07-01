@@ -38,6 +38,7 @@ class ImageLabelWorker(
         const val KEY_PROGRESS = "progress"
         const val KEY_TOTAL = "total"
         private const val PROGRESS_UPDATE_INTERVAL = 5 // Update progress every 5 images
+        private const val BATCH_LIMIT = 50 // Only process 50 images per run to avoid CPU starvation
     }
 
     override suspend fun doWork(): Result {
@@ -79,8 +80,8 @@ class ImageLabelWorker(
             if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "📦 Processing ALL ${unprocessedImages.size} images continuously...")
             if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(TAG, "───────────────────────────────────────")
             
-            // Process ALL unprocessed images (no batching)
-            val batch = unprocessedImages
+            // Process at most BATCH_LIMIT images to avoid CPU starvation
+            val batch = unprocessedImages.take(BATCH_LIMIT)
             
             // Initialize ML Kit Image Labeler (on-device only)
             val options = ImageLabelerOptions.Builder()
@@ -139,6 +140,9 @@ class ImageLabelWorker(
                 } catch (e: Exception) {
                     Log.e(TAG, "  ❌ Error: ${e.message}")
                 }
+                
+                // Yield CPU to prevent starving UI and other background tasks
+                kotlinx.coroutines.delay(50)
             }
             
             // Close labeler

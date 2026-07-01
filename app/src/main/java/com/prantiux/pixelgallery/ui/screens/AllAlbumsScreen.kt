@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.prantiux.pixelgallery.ui.components.SubPageScaffoldGrid
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
+import com.prantiux.pixelgallery.ui.utils.shimmerEffect
+import androidx.compose.ui.graphics.Color
 
 /**
  * Screen showing all albums in a grid layout
@@ -25,9 +27,7 @@ fun AllAlbumsScreen(
     // All Albums screen must show ALL albums regardless of Photos tab selection
     val categorizedAlbums by viewModel.allCategorizedAlbumsFlow.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
     val smartAlbumThumbnailCache = viewModel.smartAlbumThumbnailCache
-    val smartAlbumDominantColors = viewModel.smartAlbumDominantColors
     
     val allAlbums = remember(categorizedAlbums) {
         categorizedAlbums.mainAlbums + categorizedAlbums.otherAlbums
@@ -45,17 +45,13 @@ fun AllAlbumsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (isLoading) {
-            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+            items(12) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(64.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+                        .aspectRatio(1f)
+                        .background(Color.LightGray.copy(alpha = 0.2f), shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+                        .shimmerEffect()
+                )
             }
         } else if (allAlbums.isEmpty()) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
@@ -75,13 +71,11 @@ fun AllAlbumsScreen(
         } else {
             items(allAlbums.size) { index ->
                 val album = allAlbums[index]
-                val dominantColor = smartAlbumDominantColors[album.id]
-                    ?: MaterialTheme.colorScheme.primaryContainer
+                val dominantColor = MaterialTheme.colorScheme.primaryContainer
 
                 SmartAlbumHeroCard(
                     album = album,
                     dominantColor = dominantColor,
-                    allMediaItems = allMediaUnfiltered,
                     cachedThumbnailUri = smartAlbumThumbnailCache[album.id] ?: album.coverUri,
                     onThumbnailCached = { uri ->
                         smartAlbumThumbnailCache[album.id] = uri

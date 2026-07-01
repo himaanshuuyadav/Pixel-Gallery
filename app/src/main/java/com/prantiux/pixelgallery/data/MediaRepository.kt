@@ -18,8 +18,8 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 private const val GALLERY_PERF_TAG = "GalleryPerf"
-private const val MEDIASTORE_INITIAL_BATCH_SIZE = 20
-private const val MEDIASTORE_STREAM_BATCH_SIZE = 50
+private const val MEDIASTORE_INITIAL_BATCH_SIZE = 100
+private const val MEDIASTORE_STREAM_BATCH_SIZE = 500
 
 // Result class for move operations
 data class MoveResult(
@@ -700,7 +700,8 @@ class MediaRepository(private val context: Context) {
         }
         
         return try {
-            MediaStore.createWriteRequest(context.contentResolver, uris)
+            // createTrashRequest with false = UNTRASH (restore)
+            MediaStore.createTrashRequest(context.contentResolver, uris, false)
         } catch (e: Exception) {
             android.util.Log.e("MediaRepository", "Error creating restore request", e)
             null
@@ -723,8 +724,9 @@ class MediaRepository(private val context: Context) {
     
     // Actually restore items after user grants permission
     suspend fun performRestore(context: Context, uris: List<android.net.Uri>): Boolean = withContext(Dispatchers.IO) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return@withContext false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // The OS already performed the untrash operation when the user approved the createTrashRequest dialog
+            return@withContext true
         }
         
         var allSuccess = true
@@ -749,6 +751,11 @@ class MediaRepository(private val context: Context) {
     
     // Actually delete items after user grants permission
     suspend fun performPermanentDelete(context: Context, uris: List<android.net.Uri>): Boolean = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // The OS already deleted the items when the user approved the createDeleteRequest dialog
+            return@withContext true
+        }
+
         var allSuccess = true
         uris.forEach { uri ->
             try {

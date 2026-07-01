@@ -1,12 +1,9 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.prantiux.pixelgallery.ui.components
 
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.*
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,9 +61,7 @@ fun MediaThumbnail(
     showFavorite: Boolean = true,
     badgeType: String = "Duration with icon",
     badgeEnabled: Boolean = true,
-    thumbnailQuality: String = "Standard",
-    sharedTransitionScope: SharedTransitionScope? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null
+    thumbnailQuality: String = "Standard"
 ) {
     // Selection state tracking (logging removed for performance)
     
@@ -112,89 +107,59 @@ fun MediaThumbnail(
                 } else Modifier
             )
     ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val density = androidx.compose.ui.platform.LocalDensity.current.density
+        
         // Calculate target thumbnail size based on quality setting
-        val targetSize = when (thumbnailQuality) {
-            "High" -> coil.size.Size.ORIGINAL  // Full resolution, highest quality
-            "Standard" -> coil.size.Size(512, 512)  // 512x512 balanced quality
-            "Automatic" -> {
-                // Auto mode: choose based on device capabilities
-                val activityManager = androidx.compose.ui.platform.LocalContext.current
-                    .getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                val memoryClass = activityManager.memoryClass
-                val density = androidx.compose.ui.platform.LocalDensity.current.density
-                
-                // High-end: 512MB+ RAM and high density (xxhdpi+)
-                // Mid-range: Use standard 512x512
-                // Low-end: Use smaller 384x384
-                when {
-                    memoryClass >= 512 && density >= 3.0f -> coil.size.Size(768, 768)
-                    memoryClass >= 256 -> coil.size.Size(512, 512)
-                    else -> coil.size.Size(384, 384)
+        val targetSize = remember(thumbnailQuality, density) {
+            when (thumbnailQuality) {
+                "High" -> coil.size.Size.ORIGINAL  // Full resolution, highest quality
+                "Standard" -> coil.size.Size(512, 512)  // 512x512 balanced quality
+                "Automatic" -> {
+                    // Auto mode: choose based on device capabilities
+                    val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    val memoryClass = activityManager.memoryClass
+                    
+                    // High-end: 512MB+ RAM and high density (xxhdpi+)
+                    // Mid-range: Use standard 512x512
+                    // Low-end: Use smaller 384x384
+                    when {
+                        memoryClass >= 512 && density >= 3.0f -> coil.size.Size(768, 768)
+                        memoryClass >= 256 -> coil.size.Size(512, 512)
+                        else -> coil.size.Size(384, 384)
+                    }
                 }
+                else -> coil.size.Size(512, 512)  // Default to Standard
             }
-            else -> coil.size.Size(512, 512)  // Default to Standard
         }
         
-        val imageModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-                android.util.Log.d(
-                    "SharedElement",
-                    "MediaThumbnail id=${item.id}: sharedBounds ACTIVE"
-                )
-            }
-            with(sharedTransitionScope) {
-                Modifier
-                    .fillMaxSize()
-                    .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
-                    .sharedBounds(
-                        sharedContentState = rememberSharedContentState(
-                            key = "media_${item.id}"
-                        ),
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        // Fade source thumbnail out quickly so duplicate-layer overlap is brief.
-                        exit = fadeOut(
-                            animationSpec = tween(
-                                durationMillis = 90,
-                                easing = LinearEasing
-                            )
-                        ),
-                        boundsTransform = { _, _ ->
-                            tween(durationMillis = 320, easing = FastOutSlowInEasing)
-                        },
-                        clipInOverlayDuringTransition = OverlayClip(innerShape),
-                        resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
-                    )
-                    .clip(innerShape)
-                    .combinedClickable(
-                        onClick = { onClick() },
-                        onLongClick = onLongClick
-                    )
-            }
+        val clickModifier = Modifier
+            .fillMaxSize()
+            .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
+            .clip(innerShape)
+            .combinedClickable(
+                onClick = { onClick() },
+                onLongClick = onLongClick
+            )
+
+        val thumbnailData = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            com.prantiux.pixelgallery.image.MediaThumbnailRequest(item.uri, item.isVideo)
         } else {
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-                android.util.Log.d(
-                    "SharedElement",
-                    "MediaThumbnail id=${item.id}: sharedBounds INACTIVE " +
-                        "(scope=${sharedTransitionScope != null}, " +
-                        "visScope=${animatedVisibilityScope != null})"
-                )
-            }
-            Modifier
-                .fillMaxSize()
-                .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
-                .clip(innerShape)
-                .combinedClickable(
-                    onClick = { onClick() },
-                    onLongClick = onLongClick
-                )
+            item.uri
         }
 
-        AsyncImage(
-            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                .data(item.uri)
+        val imageRequest = remember(thumbnailData, targetSize, context) {
+            coil.request.ImageRequest.Builder(context)
+                .data(thumbnailData)
                 .size(targetSize)
-                .crossfade(true)
-                .build(),
+                .crossfade(false)
+                .build()
+        }
+
+        val imageModifier = clickModifier
+
+        AsyncImage(
+            model = imageRequest,
             contentDescription = item.displayName,
             modifier = imageModifier,
             contentScale = ContentScale.Crop

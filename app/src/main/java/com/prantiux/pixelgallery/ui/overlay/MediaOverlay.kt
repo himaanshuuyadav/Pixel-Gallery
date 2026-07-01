@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalAnimationApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
+@file:OptIn(ExperimentalAnimationApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 
 package com.prantiux.pixelgallery.ui.overlay
 
@@ -11,9 +11,7 @@ import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -128,8 +126,6 @@ fun MediaOverlay(
     mediaItems: List<MediaItem>,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore,
     videoPositionDataStore: com.prantiux.pixelgallery.data.VideoPositionDataStore,
-    sharedTransitionScope: SharedTransitionScope? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null,
     onDismiss: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -167,6 +163,7 @@ fun MediaOverlay(
 
     // Current index state
     var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
+    var hasResolvedInitialIndex by remember { mutableStateOf(false) }
     
     // Zoom state
     var scale by remember { mutableFloatStateOf(OverlayConstants.MIN_ZOOM_SCALE) }
@@ -203,14 +200,16 @@ fun MediaOverlay(
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
     var showBars by remember { mutableStateOf(true) }
-    var barsRevealUnlocked by remember { mutableStateOf(true) }
+    var barsRevealUnlocked by remember { mutableStateOf(false) }
     var isDismissing by remember { mutableStateOf(false) }
-    var openingProgress by remember { mutableStateOf(1f) }
+    var openingProgress by remember { mutableStateOf(0f) }
+    var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
 
     val animatedOpeningProgress by animateFloatAsState(
         targetValue = openingProgress,
         animationSpec = tween(
-            durationMillis = 180,
+            durationMillis = 0,
+            delayMillis = 0,
             easing = FastOutSlowInEasing
         ),
         label = "openingProgress"
@@ -488,10 +487,27 @@ fun MediaOverlay(
         }
     }
 
-    // When sheet is closed, back gesture closes overlay
-    BackHandler(enabled = overlayState.isVisible && !isSheetOpen) {
-        isDismissing = true
-        onDismiss()
+    // When sheet is closed, back gesture closes overlay with predictive back
+    PredictiveBackHandler(enabled = overlayState.isVisible && !isSheetOpen) { progressFlow ->
+        try {
+            progressFlow.collect { backEvent ->
+                predictiveBackProgress = backEvent.progress
+            }
+            // Swipe committed
+            if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
+                scale = OverlayConstants.MIN_ZOOM_SCALE
+                offsetX = 0f
+                offsetY = 0f
+                predictiveBackProgress = 0f
+            } else {
+                isDismissing = true
+                onDismiss()
+                // Do not reset predictiveBackProgress here so the image doesn't jump back to full size before AnimatedVisibility exit transition
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Swipe cancelled
+            predictiveBackProgress = 0f
+        }
     }
 
     val requestImageForIndex: (Int) -> Unit = { index ->
@@ -539,12 +555,12 @@ fun MediaOverlay(
     // Initialize state when overlay opens
     LaunchedEffect(overlayState.isVisible) {
         if (overlayState.isVisible) {
+            hasResolvedInitialIndex = false
             isDismissing = false
-            barsRevealUnlocked = true
+            barsRevealUnlocked = false
             showControls = false
-            imageZIndex.snapTo(0f)
-            openingProgress = 1f
-            currentIndex = overlayState.selectedIndex
+            imageZIndex.snapTo(1f)  // Image on top during opening animation
+            openingProgress = 0f
             scale = OverlayConstants.MIN_ZOOM_SCALE
             offsetX = 0f
             offsetY = 0f
@@ -554,13 +570,46 @@ fun MediaOverlay(
             detailsPanelProgress.snapTo(0f)
             requestImageForIndex(currentIndex)
             preloadNeighbors(currentIndex)
+            // Scrim fades in starting immediately, peaks around when shared element lands
+            openingProgress = 1f
+            barsRevealUnlocked = true
             showControls = true
             imageZIndex.snapTo(0f)
         }
     }
+    
+    // Asynchronously resolve initial index when mediaItems loads
+    LaunchedEffect(mediaItems, overlayState.selectedItemId, hasResolvedInitialIndex, overlayState.isVisible) {
+        if (overlayState.isVisible && !hasResolvedInitialIndex && mediaItems.isNotEmpty()) {
+            val targetId = overlayState.selectedItemId
+            if (targetId != null) {
+                val idx = mediaItems.indexOfFirst { it.id == targetId }
+                if (idx >= 0) {
+                    currentIndex = idx
+                    hasResolvedInitialIndex = true
+                } else {
+                    currentIndex = overlayState.selectedIndex
+                    hasResolvedInitialIndex = true
+                }
+            } else {
+                currentIndex = overlayState.selectedIndex
+                hasResolvedInitialIndex = true
+            }
+        }
+    }
+    
+    // Determine the true active index synchronously for rendering
+    val activeIndex = remember(currentIndex, mediaItems, overlayState.selectedItemId, hasResolvedInitialIndex) {
+        if (!hasResolvedInitialIndex && mediaItems.isNotEmpty() && overlayState.selectedItemId != null) {
+            val idx = mediaItems.indexOfFirst { it.id == overlayState.selectedItemId }
+            if (idx >= 0) idx else currentIndex
+        } else {
+            currentIndex
+        }
+    }
 
-    // Current media item (use currentIndex for rendering to prevent blink)
-    val currentItem = mediaItems.getOrNull(currentIndex)
+    // Current media item (use activeIndex for rendering to prevent blink)
+    val currentItem = mediaItems.getOrNull(activeIndex)
     
     // Action handlers (defined after currentItem)
     val shareItem: () -> Unit = {
@@ -583,7 +632,7 @@ fun MediaOverlay(
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 // For Android 11+, trigger system confirmation without closing overlay
                 // User will see the confirmation dialog over the media overlay
-                viewModel.enterSelectionMode(item)
+                viewModel.enterSelectionMode(item.id)
                 viewModel.deleteSelectedItems(context) { success ->
                     if (success) {
                         // If no more items, close overlay
@@ -650,7 +699,7 @@ fun MediaOverlay(
     val toggleFavorite: () -> Unit = {
         mediaItems.getOrNull(currentIndex)?.let { item ->
             // Haptic feedback
-            view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
+            view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
             
             // Toggle the favorite state
             val currentState = favoriteStates[item.id] ?: item.isFavorite
@@ -790,13 +839,21 @@ fun MediaOverlay(
         isDismissing -> 0f
         gestureMode == GestureMode.VERTICAL_DOWN ->
             1f - rawCloseProgress
-        else -> 1f
+        else -> animatedOpeningProgress
     }
 
     // In light theme, scrim transitions between surface color (controls visible)
     // and black (controls hidden) — matching Google Photos cinema mode behaviour.
     // In dark theme, scrim is always black.
-    val scrimColor = Color.Black
+    val scrimColor by animateColorAsState(
+        targetValue = when {
+            isDarkTheme -> Color.Black
+            showBars -> Color.White
+            else -> Color.Black
+        },
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "scrimColor"
+    )
 
     // Controls visibility based on gesture
     // Hide bars when zoomed in
@@ -809,7 +866,7 @@ fun MediaOverlay(
     }
 
 
-    val controlsVisible = showControls && 
+    val controlsVisible = barsRevealUnlocked && showControls && 
         showBars &&
         gestureMode != GestureMode.VERTICAL_UP &&
         !isDetailsOpen &&
@@ -1107,7 +1164,6 @@ fun MediaOverlay(
                                 scope.launch {
                                     if (abs(verticalOffset.value) > threshold) {
                                         showControls = false
-                                        isDismissing = true
                                         onDismiss()
                                     } else {
                                         // Snap back
@@ -1156,9 +1212,9 @@ fun MediaOverlay(
 
         // Media image
         currentItem?.let { item ->
-            // Render previous, current, and next images based on currentIndex
-            val prevItem = mediaItems.getOrNull(currentIndex - 1)?.takeIf { !it.isVideo }
-            val nextItem = mediaItems.getOrNull(currentIndex + 1)?.takeIf { !it.isVideo }
+            // Render previous, current, and next images based on activeIndex
+            val prevItem = mediaItems.getOrNull(activeIndex - 1)?.takeIf { !it.isVideo }
+            val nextItem = mediaItems.getOrNull(activeIndex + 1)?.takeIf { !it.isVideo }
 
             // Render previous, current, and next images for smooth horizontal swipe
             Box(modifier = Modifier.fillMaxSize().zIndex(imageZIndex.value)) {
@@ -1196,67 +1252,21 @@ fun MediaOverlay(
                         var imageIntrinsicSize by remember {
                             mutableStateOf(androidx.compose.ui.geometry.Size.Zero)
                         }
-
-                        val sharedModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-                                android.util.Log.d(
-                                    "SharedElement",
-                                    "MediaOverlay: sharedBounds ACTIVE for item id=${currentItem?.id}"
-                                )
-                            }
-                            with(sharedTransitionScope) {
-                                Modifier.fillMaxSize().sharedBounds(
-                                    sharedContentState = rememberSharedContentState(
-                                        key = "media_${currentItem?.id}"
-                                    ),
-                                    animatedVisibilityScope = animatedVisibilityScope,
-                                    boundsTransform = { _, _ ->
-                                        tween(durationMillis = 320, easing = FastOutSlowInEasing)
-                                    },
-                                    clipInOverlayDuringTransition = OverlayClip(RoundedCornerShape(0.dp)),
-                                    resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
-                                )
-                            }
-                        } else {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
-                                android.util.Log.d(
-                                    "SharedElement",
-                                    "MediaOverlay: sharedBounds INACTIVE " +
-                                        "(scope=${sharedTransitionScope != null}, " +
-                                        "visScope=${animatedVisibilityScope != null})"
-                                )
-                            }
-                            Modifier.fillMaxSize()
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .offset {
-                                    IntOffset(
-                                        x = 0,
-                                        y = if (gestureMode == GestureMode.VERTICAL_DOWN &&
-                                            detailsPanelProgress.value == 0f) {
-                                            currentVerticalOffset.roundToInt()
-                                        } else 0
-                                    )
-                                }
-                        ) {
-                            Box(modifier = sharedModifier) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(item.uri)
-                                        .size(targetDecodeSize)
-                                        .memoryCacheKey(item.uri.toString())
-                                        .diskCacheKey(item.uri.toString())
-                                        .crossfade(false)
-                                        .build(),
-                                    contentDescription = item.displayName,
-                                    contentScale = ContentScale.Fit,
-                                    onSuccess = { state ->
-                                        imageIntrinsicSize = state.painter.intrinsicSize
-                                    },
-                                    modifier = Modifier
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(item.uri)
+                                    .size(targetDecodeSize)
+                                    .memoryCacheKey(item.uri.toString())
+                                    .diskCacheKey(item.uri.toString())
+                                    .crossfade(false)
+                                    .build(),
+                                contentDescription = item.displayName,
+                                contentScale = ContentScale.Fit,
+                                onSuccess = { state ->
+                                    imageIntrinsicSize = state.painter.intrinsicSize
+                                },
+                                modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
                                         transformOrigin = TransformOrigin(0.5f, 0.5f)
@@ -1273,24 +1283,24 @@ fun MediaOverlay(
                                             this.translationY = -imageOffset
                                             this.scaleX = detailsScale
                                             this.scaleY = detailsScale
-                                            transformOrigin = TransformOrigin(0.5f, 0.5f)
                                         } else {
                                             this.translationX = horizontalOffset.value
                                             if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
                                                 val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
-                                                val scaleAmount = swipeProgress * 0.05f
-                                                this.scaleX = 1f - scaleAmount
-                                                this.scaleY = 1f - scaleAmount
+                                                this.scaleX = 1f - swipeProgress * 0.05f
+                                                this.scaleY = 1f - swipeProgress * 0.05f
                                             }
-                                            this.translationY = if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                                0f
-                                            } else {
-                                                verticalOffset.value
-                                            }
+                                            this.translationY = currentVerticalOffset
                                             if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                                val scaleAmount = 0.25f * closeProgress
-                                                this.scaleX = 1f - scaleAmount
-                                                this.scaleY = 1f - scaleAmount
+                                                this.scaleX = 1f - 0.25f * closeProgress
+                                                this.scaleY = 1f - 0.25f * closeProgress
+                                            }
+                                            if (predictiveBackProgress > 0f) {
+                                                val predScale = 1f - (predictiveBackProgress * 0.1f)
+                                                this.scaleX *= predScale
+                                                this.scaleY *= predScale
+                                                this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
+                                                this.clip = true
                                             }
                                             if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
                                                 this.scaleX *= scale
@@ -1311,13 +1321,9 @@ fun MediaOverlay(
                                                 val fittedImageHeight = rawImageHeight * fitScale
                                                 if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
                                                     gestureMode = GestureMode.ZOOM
-                                                    val adjustedPanX = pan.x * newScale
-                                                    val adjustedPanY = pan.y * newScale
-                                                    val proposedOffsetX = offsetX + adjustedPanX
-                                                    val proposedOffsetY = offsetY + adjustedPanY
-                                                    val (clampedOffsetX, clampedOffsetY) = clampOffset(
-                                                        offsetX = proposedOffsetX,
-                                                        offsetY = proposedOffsetY,
+                                                    val (cx, cy) = clampOffset(
+                                                        offsetX = offsetX + pan.x * newScale,
+                                                        offsetY = offsetY + pan.y * newScale,
                                                         scale = newScale,
                                                         containerWidth = screenWidth,
                                                         containerHeight = screenHeight,
@@ -1325,8 +1331,8 @@ fun MediaOverlay(
                                                         imageHeight = fittedImageHeight
                                                     )
                                                     scale = newScale
-                                                    offsetX = clampedOffsetX
-                                                    offsetY = clampedOffsetY
+                                                    offsetX = cx
+                                                    offsetY = cy
                                                 } else {
                                                     scale = OverlayConstants.MIN_ZOOM_SCALE
                                                     offsetX = 0f
@@ -1339,7 +1345,6 @@ fun MediaOverlay(
                             )
                         }
                     }
-                }
                 }
                 
                 // Next image - use stable key to prevent rebinding
@@ -1389,6 +1394,13 @@ fun MediaOverlay(
                                 val scaleAmount = 0.15f * closeProgress
                                 this.scaleX = 1f - scaleAmount
                                 this.scaleY = 1f - scaleAmount
+                            }
+                            if (predictiveBackProgress > 0f) {
+                                val predScale = 1f - (predictiveBackProgress * 0.1f)
+                                this.scaleX *= predScale
+                                this.scaleY *= predScale
+                                this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
+                                this.clip = true
                             }
                         }
                 ) {
@@ -1869,7 +1881,7 @@ fun MediaOverlay(
                                         onClick = {
                                             menuExpanded = false
                                             // Show copy to album dialog with current item
-                                            viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem))
+                                            viewModel.showCopyToAlbumDialog(listOfNotNull(currentItem?.id))
                                         },
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
@@ -1911,7 +1923,7 @@ fun MediaOverlay(
                                         onClick = {
                                             menuExpanded = false
                                             // Show move to album dialog with current item
-                                            viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem))
+                                            viewModel.showMoveToAlbumDialog(listOfNotNull(currentItem?.id))
                                         },
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
@@ -2114,7 +2126,7 @@ fun MediaOverlay(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                         mediaItems.getOrNull(currentIndex)?.let { item ->
                             try {
                                 val deleted = context.contentResolver.delete(item.uri, null, null)
@@ -2137,7 +2149,7 @@ fun MediaOverlay(
             },
             dismissButton = {
                 TextButton(onClick = { 
-                    view?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                     showDeleteDialog = false 
                 }) {
                     Text("Cancel")

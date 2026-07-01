@@ -11,6 +11,8 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.withFrameNanos
 import androidx.core.view.WindowCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -134,6 +136,7 @@ class MainActivity : ComponentActivity() {
         
         setContent {
             var startupReady by remember { mutableStateOf(false) }
+            var showAppContent by remember { mutableStateOf(false) }
 
             LaunchedEffect(Unit) {
                 withFrameNanos { }
@@ -147,6 +150,7 @@ class MainActivity : ComponentActivity() {
                 // Wait one more frame so AppNavigation content is committed before splash exit.
                 withFrameNanos { }
                 uiReady = true
+                showAppContent = true
             }
 
             val settingsDataStore = remember { com.prantiux.pixelgallery.data.SettingsDataStore(this) }
@@ -237,18 +241,35 @@ class MainActivity : ComponentActivity() {
                 amoledMode = amoledMode
             ) {
                 if (startupReady) {
-                    AppNavigation(
-                        viewModel = viewModel,
-                        settingsDataStore = settingsDataStore,
-                        defaultTab = defaultTab,
-                        lastUsedTab = lastUsedTab,
-                        onTabChanged = { tab ->
-                            lastUsedTab = tab
-                            lifecycleScope.launch {
-                                settingsDataStore.saveLastUsedTab(tab)
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showAppContent,
+                        enter = androidx.compose.animation.fadeIn(
+                            animationSpec = androidx.compose.animation.core.tween(
+                                durationMillis = 400,
+                                easing = androidx.compose.animation.core.LinearOutSlowInEasing
+                            )
+                        ) + androidx.compose.animation.scaleIn(
+                            initialScale = 0.92f,
+                            animationSpec = androidx.compose.animation.core.tween(
+                                durationMillis = 400,
+                                easing = androidx.compose.animation.core.FastOutSlowInEasing
+                            )
+                        ),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        AppNavigation(
+                            viewModel = viewModel,
+                            settingsDataStore = settingsDataStore,
+                            defaultTab = defaultTab,
+                            lastUsedTab = lastUsedTab,
+                            onTabChanged = { tab ->
+                                lastUsedTab = tab
+                                lifecycleScope.launch {
+                                    settingsDataStore.saveLastUsedTab(tab)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -264,38 +285,11 @@ class MainActivity : ComponentActivity() {
             viewModel.initialize(this@MainActivity)
         }
 
-        lifecycleScope.launch(Dispatchers.Default) {
-            val imageLoader = ImageLoader.Builder(this@MainActivity)
-                .components {
-                    add(VideoFrameDecoder.Factory())
-                }
-                .memoryCache {
-                    MemoryCache.Builder(this@MainActivity)
-                        .maxSizePercent(0.25)
-                        .strongReferencesEnabled(true)
-                        .build()
-                }
-                .diskCache {
-                    DiskCache.Builder()
-                        .directory(cacheDir.resolve("image_cache"))
-                        .maxSizeBytes(250L * 1024 * 1024)
-                        .build()
-                }
-                .memoryCachePolicy(CachePolicy.ENABLED)
-                .diskCachePolicy(CachePolicy.ENABLED)
-                .crossfade(false)
-                .build()
 
-            withContext(Dispatchers.Main) {
-                coil.Coil.setImageLoader(imageLoader)
-            }
-        }
 
         lifecycleScope.launch {
-            delay(10000)
-            if (viewModel.initialSetupInProgress.value) {
-                viewModel.initialSetupInProgress.filter { !it }.first()
-            }
+            // Delay ML processing by 30 seconds to ensure the app is fully loaded and smooth
+            delay(30000)
             withContext(Dispatchers.IO) {
                 com.prantiux.pixelgallery.ml.ImageLabelScheduler.schedulePeriodicLabeling(this@MainActivity)
             }

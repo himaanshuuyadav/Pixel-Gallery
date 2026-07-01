@@ -79,7 +79,7 @@ fun SelectionTopBar(
         SelectionTopBarContent(
             selectedCount = selectedCount,
             onCancelSelection = {
-                view?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                 onCancelSelection()
             },
             successMessage = successMessage

@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.screens.settings
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
+import com.prantiux.pixelgallery.ui.utils.bounceClick
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 
@@ -187,10 +189,7 @@ enum class SettingPosition {
 internal fun CategoryHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.labelLarge.copy(
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.5.sp
-        ),
+        style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp)
     )
@@ -215,19 +214,23 @@ internal fun GroupedSettingItem(
     onClick: () -> Unit,
     enabled: Boolean = true
 ) {
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
     
     Surface(
         onClick = onClick,
         enabled = enabled,
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        modifier = Modifier.fillMaxWidth()
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .bounceClick()
+            .fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -246,7 +249,8 @@ internal fun GroupedSettingItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = if (enabled) MaterialTheme.colorScheme.onSurface 
                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 )
@@ -281,12 +285,14 @@ internal fun GroupedSettingToggle(
     enabled: Boolean = true
 ) {
     val haptic = LocalHapticFeedback.current
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(8.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
 
     val handleCheckedChange: (Boolean) -> Unit = { newValue ->
         if (enabled && newValue != checked) {
@@ -301,8 +307,10 @@ internal fun GroupedSettingToggle(
         onClick = { handleCheckedChange(!checked) },
         enabled = enabled,
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        modifier = Modifier.fillMaxWidth()
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .bounceClick()
+            .fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -321,7 +329,8 @@ internal fun GroupedSettingToggle(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = if (enabled) MaterialTheme.colorScheme.onSurface 
                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 )

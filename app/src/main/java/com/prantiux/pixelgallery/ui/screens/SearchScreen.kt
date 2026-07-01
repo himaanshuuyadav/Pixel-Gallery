@@ -2,6 +2,7 @@
 
 package com.prantiux.pixelgallery.ui.screens
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -62,6 +63,7 @@ import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
+import com.prantiux.pixelgallery.ui.utils.shimmerEffect
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
 import com.prantiux.pixelgallery.model.Album
@@ -79,8 +81,6 @@ data class AlbumInfo(val name: String, val count: Int, val thumbnailUri: android
 fun SearchScreen(
     viewModel: MediaViewModel, 
     navController: androidx.navigation.NavController,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     val context = LocalContext.current
@@ -88,9 +88,7 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
     // ROOM-FIRST: Use Room flows for base media lists
-    val images by viewModel.imagesFlow.collectAsState()
-    val videos by viewModel.videosFlow.collectAsState()
-    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     // ROOM-FIRST: Use Room-based search flow instead of in-memory search
     val searchResultsRaw by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
@@ -138,20 +136,13 @@ fun SearchScreen(
     // Smart albums state
     var smartAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
     val smartAlbumThumbnailCache = viewModel.smartAlbumThumbnailCache
-    val smartAlbumDominantColors = viewModel.smartAlbumDominantColors
     
-    // Load smart albums on launch
-    LaunchedEffect(allMediaUnfiltered) {
-        if (allMediaUnfiltered.isNotEmpty()) {
+    // Load smart albums when sync finishes or on launch
+    LaunchedEffect(isLoading) {
+        if (!isLoading) {
             coroutineScope.launch {
                 val albums = SmartAlbumGenerator.generateSmartAlbums(context)
                 smartAlbums = albums
-
-                viewModel.preloadSmartAlbumColors(
-                    context = context,
-                    albums = albums,
-                    allMediaItems = allMediaUnfiltered
-                )
             }
         }
     }
@@ -195,23 +186,7 @@ fun SearchScreen(
         }
     }
 
-    // Build search collections off the main thread to avoid frame drops with large media lists.
-    val allMedia by produceState(initialValue = emptyList<MediaItem>(), images, videos) {
-        value = withContext(Dispatchers.Default) {
-            (images + videos).sortedByDescending { it.dateAdded }
-        }
-    }
-
-    val albums by produceState(initialValue = emptyList<AlbumInfo>(), allMedia) {
-        value = withContext(Dispatchers.Default) {
-            allMedia.groupBy { it.bucketName }
-                .filter { it.key.isNotEmpty() }
-                .map { (name, items) -> AlbumInfo(name, items.size, items.firstOrNull()?.uri ?: android.net.Uri.EMPTY) }
-                .sortedByDescending { it.count }
-        }
-    }
-    
-    // Quick filters from SearchEngine
+    // Handle back gesture
     val quickFilters = remember { SearchEngine.getQuickFilters() }
 
     val navBarHeight = calculateFloatingNavBarHeight()
@@ -331,6 +306,7 @@ fun SearchScreen(
                         tonalElevation = 3.dp
                     ) {
                         LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp),
@@ -346,7 +322,8 @@ fun SearchScreen(
                                 ) {
                                     Text(
                                         text = "Recent searches",
-                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     TextButton(
@@ -407,6 +384,7 @@ fun SearchScreen(
                         tonalElevation = 3.dp
                     ) {
                         LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp),
@@ -415,7 +393,8 @@ fun SearchScreen(
                             item {
                                 Text(
                                     text = "Suggestions",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(vertical = 8.dp)
                                 )
@@ -544,9 +523,10 @@ fun SearchScreen(
                         }
                     }
                     
-                    val isLoadingSmartAlbums = (images.isNotEmpty() || videos.isNotEmpty()) && smartAlbums.isEmpty()
+                    val isLoadingSmartAlbums = isLoading
 
                     LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
                         state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp)
@@ -559,26 +539,30 @@ fun SearchScreen(
                         // Show loading state or actual albums in centered carousel
                         item {
                             if (isLoadingSmartAlbums) {
-                                // Loading placeholders - horizontal scroll
-                                LazyRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                // Loading placeholders - matches 2-column grid structure
+                                val cardHeight = 240.dp
+                                val rowCount = 2 // Show 4 skeletons (2 rows)
+                                val gridHeight = (cardHeight * rowCount) + (12.dp * (rowCount - 1).coerceAtLeast(0))
+                                
+                                LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
+                                    columns = GridCells.Fixed(2),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    userScrollEnabled = false,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(gridHeight)
                                 ) {
                                     items(4) {
                                         Box(
                                             modifier = Modifier
-                                                .width(280.dp)
-                                                .height(210.dp)
+                                                .fillMaxWidth()
+                                                .height(cardHeight)
                                                 .clip(RoundedCornerShape(28.dp))
-                                                .background(MaterialTheme.colorScheme.primaryContainer),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(32.dp),
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                                            )
-                                        }
+                                                .shimmerEffect()
+                                        )
                                     }
                                 }
                             } else if (smartAlbums.isNotEmpty()) {
@@ -587,6 +571,7 @@ fun SearchScreen(
                                 val gridHeight = (cardHeight * rowCount) + (12.dp * (rowCount - 1).coerceAtLeast(0))
 
                                 LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
                                     columns = GridCells.Fixed(2),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -598,13 +583,11 @@ fun SearchScreen(
                                 ) {
                                     items(smartAlbums.size) { index ->
                                         val album = smartAlbums[index]
-                                        val dominantColor = smartAlbumDominantColors[album.id]
-                                            ?: MaterialTheme.colorScheme.primaryContainer
+                                        val dominantColor = MaterialTheme.colorScheme.primaryContainer
 
                                         SmartAlbumHeroCard(
                                             album = album,
                                             dominantColor = dominantColor,
-                                            allMediaItems = allMediaUnfiltered,
                                             cachedThumbnailUri = smartAlbumThumbnailCache[album.id],
                                             onThumbnailCached = { uri ->
                                                 smartAlbumThumbnailCache[album.id] = uri
@@ -708,6 +691,7 @@ fun SearchScreen(
                             }
                     ) {
                         LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
                             columns = GridCells.Fixed(3),
                             state = gridState,
                             modifier = Modifier.fillMaxSize(),
@@ -720,7 +704,8 @@ fun SearchScreen(
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Text(
                                     text = "Albums (${searchResults.matchedAlbums.size})",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
                                         .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -771,6 +756,7 @@ fun SearchScreen(
                                                 navController.navigate(com.prantiux.pixelgallery.navigation.Screen.AlbumDetail.createRoute(bucketId))
                                             }
                                         },
+                                        onLongPress = null,
                                         onMenuClick = {
                                             albumActionsSheet = Album(
                                                 id = bucketId ?: albumMatch.albumName,
@@ -798,7 +784,8 @@ fun SearchScreen(
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Text(
                                     text = categoryHeading,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
                                         .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -830,8 +817,6 @@ fun SearchScreen(
                                     badgeType = badgeType,
                                     badgeEnabled = badgeEnabled,
                                     thumbnailQuality = thumbnailQuality,
-                                    sharedTransitionScope = sharedTransitionScope,
-                                    animatedVisibilityScope = animatedVisibilityScope,
                                     onClick = {
                                         // Save search to recent searches
                                         viewModel.addRecentSearch(searchQuery)
@@ -887,7 +872,8 @@ fun SearchScreen(
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
     )
@@ -935,7 +921,7 @@ fun RecentSearchPill(text: String, onClick: () -> Unit, onDelete: () -> Unit) {
 }
 
 @Composable
-fun SearchSuggestionItem(text: String, iconUnicode: String, onClick: () -> Unit, onDelete: (() -> Unit)? = null) {
+fun SearchSuggestionItem(text: String, iconUnicode: String, onClick: () -> Unit, onDelete: (() -> Unit)) {
     Surface(
         onClick = onClick,
         color = Color.Transparent,
@@ -1134,22 +1120,13 @@ fun AlbumResultItem(name: String, count: Int, thumbnailUri: android.net.Uri, onC
 fun SmartAlbumHeroCard(
     album: Album,
     dominantColor: Color,
-    allMediaItems: List<MediaItem>,
     cachedThumbnailUri: android.net.Uri?,
-    onThumbnailCached: (android.net.Uri?) -> Unit,
+    onThumbnailCached: (android.net.Uri) -> Unit,
     onClick: () -> Unit,
     albumIndex: Int = 0
 ) {
     val context = LocalContext.current
-    val thumbnailUri = cachedThumbnailUri
-    
-    // Load thumbnail if not cached
-    LaunchedEffect(album.id, allMediaItems, cachedThumbnailUri) {
-        if (cachedThumbnailUri == null) {
-            val media = SmartAlbumGenerator.getMediaForSmartAlbum(context, album.id, allMediaItems)
-            onThumbnailCached(media.firstOrNull()?.uri)
-        }
-    }
+    val thumbnailUri = cachedThumbnailUri ?: album.coverUri
     
     val labelBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
 

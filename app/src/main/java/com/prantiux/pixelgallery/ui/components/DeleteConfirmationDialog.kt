@@ -70,7 +70,7 @@ fun DeleteConfirmationDialog(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            view?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                            view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                             onDismiss()
                         },
                         modifier = Modifier.weight(1f),
@@ -81,7 +81,7 @@ fun DeleteConfirmationDialog(
                     
                     Button(
                         onClick = {
-                            view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            view?.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                             onConfirm()
                             onDismiss()
                         },

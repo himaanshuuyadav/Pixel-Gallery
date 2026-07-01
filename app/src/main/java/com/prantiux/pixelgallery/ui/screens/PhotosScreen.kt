@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.screens
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import android.Manifest
 import android.os.Build
 import android.os.SystemClock
@@ -54,21 +55,20 @@ import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
+import com.prantiux.pixelgallery.model.MediaGridItem
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PhotosScreen(
     viewModel: MediaViewModel,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    // ROOM-FIRST: Observe mediaFlow (includes album filtering)
-    val media by viewModel.mediaFlow.collectAsState()
-    val groupedMedia by viewModel.groupedMediaFlow.collectAsState()
+    // ROOM-FIRST: Observe pagedMediaFlow
+    val pagedMedia = viewModel.pagedMediaFlow.collectAsLazyPagingItems()
     val isLoading by viewModel.isLoading.collectAsState()
-    val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
 
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -90,21 +90,15 @@ fun PhotosScreen(
         withFrameNanos { }
         // ROOM-FIRST: No manual refresh needed - Room flows are reactive
         // ContentObserver will trigger MediaStore sync automatically when media changes
-        if (permissionsState.allPermissionsGranted && viewModel.isMediaEmpty()) {
-            viewModel.refresh(context, showLoader = false)
-        }
     }
 
     if (permissionsState.allPermissionsGranted) {
         PhotosContent(
-            media = media,
-            groupedMedia = groupedMedia,
+            pagedMedia = pagedMedia,
             isLoading = isLoading,
             sortMode = sortMode,
             onSortModeChanged = { viewModel.setSortMode(it) },
             viewModel = viewModel,
-            sharedTransitionScope = sharedTransitionScope,
-            animatedVisibilityScope = animatedVisibilityScope,
             onNavigateToSettings = onNavigateToSettings
         )
     } else {
@@ -117,14 +111,11 @@ fun PhotosScreen(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotosContent(
-    media: List<MediaItem>,
-    groupedMedia: List<com.prantiux.pixelgallery.model.MediaGroup>,
+    pagedMedia: androidx.paging.compose.LazyPagingItems<MediaGridItem>,
     isLoading: Boolean,
     sortMode: SortMode,
     onSortModeChanged: (SortMode) -> Unit,
     viewModel: MediaViewModel,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -135,7 +126,6 @@ fun PhotosContent(
     val scrollbarMonth by viewModel.scrollbarMonth.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
     val pinchGestureEnabled by viewModel.pinchGestureEnabled.collectAsState()
-    val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
@@ -209,7 +199,7 @@ fun PhotosContent(
     
     // Track if initial load is complete - only show loader on FIRST load after permission grant
     // Initialize based on whether we already have data
-    var hasLoadedOnce by remember { mutableStateOf(media.isNotEmpty()) }
+    var hasLoadedOnce by remember { mutableStateOf(pagedMedia.itemCount > 0) }
     var previousIsLoading by remember { mutableStateOf(isLoading) }
     
     LaunchedEffect(isLoading) {
@@ -217,7 +207,7 @@ fun PhotosContent(
         // AND we have media items
         // AND hasLoadedOnce is still false
         if (previousIsLoading && !isLoading && !hasLoadedOnce) {
-            if (media.isNotEmpty()) {
+            if (pagedMedia.itemCount > 0) {
                 hasLoadedOnce = true
             }
         }
@@ -227,13 +217,12 @@ fun PhotosContent(
     }
     
     // Show loading when: loading AND (never loaded before OR list is empty)
-    val showLoading = isLoading && (!hasLoadedOnce || media.isEmpty())
+    val showLoading = isLoading && pagedMedia.itemCount == 0
     
     // Create index map for O(1) lookups instead of O(n) indexOf()
-    val indexMap = remember(media) {
-        media.mapIndexed { i, item -> item.id to i }.toMap()
-    }
-    
+    // Note: With paging, a simple map is not sufficient without full list observation,
+    // which is not how Paging3 works. The indexMap is omitted here as it's not feasible.
+
     // Determine column count based on grid type
     val columnCount = when (gridType) {
         com.prantiux.pixelgallery.viewmodel.GridType.DAY -> 3
@@ -242,6 +231,7 @@ fun PhotosContent(
     
     // Remember scroll state to preserve position
     val gridState = rememberLazyGridState()
+
     
     // Calculate scroll progress for expandable app bar
     val scrollProgress = remember {
@@ -268,8 +258,8 @@ fun PhotosContent(
             snappedScrollProgress.animateTo(
                 targetValue = targetProgress,
                 animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMedium
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessLow
                 )
             )
         }
@@ -282,15 +272,7 @@ fun PhotosContent(
     val view = LocalView.current
     
     // Prepare date group info for scrollbar
-    val dateGroupsForScrollbar = remember(groupedMedia) {
-        groupedMedia.map { group ->
-            com.prantiux.pixelgallery.ui.components.DateGroupInfo(
-                date = group.date,
-                displayDate = group.displayDate,
-                itemCount = group.items.size
-            )
-        }
-    }
+    val dateGroupsForScrollbar by viewModel.photosDateGroups.collectAsState()
     
     // Don't auto-show scrollbar on scroll - only when dragging
     // Remove the auto-hide LaunchedEffect
@@ -323,16 +305,11 @@ fun PhotosContent(
             // Material 3 Expressive: Show LoadingIndicator ONLY on FIRST load after permission grant
             // Never show on subsequent navigations to prevent UI jank
             // Show loading FIRST, only show "no media" after loading completes
-            if (initialSetupInProgress) {
-                com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    label = "Setting up gallery..."
-                )
-            } else if (showLoading) {
+            if (showLoading) {
                 com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
                     modifier = Modifier.align(Alignment.Center)
                 )
-            } else if (media.isEmpty()) {
+            } else if (pagedMedia.itemCount == 0) {
                 // Only show "no media" after loading is complete (when not loading)
                 Text(
                     "No media found",
@@ -341,6 +318,7 @@ fun PhotosContent(
                 )
             } else {
                 LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
                         columns = GridCells.Fixed(columnCount),
                         state = gridState,
                         modifier = Modifier
@@ -359,125 +337,124 @@ fun PhotosContent(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         
-                        groupedMedia.forEachIndexed { index, group ->
-                        // Date Header - spans all columns with checkbox when in selection mode
-                        item(span = { GridItemSpan(columnCount) }) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 8.dp, top = 28.dp, bottom = 8.dp, end = 8.dp)
-                                    .then(
-                                        if (index == 0) {
-                                            Modifier.onGloballyPositioned { coords ->
-                                                if (firstHeaderTopPx == null) {
-                                                    firstHeaderTopPx = coords.positionInRoot().y
+                        items(
+                            count = pagedMedia.itemCount,
+                            key = pagedMedia.itemKey { item ->
+                                when (item) {
+                                    is MediaGridItem.Header -> "header_${item.dateGroupKey}"
+                                    is MediaGridItem.Media -> item.mediaItem.id
+                                }
+                            },
+                            span = { index ->
+                                val item = pagedMedia[index]
+                                if (item is MediaGridItem.Header) {
+                                    GridItemSpan(columnCount)
+                                } else {
+                                    GridItemSpan(1)
+                                }
+                            }
+                        ) { index ->
+                            val item = pagedMedia[index]
+                            
+                            if (item != null) {
+                                when (item) {
+                                    is MediaGridItem.Header -> {
+                                        val isDay = gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 8.dp, top = 28.dp, bottom = 8.dp, end = 8.dp)
+                                                .then(
+                                                    if (index == 0) {
+                                                        Modifier.onGloballyPositioned { coords ->
+                                                            if (firstHeaderTopPx == null) {
+                                                                firstHeaderTopPx = coords.positionInRoot().y
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Modifier
+                                                    }
+                                                ),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Date text
+                                            Text(
+                                                text = item.displayDate,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            
+                                            // Always reserve space for checkbox to prevent layout shift
+                                            Box(
+                                                modifier = Modifier.size(24.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isSelectionMode) {
+                                                    // Show checkbox in selection mode
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(24.dp)
+                                                            .clip(CircleShape)
+                                                            .border(
+                                                                width = 2.dp,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                shape = CircleShape
+                                                            )
+                                                            .background(Color.Transparent, CircleShape)
+                                                            .clickable {
+                                                                viewModel.selectAllInDateGroup(item.dateGroupKey, isDay)
+                                                            },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        // Render empty checkbox that can be clicked to select all
+                                                    }
                                                 }
                                             }
-                                        } else {
-                                            Modifier
                                         }
-                                    ),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Date text
-                                Text(
-                                    text = group.displayDate,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                
-                                // Always reserve space for checkbox to prevent layout shift
-                                Box(
-                                    modifier = Modifier.size(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isSelectionMode) {
-                                        // Show checkbox in selection mode
-                                        val allSelected = group.items.all { selectedItems.contains(it) }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(CircleShape)
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = if (allSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    shape = CircleShape
-                                                )
-                                                .background(
-                                                    if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f)  else Color.Transparent,
-                                                    CircleShape
-                                                )
-                                                .clickable {
-                                                    if (allSelected) {
-                                                        viewModel.deselectAllInGroup(group.items)
-                                                    } else {
-                                                        viewModel.selectAllInGroup(group.items)
-                                                    }
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (allSelected) {
-                                                FontIcon(
-                                                    unicode = FontIcons.Done,
-                                                    contentDescription = "Selected",
-                                                    size = 16.sp,
-                                                    tint = MaterialTheme.colorScheme.onPrimary
-                                                )
-                                            }
-                                        }
+                                    }
+                                    is MediaGridItem.Media -> {
+                                        val mediaItem = item.mediaItem
+                                        val isSelected = selectedItems.contains(mediaItem.id)
+                                        val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                            index = index, // Approximate corner shape for now
+                                            totalItems = pagedMedia.itemCount,
+                                            columns = columnCount,
+                                            cornerType = cornerType
+                                        )
+                            
+                                        MediaThumbnail(
+                                            item = mediaItem,
+                                            isSelected = isSelected,
+                                            isSelectionMode = isSelectionMode,
+                                            shape = gridShape,
+                                            badgeType = badgeType,
+                                            badgeEnabled = badgeEnabled,
+                                            thumbnailQuality = thumbnailQuality,
+                                            onClick = {
+                                                if (isSelectionMode) {
+                                                    viewModel.toggleSelection(mediaItem.id)
+                                                } else {
+                                                    viewModel.showMediaOverlayWithItem(
+                                                        mediaType = "photos",
+                                                        albumId = "all",
+                                                        item = mediaItem
+                                                    )
+                                                }
+                                            },
+                                            onLongClick = {
+                                                if (!isSelectionMode) {
+                                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                                                    viewModel.enterSelectionMode(mediaItem.id)
+                                                }
+                                            },
+                                            showFavorite = true
+                                        )
                                     }
                                 }
                             }
                         }
-                        
-                        // Media items for this date - with stable keys for optimal recomposition
-                        items(
-                            count = group.items.size,
-                            key = { index -> group.items[index].id }  // CRITICAL: Stable key prevents unnecessary recomposition
-                        ) { index ->
-                            val item = group.items[index]
-                            val globalIndex = indexMap[item.id] ?: 0  // O(1) lookup instead of O(n) indexOf
-                            val isSelected = selectedItems.contains(item)
-                            val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                                index = index,
-                                totalItems = group.items.size,
-                                columns = columnCount,
-                                cornerType = cornerType
-                            )
-                            
-                            MediaThumbnail(
-                                item = item,
-                                isSelected = isSelected,
-                                isSelectionMode = isSelectionMode,
-                                shape = gridShape,
-                                badgeType = badgeType,
-                                badgeEnabled = badgeEnabled,
-                                thumbnailQuality = thumbnailQuality,
-                                sharedTransitionScope = sharedTransitionScope,
-                                animatedVisibilityScope = animatedVisibilityScope,
-                                onClick = {
-                                    if (isSelectionMode) {
-                                        viewModel.toggleSelection(item)
-                                    } else {
-                                        viewModel.showMediaOverlay(
-                                            mediaType = "photos",
-                                            albumId = "all",
-                                            selectedIndex = globalIndex
-                                        )
-                                    }
-                                },
-                                onLongClick = {
-                                    if (!isSelectionMode) {
-                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                        viewModel.enterSelectionMode(item)
-                                    }
-                                },
-                                showFavorite = true
-                            )
-                        }
-                    }
                 }
             }
             

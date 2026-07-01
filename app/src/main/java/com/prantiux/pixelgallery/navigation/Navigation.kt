@@ -1,20 +1,19 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 
 package com.prantiux.pixelgallery.navigation
 
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalAnimationApi
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.ui.graphics.TransformOrigin
@@ -70,6 +69,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import com.prantiux.pixelgallery.ui.animation.AnimatedRootContent
+import com.prantiux.pixelgallery.ui.utils.bounceClick
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -115,21 +115,6 @@ sealed class Screen(val route: String, val title: String, val iconUnicode: Strin
 private const val OVERLAY_DEBUG_TAG = "OverlayDebug"
 
 private object HierarchicalNavMotion {
-    private const val DURATION_MS = 280
-    private const val ENTER_ALPHA = 0.9f
-    private const val PRIMARY_SLIDE_FRACTION = 0.28f
-    private const val SECONDARY_SLIDE_FRACTION = 0.08f
-
-    private val animationSpec = tween<IntOffset>(
-        durationMillis = DURATION_MS,
-        easing = FastOutSlowInEasing
-    )
-
-    private val fadeSpec = tween<Float>(
-        durationMillis = DURATION_MS,
-        easing = FastOutSlowInEasing
-    )
-
     private val hierarchicalRoutes = setOf(
         Screen.Settings.route,
         Screen.AllAlbums.route,
@@ -153,62 +138,116 @@ private object HierarchicalNavMotion {
             route.startsWith("smartalbum/")
     }
 
-    private fun shouldAnimate(
-        initialState: NavBackStackEntry,
-        targetState: NavBackStackEntry
-    ): Boolean {
-        return isHierarchicalRoute(initialState.destination.route) ||
-            isHierarchicalRoute(targetState.destination.route)
-    }
+    private val navItems = listOf(
+        Screen.Photos.route,
+        Screen.Search.route,
+        Screen.Albums.route
+    )
 
     val enterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        if (!shouldAnimate(initialState, targetState)) {
-            EnterTransition.None
-        } else {
+        val initialRoute = initialState.destination.route
+        val targetRoute = targetState.destination.route
+        val isInitialDeep = isHierarchicalRoute(initialRoute)
+        val isTargetDeep = isHierarchicalRoute(targetRoute)
+        
+        val animationSpec = spring<IntOffset>(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessLow
+        )
+
+        val slide = if (isTargetDeep) {
             slideInHorizontally(
-                animationSpec = animationSpec,
-                initialOffsetX = { fullWidth -> (fullWidth * PRIMARY_SLIDE_FRACTION).roundToInt() }
-            ) + fadeIn(
-                animationSpec = fadeSpec,
-                initialAlpha = ENTER_ALPHA
+                initialOffsetX = { it },
+                animationSpec = animationSpec
             )
+        } else {
+            val initialIndex = navItems.indexOfFirst { it == initialRoute }
+            val targetIndex = navItems.indexOfFirst { it == targetRoute }
+
+            if (targetIndex > initialIndex) {
+                slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = animationSpec
+                )
+            } else {
+                slideInHorizontally(
+                    initialOffsetX = { -it },
+                    animationSpec = animationSpec
+                )
+            }
         }
+        
+        if (isInitialDeep && isTargetDeep) slide else slide + fadeIn()
     }
 
     val exitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        if (!shouldAnimate(initialState, targetState)) {
-            ExitTransition.None
-        } else {
+        val initialRoute = initialState.destination.route
+        val targetRoute = targetState.destination.route
+        val isTargetDeep = isHierarchicalRoute(targetRoute)
+        val isInitialDeep = isHierarchicalRoute(initialRoute)
+
+        val animationSpec = spring<IntOffset>(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        )
+
+        val slide = if (isTargetDeep || (isInitialDeep && !isTargetDeep)) {
             slideOutHorizontally(
-                animationSpec = animationSpec,
-                targetOffsetX = { fullWidth -> -(fullWidth * SECONDARY_SLIDE_FRACTION).roundToInt() }
-            ) + fadeOut(animationSpec = fadeSpec)
+                targetOffsetX = { -it / 3 },
+                animationSpec = animationSpec
+            )
+        } else {
+            val initialIndex = navItems.indexOfFirst { it == initialRoute }
+            val targetIndex = navItems.indexOfFirst { it == targetRoute }
+
+            if (targetIndex > initialIndex) {
+                slideOutHorizontally(
+                    targetOffsetX = { -it / 3 },
+                    animationSpec = animationSpec
+                )
+            } else {
+                slideOutHorizontally(
+                    targetOffsetX = { it / 3 },
+                    animationSpec = animationSpec
+                )
+            }
         }
+        
+        if (isInitialDeep && isTargetDeep) slide else slide + fadeOut()
     }
 
     val popEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        if (!shouldAnimate(initialState, targetState)) {
-            EnterTransition.None
-        } else {
-            slideInHorizontally(
-                animationSpec = animationSpec,
-                initialOffsetX = { fullWidth -> -(fullWidth * PRIMARY_SLIDE_FRACTION).roundToInt() }
-            ) + fadeIn(
-                animationSpec = fadeSpec,
-                initialAlpha = ENTER_ALPHA
+        val initialRoute = initialState.destination.route
+        val targetRoute = targetState.destination.route
+        val isInitialDeep = isHierarchicalRoute(initialRoute)
+        val isTargetDeep = isHierarchicalRoute(targetRoute)
+        
+        val slide = slideInHorizontally(
+            initialOffsetX = { -it / 3 },
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessLow
             )
-        }
+        )
+        
+        if (isInitialDeep && isTargetDeep) slide else slide + fadeIn()
     }
 
     val popExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        if (!shouldAnimate(initialState, targetState)) {
-            ExitTransition.None
-        } else {
-            slideOutHorizontally(
-                animationSpec = animationSpec,
-                targetOffsetX = { fullWidth -> (fullWidth * PRIMARY_SLIDE_FRACTION).roundToInt() }
-            ) + fadeOut(animationSpec = fadeSpec)
-        }
+        val initialRoute = initialState.destination.route
+        val targetRoute = targetState.destination.route
+        val isInitialDeep = isHierarchicalRoute(initialRoute)
+        val isTargetDeep = isHierarchicalRoute(targetRoute)
+        
+        val slide = slideOutHorizontally(
+            targetOffsetX = { it },
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessLow
+            )
+        )
+        
+        if (isInitialDeep && isTargetDeep) slide else slide + fadeOut()
     }
 }
 
@@ -346,11 +385,7 @@ private fun PixelNavBarItem(
     
     Column(
         modifier = Modifier
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null, // No ripple effect
-                onClick = onClick
-            )
+            .bounceClick(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -400,6 +435,59 @@ private fun PixelNavBarItem(
             ),
             color = textColor
         )
+    }
+}
+
+@Composable
+fun TabPredictiveBackHandler(
+    enabled: Boolean,
+    activeTabIndex: Int,
+    defaultTabIndex: Int,
+    screenWidthPx: Float,
+    tabOffsets: List<androidx.compose.animation.core.Animatable<Float, androidx.compose.animation.core.AnimationVector1D>>,
+    tabAlphas: List<androidx.compose.animation.core.Animatable<Float, androidx.compose.animation.core.AnimationVector1D>>,
+    onCommit: () -> Unit
+) {
+    androidx.activity.compose.PredictiveBackHandler(enabled = enabled) { progress ->
+        try {
+            progress.collect { backEvent ->
+                val p = backEvent.progress
+                val moveOffset = screenWidthPx * p * 0.4f
+                val movingRight = defaultTabIndex > activeTabIndex
+                
+                // Push current tab away slightly
+                tabOffsets[activeTabIndex].snapTo(if (movingRight) -moveOffset else moveOffset)
+                tabAlphas[activeTabIndex].snapTo(1f - (p * 0.3f))
+                
+                // Pull default tab in from the background
+                val targetOffset = if (movingRight) screenWidthPx / 3f else -screenWidthPx / 3f
+                tabOffsets[defaultTabIndex].snapTo(targetOffset * (1f - p))
+                tabAlphas[defaultTabIndex].snapTo(p * 0.8f)
+            }
+            // Gesture committed - pop back to default tab
+            onCommit()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            // Gesture cancelled - spring back to current tab
+            val movingRight = defaultTabIndex > activeTabIndex
+            
+            kotlinx.coroutines.coroutineScope {
+                launch {
+                    tabOffsets[activeTabIndex].animateTo(
+                        0f, 
+                        androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioLowBouncy, stiffness = androidx.compose.animation.core.Spring.StiffnessLow)
+                    )
+                }
+                launch { tabAlphas[activeTabIndex].animateTo(1f) }
+                
+                launch {
+                    tabOffsets[defaultTabIndex].animateTo(
+                        if (movingRight) -screenWidthPx / 3f else screenWidthPx / 3f,
+                        androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy, stiffness = androidx.compose.animation.core.Spring.StiffnessLow)
+                    )
+                }
+                launch { tabAlphas[defaultTabIndex].animateTo(0f) }
+            }
+        }
     }
 }
 
@@ -512,8 +600,7 @@ fun AppNavigation(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { _ ->
         AnimatedRootContent(modifier = Modifier.fillMaxSize()) {
-            SharedTransitionLayout {
-                Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
             // Global navigation bar background - MUST be first to render behind all content
             Box(
                 modifier = Modifier
@@ -529,9 +616,7 @@ fun AppNavigation(
             var finalOverlayMediaItems by remember {
                 mutableStateOf<List<com.prantiux.pixelgallery.model.MediaItem>>(emptyList())
             }
-            val overlayScopeHolder = remember {
-                mutableStateOf<AnimatedVisibilityScope?>(null)
-            }
+
 
             androidx.compose.runtime.LaunchedEffect(isOverlayVisible) {
                 if (com.prantiux.pixelgallery.BuildConfig.DEBUG) {
@@ -539,72 +624,94 @@ fun AppNavigation(
                 }
             }
 
-            // Subtle tab fade-through with directional horizontal offset and Material 3 Expressive spring bounce
-            // Material 3 Expressive spring values: dampingRatio=0.65f for subtle bounce, stiffness=200f for responsive motion
-            val tabAnimationSpec = spring<Float>(dampingRatio = 0.65f, stiffness = 200f)
-            val density = LocalDensity.current
-            val activeTabIndex = when (activeRoute) {
-                Screen.Photos.route -> 0
+            var lastValidTabIndex by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            
+            val currentCalculatedIndex = when (activeRoute) {
+                Screen.Photos.route -> { lastValidTabIndex = 0; 0 }
+                Screen.Albums.route -> { lastValidTabIndex = 1; 1 }
+                Screen.Search.route -> { lastValidTabIndex = 2; 2 }
+                else -> lastValidTabIndex
+            }
+            
+            var activeTabIndex by remember { androidx.compose.runtime.mutableIntStateOf(currentCalculatedIndex) }
+            var previousTabIndex by remember { androidx.compose.runtime.mutableIntStateOf(currentCalculatedIndex) }
+            
+            if (currentCalculatedIndex != activeTabIndex) {
+                previousTabIndex = activeTabIndex
+                activeTabIndex = currentCalculatedIndex
+            }
+
+            val screenWidthPx = with(LocalDensity.current) { 
+                androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp.toPx() 
+            }
+            
+            // Track tab offsets and alphas
+            val tabOffsets = remember { List(3) { androidx.compose.animation.core.Animatable(if (it == activeTabIndex) 0f else screenWidthPx) } }
+            val tabAlphas = remember { List(3) { androidx.compose.animation.core.Animatable(if (it == activeTabIndex) 1f else 0f) } }
+            
+            val defaultTabRoute = when (defaultTab) {
+                "Albums" -> Screen.Albums.route
+                "Search" -> Screen.Search.route
+                else -> Screen.Photos.route
+            }
+            
+            val defaultTabIndex = when (defaultTabRoute) {
                 Screen.Albums.route -> 1
                 Screen.Search.route -> 2
                 else -> 0
             }
-            val horizontalOffsetDp = 28f
             
-            // Photos tab animation
-            val photosAlpha by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Photos.route) 1f else 0f,
-                animationSpec = tabAnimationSpec,
-                label = "photosAlpha"
-            )
-            val photosTranslationX by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Photos.route) {
-                    0f
-                } else {
-                    if (0 < activeTabIndex) -horizontalOffsetDp else horizontalOffsetDp
-                },
-                animationSpec = tabAnimationSpec,
-                label = "photosTranslationX"
-            )
+            val isCurrentRouteTab = activeRoute == Screen.Photos.route || activeRoute == Screen.Albums.route || activeRoute == Screen.Search.route
             
-            // Albums tab animation
-            val albumsAlpha by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Albums.route) 1f else 0f,
-                animationSpec = tabAnimationSpec,
-                label = "albumsAlpha"
-            )
-            val albumsTranslationX by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Albums.route) {
-                    0f
-                } else {
-                    if (1 < activeTabIndex) -horizontalOffsetDp else horizontalOffsetDp
-                },
-                animationSpec = tabAnimationSpec,
-                label = "albumsTranslationX"
-            )
+            // PredictiveBackHandler has been moved into individual NavHost composables
             
-            // Search tab animation
-            val searchAlpha by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Search.route) 1f else 0f,
-                animationSpec = tabAnimationSpec,
-                label = "searchAlpha"
-            )
-            val searchTranslationX by animateFloatAsState(
-                targetValue = if (activeRoute == Screen.Search.route) {
-                    0f
-                } else {
-                    if (2 < activeTabIndex) -horizontalOffsetDp else horizontalOffsetDp
-                },
-                animationSpec = tabAnimationSpec,
-                label = "searchTranslationX"
-            )
+            androidx.compose.runtime.LaunchedEffect(activeTabIndex) {
+                if (activeTabIndex == previousTabIndex) return@LaunchedEffect
+                
+                val movingRight = activeTabIndex > previousTabIndex
+                
+                // Snap incoming tab to starting position
+                val incomingStartOffset = if (movingRight) screenWidthPx else -screenWidthPx
+                tabOffsets[activeTabIndex].snapTo(incomingStartOffset)
+                
+                val animationSpec = androidx.compose.animation.core.spring<Float>(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioLowBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                )
+                
+                val fadeSpec = androidx.compose.animation.core.tween<Float>(durationMillis = 300)
+                
+                // Animate all tabs
+                for (i in 0..2) {
+                    launch {
+                        if (i == activeTabIndex) {
+                            launch { tabAlphas[i].animateTo(1f, fadeSpec) }
+                            tabOffsets[i].animateTo(0f, animationSpec)
+                        } else if (i == previousTabIndex) {
+                            val targetOffset = if (movingRight) -screenWidthPx / 3f else screenWidthPx / 3f
+                            launch { tabAlphas[i].animateTo(0f, fadeSpec) }
+                            tabOffsets[i].animateTo(targetOffset, animationSpec)
+                        } else {
+                            tabAlphas[i].snapTo(0f)
+                        }
+                    }
+                }
+            }
+            
+            val photosAlpha = tabAlphas[0].value
+            val photosOffsetX = tabOffsets[0].value
+            
+            val albumsAlpha = tabAlphas[1].value
+            val albumsOffsetX = tabOffsets[1].value
+            
+            val searchAlpha = tabAlphas[2].value
+            val searchOffsetX = tabOffsets[2].value
 
             // Media overlay data collection - only when visible (performance)
             // Skip if trash mode (RecycleBinScreen shows its own overlay)
             if (isOverlayVisible && overlayState.mediaType != "trash") {
                 val sortedMediaForOverlay by viewModel.mediaFlow.collectAsState()
-                val allMediaUnfilteredForOverlay by viewModel.allMediaUnfilteredFlow.collectAsState()
-                val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
+                                val albumMediaForOverlay by viewModel.albumMediaFlow(overlayState.albumId).collectAsState(initial = emptyList())
                 val searchQuery = overlayState.searchQuery ?: ""
                 val searchResults by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
                 val favoriteItems by viewModel.favoritesFlow.collectAsState()
@@ -637,16 +744,14 @@ fun AppNavigation(
                 androidx.compose.runtime.LaunchedEffect(
                     isOverlayVisible,
                     overlayState.mediaType,
-                    overlayState.albumId,
-                    allMediaUnfilteredForOverlay
+                    overlayState.albumId
                 ) {
                     if (!isOverlayVisible) return@LaunchedEffect
                     if (isSmartAlbumOverlay) {
                         val sortedSmartMedia = withContext(Dispatchers.Default) {
                             SmartAlbumGenerator.getMediaForSmartAlbum(
                                 overlayContext,
-                                overlayState.albumId,
-                                allMediaUnfilteredForOverlay
+                                overlayState.albumId
                             ).sortedByDescending { it.dateAdded }
                         }
                         smartAlbumOverlayMedia = sortedSmartMedia
@@ -679,14 +784,12 @@ fun AppNavigation(
                                 .fillMaxSize()
                                 .alpha(photosAlpha)
                                 .graphicsLayer {
-                                    translationX = photosTranslationX * density.density
+                                    translationX = photosOffsetX
                                 }
                                 .zIndex(if (activeRoute == Screen.Photos.route) 1f else 0f)
                         ) {
                             PhotosScreen(
                                 viewModel = viewModel,
-                                sharedTransitionScope = this@SharedTransitionLayout,
-                                animatedVisibilityScope = overlayScopeHolder.value,
                                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
                             )
                         }
@@ -696,7 +799,7 @@ fun AppNavigation(
                                 .fillMaxSize()
                                 .alpha(albumsAlpha)
                                 .graphicsLayer {
-                                    translationX = albumsTranslationX * density.density
+                                    translationX = albumsOffsetX
                                 }
                                 .zIndex(if (activeRoute == Screen.Albums.route) 1f else 0f)
                         ) {
@@ -716,9 +819,7 @@ fun AppNavigation(
                                 onNavigateToSettings = {
                                     navController.navigate(Screen.Settings.route)
                                 },
-                                viewModel = viewModel,
-                                sharedTransitionScope = this@SharedTransitionLayout,
-                                animatedVisibilityScope = overlayScopeHolder.value
+                                viewModel = viewModel
                             )
                         }
 
@@ -727,15 +828,13 @@ fun AppNavigation(
                                 .fillMaxSize()
                                 .alpha(searchAlpha)
                                 .graphicsLayer {
-                                    translationX = searchTranslationX * density.density
+                                    translationX = searchOffsetX
                                 }
                                 .zIndex(if (activeRoute == Screen.Search.route) 1f else 0f)
                         ) {
                             SearchScreen(
                                 viewModel = viewModel,
                                 navController = navController,
-                                sharedTransitionScope = this@SharedTransitionLayout,
-                                animatedVisibilityScope = overlayScopeHolder.value,
                                 settingsDataStore = settingsDataStore
                             )
                         }
@@ -744,7 +843,7 @@ fun AppNavigation(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .zIndex(if (isTabRoute) 0f else 2f)
+                        .zIndex(2f)
                 ) {
                     NavHost(
                         navController = navController,
@@ -764,12 +863,30 @@ fun AppNavigation(
                         composable(
                             route = Screen.Albums.route
                         ) {
+                            TabPredictiveBackHandler(
+                                enabled = activeTabIndex != defaultTabIndex,
+                                activeTabIndex = activeTabIndex,
+                                defaultTabIndex = defaultTabIndex,
+                                screenWidthPx = screenWidthPx,
+                                tabOffsets = tabOffsets,
+                                tabAlphas = tabAlphas,
+                                onCommit = { navController.popBackStack() }
+                            )
                             Box(modifier = Modifier.fillMaxSize())
                         }
 
                         composable(
                             route = Screen.Search.route
                         ) {
+                            TabPredictiveBackHandler(
+                                enabled = activeTabIndex != defaultTabIndex,
+                                activeTabIndex = activeTabIndex,
+                                defaultTabIndex = defaultTabIndex,
+                                screenWidthPx = screenWidthPx,
+                                tabOffsets = tabOffsets,
+                                tabAlphas = tabAlphas,
+                                onCommit = { navController.popBackStack() }
+                            )
                             Box(modifier = Modifier.fillMaxSize())
                         }
 
@@ -788,7 +905,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.RecycleBin.route
                     ) {
-                        RecycleBinScreen(
+                            RecycleBinScreen(
                             viewModel = viewModel,
                             onNavigateBack = { navController.popBackStack() },
                             settingsDataStore = settingsDataStore,
@@ -802,8 +919,6 @@ fun AppNavigation(
                             FavoritesScreen(
                                 viewModel = viewModel,
                                 onNavigateBack = { navController.popBackStack() },
-                                sharedTransitionScope = this@SharedTransitionLayout,
-                                animatedVisibilityScope = overlayScopeHolder.value,
                                 settingsDataStore = settingsDataStore
                             )
                         }
@@ -811,7 +926,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.Settings.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.SettingsScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.SettingsScreen(
                             viewModel = viewModel,
                             onNavigateToGridType = { navController.navigate(Screen.GridTypeSetting.route) },
                             onNavigateToGalleryView = { navController.navigate(Screen.GalleryViewSetting.route) },
@@ -827,7 +942,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.GridTypeSetting.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.LayoutSettingScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.LayoutSettingScreen(
                             viewModel = viewModel,
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
@@ -837,7 +952,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.GalleryViewSetting.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.GalleryViewSettingScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.GalleryViewSettingScreen(
                             viewModel = viewModel,
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
@@ -847,7 +962,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.ThemeSetting.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.ThemeSettingScreen(
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
                         )
@@ -856,7 +971,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.PreviewsSetting.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.PreviewsSettingScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.PreviewsSettingScreen(
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
                         )
@@ -865,7 +980,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.GesturesSetting.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.GesturesSettingScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.GesturesSettingScreen(
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
                         )
@@ -874,7 +989,7 @@ fun AppNavigation(
                     composable(
                         route = Screen.PlaybackSetting.route
                     ) {
-                        com.prantiux.pixelgallery.ui.screens.settings.PlaybackSettingScreen(
+                            com.prantiux.pixelgallery.ui.screens.settings.PlaybackSettingScreen(
                             settingsDataStore = settingsDataStore,
                             onBackClick = { navController.popBackStack() }
                         )
@@ -894,13 +1009,11 @@ fun AppNavigation(
                         arguments = listOf(navArgument("albumId") { type = NavType.StringType })
                     ) { backStackEntry ->
                         val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
-                        AlbumDetailScreen(
+                            AlbumDetailScreen(
                             viewModel = viewModel,
                             albumId = albumId,
                             onNavigateBack = { navController.popBackStack() },
                             onNavigateToViewer = { },
-                            sharedTransitionScope = this@SharedTransitionLayout,
-                            animatedVisibilityScope = overlayScopeHolder.value,
                             settingsDataStore = settingsDataStore
                         )
                     }
@@ -915,8 +1028,6 @@ fun AppNavigation(
                                 albumId = albumId,
                                 onNavigateBack = { navController.popBackStack() },
                                 onNavigateToViewer = { },
-                                sharedTransitionScope = this@SharedTransitionLayout,
-                                animatedVisibilityScope = overlayScopeHolder.value,
                                 settingsDataStore = settingsDataStore
                             )
                         }
@@ -941,22 +1052,18 @@ fun AppNavigation(
 
             AnimatedVisibility(
                 visible = isOverlayVisible && overlayState.mediaType != "trash",
-                // enter = fadeIn(animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing)),
-                // exit = fadeOut(animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing))
-                enter = EnterTransition.None,
-                exit = ExitTransition.None
+                enter = fadeIn(animationSpec = tween(400, easing = LinearOutSlowInEasing)) +
+                        scaleIn(initialScale = 0.85f, animationSpec = tween(400, easing = FastOutSlowInEasing)),
+                exit = fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing)) +
+                       scaleOut(targetScale = 0.85f, animationSpec = tween(250, easing = FastOutLinearInEasing)),
+                modifier = Modifier.fillMaxSize().zIndex(100f)
             ) {
-                // Shared-element transition disabled: keep scope holder unlinked.
-                // overlayScopeHolder.value = this@AnimatedVisibility
                 com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
                     viewModel = viewModel,
                     overlayState = overlayState,
                     mediaItems = finalOverlayMediaItems,
                     settingsDataStore = settingsDataStore,
                     videoPositionDataStore = videoPositionDataStore,
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    // animatedVisibilityScope = this@AnimatedVisibility,
-                    animatedVisibilityScope = null,
                     onDismiss = { viewModel.hideMediaOverlay() }
                 )
             }
@@ -984,13 +1091,38 @@ fun AppNavigation(
                 )
             }
             
+            val showNavBar = !isOverlayVisible && !isScrollbarDragging && isTabRoute
+            var delayedShowNavBar by remember { mutableStateOf(showNavBar) }
+            
+            androidx.compose.runtime.LaunchedEffect(showNavBar) {
+                if (showNavBar) {
+                    // Delay to let screen slide-out animation finish first
+                    kotlinx.coroutines.delay(250)
+                    delayedShowNavBar = true
+                } else {
+                    // Hide instantly so it doesn't get in the way
+                    delayedShowNavBar = false
+                }
+            }
+
             val navBarAnimProgress by animateFloatAsState(
-                targetValue = if (isOverlayVisible || isScrollbarDragging) 0f else 1f,
-                animationSpec = tween(durationMillis = 150, easing = FastOutLinearInEasing),
+                targetValue = if (delayedShowNavBar) 1f else 0f,
+                animationSpec = if (delayedShowNavBar) {
+                    androidx.compose.animation.core.spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                        stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                    )
+                } else {
+                    androidx.compose.animation.core.spring(
+                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                        stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                    )
+                },
                 label = "navBarAnimation"
             )
             
-            if (currentRoute in bottomNavItems.map { it.route }) {
+            // ALWAYS in composition to prevent jank, hidden via navBarAnimProgress (translationY)
+            run {
                 // Get system navigation bar inset to properly position the floating bar
                 val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                 val bottomPadding = if (navBarInset > 0.dp) 8.dp else 24.dp
@@ -1190,16 +1322,8 @@ fun AppNavigation(
                                 },
                                 onClick = {
                                     showMoreMenu = false
-                                    selectedItems.firstOrNull()?.let { item ->
-                                        if (!item.isVideo) {
-                                            val wallpaperIntent = android.content.Intent(android.content.Intent.ACTION_ATTACH_DATA).apply {
-                                                setDataAndType(item.uri, "image/*")
-                                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                            }
-                                            context.startActivity(android.content.Intent.createChooser(wallpaperIntent, "Set as"))
-                                        } else {
-                                            android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
+                                    selectedItems.firstOrNull()?.let { itemId ->
+                                        viewModel.setAsWallpaper(context, itemId)
                                     }
                                 },
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1310,8 +1434,4 @@ fun AppNavigation(
         }
     }
 }
-
 }
-
-}
-

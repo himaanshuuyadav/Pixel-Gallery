@@ -22,5 +22,7 @@ data class MediaItem(
     val isFavorite: Boolean = false, // Track favorite status
     val latitude: Double? = null, // GPS latitude
     val longitude: Double? = null, // GPS longitude
-    val location: String? = null // Resolved location name
+    val location: String? = null, // Resolved location name
+    val dateGroupDay: String = "",
+    val dateGroupMonth: String = ""
 )

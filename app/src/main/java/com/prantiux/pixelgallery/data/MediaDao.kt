@@ -6,6 +6,12 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+data class BucketInfo(
+    val bucketId: String,
+    val bucketName: String?,
+    val count: Int
+)
+
 @Dao
 interface MediaDao {
 
@@ -15,14 +21,25 @@ interface MediaDao {
     @Query("SELECT * FROM media ORDER BY dateAdded DESC")
     fun getAllMedia(): Flow<List<MediaEntity>>
 
+    @Query("SELECT * FROM media ORDER BY dateAdded DESC")
+    fun getPagedMedia(): androidx.paging.PagingSource<Int, MediaEntity>
+
+
+
     // ═════════════════════════════════════════════════════════════════════
     // DATE SORTING (Primary sort mode)
     // ═════════════════════════════════════════════════════════════════════
     @Query("SELECT * FROM media ORDER BY dateAdded DESC")
     fun getMediaByDateDesc(): Flow<List<MediaEntity>>
 
+    @Query("SELECT * FROM media ORDER BY dateAdded DESC")
+    fun getPagedMediaByDateDesc(): androidx.paging.PagingSource<Int, MediaEntity>
+
     @Query("SELECT * FROM media ORDER BY dateAdded ASC")
     fun getMediaByDateAsc(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media ORDER BY dateAdded ASC")
+    fun getPagedMediaByDateAsc(): androidx.paging.PagingSource<Int, MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // NAME SORTING
@@ -30,8 +47,14 @@ interface MediaDao {
     @Query("SELECT * FROM media ORDER BY displayName ASC")
     fun getMediaByNameAsc(): Flow<List<MediaEntity>>
 
+    @Query("SELECT * FROM media ORDER BY displayName ASC")
+    fun getPagedMediaByNameAsc(): androidx.paging.PagingSource<Int, MediaEntity>
+
     @Query("SELECT * FROM media ORDER BY displayName DESC")
     fun getMediaByNameDesc(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media ORDER BY displayName DESC")
+    fun getPagedMediaByNameDesc(): androidx.paging.PagingSource<Int, MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // SIZE SORTING
@@ -39,8 +62,14 @@ interface MediaDao {
     @Query("SELECT * FROM media ORDER BY size DESC")
     fun getMediaBySizeDesc(): Flow<List<MediaEntity>>
 
+    @Query("SELECT * FROM media ORDER BY size DESC")
+    fun getPagedMediaBySizeDesc(): androidx.paging.PagingSource<Int, MediaEntity>
+
     @Query("SELECT * FROM media ORDER BY size ASC")
     fun getMediaBySizeAsc(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media ORDER BY size ASC")
+    fun getPagedMediaBySizeAsc(): androidx.paging.PagingSource<Int, MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // TYPE FILTERING (by video/image)
@@ -60,6 +89,48 @@ interface MediaDao {
         ORDER BY dateAdded DESC
     """)
     fun getImagesByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY dateAdded DESC
+    """)
+    fun getPagedMediaByBucketIdsDateDesc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY dateAdded ASC
+    """)
+    fun getPagedMediaByBucketIdsDateAsc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY displayName ASC
+    """)
+    fun getPagedMediaByBucketIdsNameAsc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY displayName DESC
+    """)
+    fun getPagedMediaByBucketIdsNameDesc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY size DESC
+    """)
+    fun getPagedMediaByBucketIdsSizeDesc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
+
+    @Query("""
+        SELECT * FROM media
+        WHERE bucketId IN (:bucketIds)
+        ORDER BY size ASC
+    """)
+    fun getPagedMediaByBucketIdsSizeAsc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
     @Query("SELECT * FROM media WHERE isVideo = 1 ORDER BY dateAdded DESC")
     fun getAllVideos(): Flow<List<MediaEntity>>
@@ -85,6 +156,14 @@ interface MediaDao {
     """)
     fun searchMedia(query: String): Flow<List<MediaEntity>>
 
+    @Query("""
+        SELECT * FROM media
+        WHERE displayName LIKE '%' || :query || '%'
+        OR bucketName LIKE '%' || :query || '%'
+        ORDER BY dateAdded DESC
+    """)
+    fun searchPagedMedia(query: String): androidx.paging.PagingSource<Int, MediaEntity>
+
     // ═════════════════════════════════════════════════════════════════════
 
     // GET MEDIA BY BUCKET (for album detail view)
@@ -95,6 +174,39 @@ interface MediaDao {
         ORDER BY dateAdded DESC
     """)
     fun getMediaByBucket(bucketId: String): Flow<List<MediaEntity>>
+
+    @Query("""
+        SELECT bucketId, bucketName, COUNT(*) as count 
+        FROM media 
+        WHERE bucketId IS NOT NULL 
+        GROUP BY bucketId, bucketName 
+        ORDER BY count DESC
+    """)
+    fun getAllBuckets(): List<BucketInfo>
+
+    @Query("""
+        SELECT bucketId, bucketName, COUNT(*) as count 
+        FROM media 
+        WHERE bucketId IS NOT NULL 
+        GROUP BY bucketId, bucketName 
+        ORDER BY count DESC
+    """)
+    fun getAllBucketsFlow(): Flow<List<BucketInfo>>
+
+    @Query("SELECT * FROM media WHERE bucketId = :bucketId ORDER BY dateAdded DESC LIMIT :limit")
+    fun getTopMediaForBucket(bucketId: String, limit: Int): List<MediaEntity>
+
+    // ═════════════════════════════════════════════════════════════════════
+    // SELECTION QUERIES (For Select All in Paging)
+    // ═════════════════════════════════════════════════════════════════════
+    @Query("SELECT * FROM media WHERE dateGroupDay = :dateGroupDay")
+    suspend fun getMediaByDateGroupDay(dateGroupDay: String): List<MediaEntity>
+
+    @Query("SELECT * FROM media WHERE dateGroupMonth = :dateGroupMonth")
+    suspend fun getMediaByDateGroupMonth(dateGroupMonth: String): List<MediaEntity>
+
+    @Query("SELECT * FROM media WHERE bucketId = :bucketId")
+    suspend fun getMediaByBucketOnce(bucketId: String): List<MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // GET MEDIA BY MULTIPLE BUCKETS (for Photos View album filter)
@@ -283,6 +395,12 @@ interface MediaDao {
 
     @Query("SELECT COUNT(*) FROM media")
     suspend fun getMediaCount(): Int
+
+    @Query("SELECT * FROM media WHERE id = :id LIMIT 1")
+    suspend fun getMediaByIdOnce(id: Long): MediaEntity?
+
+    @Query("SELECT * FROM media WHERE id IN (:ids)")
+    suspend fun getMediaByIds(ids: List<Long>): List<MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // SYNC OPERATIONS

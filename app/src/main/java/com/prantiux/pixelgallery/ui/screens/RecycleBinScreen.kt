@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.screens
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import android.Manifest
 import android.os.Build
 import android.view.HapticFeedbackConstants
@@ -122,7 +123,7 @@ fun RecycleBinContent(
     trashedItems: List<MediaItem>,
     isLoading: Boolean,
     isSelectionMode: Boolean,
-    selectedItems: Set<MediaItem>,
+    selectedItems: Set<Long>,
     onNavigateBack: () -> Unit,
     viewModel: MediaViewModel,
     badgeType: String,
@@ -253,6 +254,7 @@ fun RecycleBinContent(
                     }
                 } else {
                     LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
                         columns = GridCells.Fixed(3),
                         state = gridState,
                         modifier = Modifier
@@ -310,7 +312,7 @@ fun RecycleBinContent(
                                     ) {
                                         // Show checkbox only in selection mode
                                         if (capturedIsSelectionMode) {
-                                            val allSelected = group.items.all { capturedSelectedItems.contains(it) }
+                                            val allSelected = group.items.all { capturedSelectedItems.contains(it.id) }
                                             if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("RecycleBinScreen", "Selection mode - checkbox for ${group.daysLeftRange}: allSelected=$allSelected")
                                             Box(
                                                 modifier = Modifier
@@ -351,7 +353,7 @@ fun RecycleBinContent(
                             // Media items
                             items(group.items.size) { index ->
                                 val item = group.items[index]
-                                val isSelected = capturedSelectedItems.contains(item)
+                                val isSelected = capturedSelectedItems.contains(item.id)
                                 val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
                                     index = index,
                                     totalItems = group.items.size,

@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.palette.graphics.Palette
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.prantiux.pixelgallery.data.AlbumRepository
@@ -36,9 +35,6 @@ import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.search.SearchResultFilter
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
-import com.prantiux.pixelgallery.ui.theme.extractSeedColor
-import com.prantiux.pixelgallery.ui.theme.selectThemeAwareSwatch
-import com.prantiux.pixelgallery.ui.theme.adjustColorForSmartAlbum
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -62,6 +58,13 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOn
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
+import androidx.paging.insertSeparators
+import androidx.paging.map
+import com.prantiux.pixelgallery.model.MediaGridItem
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -116,86 +119,11 @@ class MediaViewModel : ViewModel() {
     val smartAlbumThumbnailCache: SnapshotStateMap<String, android.net.Uri?>
         get() = _smartAlbumThumbnailCache
     
-    // Smart album dominant color cache
-    private val _smartAlbumDominantColors = mutableStateMapOf<String, Color>()
-    val smartAlbumDominantColors: SnapshotStateMap<String, Color>
-        get() = _smartAlbumDominantColors
-
-    fun preloadSmartAlbumColors(
-        context: Context,
-        albums: List<Album>,
-        allMediaItems: List<MediaItem>
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            albums.forEach { album ->
-                val alreadyCached = withContext(Dispatchers.Main) {
-                    _smartAlbumDominantColors.containsKey(album.id)
-                }
-                if (alreadyCached) return@forEach
-
-                val media = SmartAlbumGenerator.getMediaForSmartAlbum(context, album.id, allMediaItems)
-                val firstMedia = media.firstOrNull() ?: return@forEach
-                val extractedColor = extractDominantColor(context, firstMedia.uri) ?: return@forEach
-
-                withContext(Dispatchers.Main) {
-                    _smartAlbumDominantColors[album.id] = extractedColor
-                }
-            }
-        }
-    }
-
-    private fun extractDominantColor(context: Context, uri: Uri): Color? {
-        return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream.close()
-
-            if (bitmap == null) return null
-
-            // Build Palette and apply theme-aware swatch selection
-            val palette = Palette.Builder(bitmap)
-                .maximumColorCount(16)
-                .resizeBitmapArea(0)
-                .clearFilters()
-                .generate()
-
-            // Detect dark theme from system configuration
-            val isDarkTheme = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-
-            // Select theme-aware swatch (Echo-inspired approach)
-            val swatchRgb = selectThemeAwareSwatch(palette, isDarkTheme)
-            if (swatchRgb == null) {
-                bitmap.recycle()
-                return Color(0xFF6C4FF5) // Fallback to primary color
-            }
-
-            val extractedColor = Color(swatchRgb)
-
-            // Use a neutral surface color for blending (works across both light and dark)
-            val surfaceColor = if (isDarkTheme) {
-                Color(0xFF1C1B1F) // Material 3 dark surface
-            } else {
-                Color(0xFFFFFBFE) // Material 3 light surface
-            }
-
-            // Apply theme-aware adjustment
-            val adjustedColor = adjustColorForSmartAlbum(extractedColor, isDarkTheme, surfaceColor)
-
-            bitmap.recycle()
-            adjustedColor
-        } catch (e: Exception) {
-            Log.w("SmartAlbum", "Failed to extract color for uri=$uri: ${e.message}")
-            null
-        }
-    }
 
 
-    private val _isLoading = MutableStateFlow(false)
+    private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     
-    private val _initialSetupInProgress = MutableStateFlow(false)
-    val initialSetupInProgress: StateFlow<Boolean> = _initialSetupInProgress.asStateFlow()
-
     private val _mediaPermissionsGranted = MutableStateFlow(false)
     val mediaPermissionsGranted: StateFlow<Boolean> = _mediaPermissionsGranted.asStateFlow()
 
@@ -205,8 +133,8 @@ class MediaViewModel : ViewModel() {
     private val _sortMode = MutableStateFlow(SortMode.DATE_DESC)
     val sortMode: StateFlow<SortMode> = _sortMode.asStateFlow()
 
-    private val _selectedItems = MutableStateFlow<Set<MediaItem>>(emptySet())
-    val selectedItems: StateFlow<Set<MediaItem>> = _selectedItems.asStateFlow()
+    private val _selectedItems = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedItems: StateFlow<Set<Long>> = _selectedItems.asStateFlow()
 
     private val _isSelectionMode = MutableStateFlow(false)
     val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
@@ -230,8 +158,8 @@ class MediaViewModel : ViewModel() {
     private val _isTrashSelectionMode = MutableStateFlow(false)
     val isTrashSelectionMode: StateFlow<Boolean> = _isTrashSelectionMode.asStateFlow()
     
-    private val _selectedTrashItems = MutableStateFlow<Set<MediaItem>>(emptySet())
-    val selectedTrashItems: StateFlow<Set<MediaItem>> = _selectedTrashItems.asStateFlow()
+    private val _selectedTrashItems = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedTrashItems: StateFlow<Set<Long>> = _selectedTrashItems.asStateFlow()
     
     // Trash request launcher for Android 11+
     private var trashRequestLauncher: ((android.app.PendingIntent) -> Unit)? = null
@@ -250,8 +178,8 @@ class MediaViewModel : ViewModel() {
     val gridType: StateFlow<GridType> = _gridType.asStateFlow()
     
     // Selected albums for gallery view
-    private val _selectedAlbums = MutableStateFlow<Set<String>>(emptySet())
-    val selectedAlbums: StateFlow<Set<String>> = _selectedAlbums.asStateFlow()
+    private val _selectedAlbums = MutableStateFlow<Set<String>?>(null)
+    val selectedAlbums: StateFlow<Set<String>?> = _selectedAlbums.asStateFlow()
     
     // Pinch gesture enabled state
     private val _pinchGestureEnabled = MutableStateFlow(false)
@@ -261,15 +189,15 @@ class MediaViewModel : ViewModel() {
     private val _showCopyToAlbumDialog = MutableStateFlow(false)
     val showCopyToAlbumDialog: StateFlow<Boolean> = _showCopyToAlbumDialog.asStateFlow()
     
-    private val _itemsToCopy = MutableStateFlow<List<MediaItem>>(emptyList())
-    val itemsToCopy: StateFlow<List<MediaItem>> = _itemsToCopy.asStateFlow()
+    private val _itemsToCopy = MutableStateFlow<List<Long>>(emptyList())
+    val itemsToCopy: StateFlow<List<Long>> = _itemsToCopy.asStateFlow()
     
     // Move to album dialog state
     private val _showMoveToAlbumDialog = MutableStateFlow(false)
     val showMoveToAlbumDialog: StateFlow<Boolean> = _showMoveToAlbumDialog.asStateFlow()
     
-    private val _itemsToMove = MutableStateFlow<List<MediaItem>>(emptyList())
-    val itemsToMove: StateFlow<List<MediaItem>> = _itemsToMove.asStateFlow()
+    private val _itemsToMove = MutableStateFlow<List<Long>>(emptyList())
+    val itemsToMove: StateFlow<List<Long>> = _itemsToMove.asStateFlow()
     
     private val _copySuccessMessage = MutableStateFlow<String?>(null)
     val copySuccessMessage: StateFlow<String?> = _copySuccessMessage.asStateFlow()
@@ -329,7 +257,8 @@ class MediaViewModel : ViewModel() {
         val mediaType: String = "photos",
         val albumId: String = "all",
         val selectedIndex: Int = 0,
-        val searchQuery: String? = null
+        val searchQuery: String? = null,
+        val selectedItemId: Long? = null
     )
 
     private val _overlayState = MutableStateFlow(MediaOverlayState())
@@ -365,7 +294,7 @@ class MediaViewModel : ViewModel() {
         }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Lazily,
             initialValue = emptyList()
         )
     
@@ -398,12 +327,14 @@ class MediaViewModel : ViewModel() {
                         withContext(Dispatchers.Default) {
                             if (BuildConfig.DEBUG) {
                                 if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: Media count before filter: ${mediaItems.size}")
-                                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums.size} album(s)")
+                                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: Selected albums: ${selectedAlbums?.size ?: "null"} album(s)")
                             }
 
                             logPerfIfLarge("mediaFlow.albumFilter", mediaItems.size)
 
-                            val filtered = if (selectedAlbums.isEmpty()) {
+                            val filtered = if (selectedAlbums == null) {
+                                mediaItems
+                            } else if (selectedAlbums.isEmpty()) {
                                 if (BuildConfig.DEBUG) {
                                     if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "mediaFlow: No albums selected → returning empty list")
                                 }
@@ -419,9 +350,6 @@ class MediaViewModel : ViewModel() {
                             filtered.toList()
                         }
                     }
-                    .flatMapLatest { filteredMedia ->
-                        emitIncrementalMediaBatches(filteredMedia)
-                    }
             }
         }
         .distinctUntilChanged()
@@ -429,39 +357,75 @@ class MediaViewModel : ViewModel() {
         .conflate()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Lazily,
             initialValue = emptyList()
         )
 
     /**
-     * UNFILTERED ROOM-FIRST MEDIA FLOW.
-     *
-     * This bypasses the Photos View selected-albums filter and should be used by
-     * Smart Albums so displayed counts and opened content remain consistent.
+     * PAGED MEDIA FLOW: Primary UI Flow for Paging 3 (Infinite Scroll)
      */
-    val allMediaUnfilteredFlow: StateFlow<List<MediaItem>> = _databaseReady
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val pagedMediaFlow: kotlinx.coroutines.flow.Flow<PagingData<MediaGridItem>> = _databaseReady
         .flatMapLatest { ready ->
             if (!ready) {
-                flowOf(emptyList())
+                flowOf(PagingData.empty())
             } else {
-                mediaEntitiesFlow
-                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        withContext(Dispatchers.Default) {
-                            logPerfIfLarge("allMediaUnfilteredFlow.toMediaItems", entities.size)
-                            entities.toMediaItems(favIds.toSet()).toList()
+                _selectedAlbums
+                    .combine(_sortMode) { selectedAlbums, sortMode ->
+                        Pair(selectedAlbums, sortMode)
+                    }
+                    .flatMapLatest { (selected, sortMode) ->
+                        Pager(
+                            config = PagingConfig(pageSize = 100, enablePlaceholders = true, prefetchDistance = 200),
+                            pagingSourceFactory = {
+                                if (selected == null || selected.isEmpty()) {
+                                    when (sortMode) {
+                                        SortMode.DATE_DESC -> database.mediaDao().getPagedMediaByDateDesc()
+                                        SortMode.DATE_ASC -> database.mediaDao().getPagedMediaByDateAsc()
+                                        SortMode.NAME_ASC -> database.mediaDao().getPagedMediaByNameAsc()
+                                        SortMode.NAME_DESC -> database.mediaDao().getPagedMediaByNameDesc()
+                                        SortMode.SIZE_DESC -> database.mediaDao().getPagedMediaBySizeDesc()
+                                        SortMode.SIZE_ASC -> database.mediaDao().getPagedMediaBySizeAsc()
+                                    }
+                                } else {
+                                    val selectedList = selected.toList()
+                                    when (sortMode) {
+                                        SortMode.DATE_DESC -> database.mediaDao().getPagedMediaByBucketIdsDateDesc(selectedList)
+                                        SortMode.DATE_ASC -> database.mediaDao().getPagedMediaByBucketIdsDateAsc(selectedList)
+                                        SortMode.NAME_ASC -> database.mediaDao().getPagedMediaByBucketIdsNameAsc(selectedList)
+                                        SortMode.NAME_DESC -> database.mediaDao().getPagedMediaByBucketIdsNameDesc(selectedList)
+                                        SortMode.SIZE_DESC -> database.mediaDao().getPagedMediaByBucketIdsSizeDesc(selectedList)
+                                        SortMode.SIZE_ASC -> database.mediaDao().getPagedMediaByBucketIdsSizeAsc(selectedList)
+                                    }
+                                }
+                            }
+                        ).flow
+                    }
+                    .cachedIn(viewModelScope)
+                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { pagingData, favIds ->
+                        val favSet = favIds.toSet()
+                        pagingData.map { entity ->
+                            MediaGridItem.Media(entity.toMediaItem(isFavorite = entity.id in favSet))
+                        }
+                    }
+                    .combine(_gridType) { pagingData, type ->
+                        pagingData.insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
+                            if (after == null) return@insertSeparators null
+                            
+                            val beforeGroup = before?.let { if (type == GridType.DAY) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
+                            val afterGroup = if (type == GridType.DAY) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
+                            
+                            if (beforeGroup != afterGroup) {
+                                val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type == GridType.DAY)
+                                MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
+                            } else {
+                                null
+                            }
                         }
                     }
             }
         }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .conflate()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    
+
     /**
      * ALL ALBUMS FLOW: Complete album list from Room (UNFILTERED)
      * 
@@ -474,35 +438,24 @@ class MediaViewModel : ViewModel() {
             if (!ready) {
                 flowOf(emptyList())
             } else {
-                mediaEntitiesFlow
-                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        withContext(Dispatchers.Default) {
-                            logPerfIfLarge("allAlbumsFlow.toMediaItems", entities.size)
-                            entities.toMediaItems(favIds.toSet())
-                        }
-                    }
-                    .mapLatest { items ->
-                        withContext(Dispatchers.Default) {
-                            logPerfIfLarge("allAlbumsFlow.groupSort", items.size)
-                            if (items.isEmpty()) {
-                                emptyList()
-                            } else {
-                                items
-                                    .groupBy { it.bucketId }
-                                    .map { (bucketId, groupItems) ->
-                                        val topSix = groupItems.take(6)
+                database.mediaDao().getAllBucketsFlow()
+                    .mapLatest { buckets ->
+                        withContext(Dispatchers.IO) {
+                            traceGalleryPerf("allAlbumsFlow.fromRoom") {
+                                buckets.mapNotNull { bucket ->
+                                    val topMedia = database.mediaDao().getTopMediaForBucket(bucket.bucketId, 6)
+                                    if (topMedia.isNotEmpty()) {
                                         Album(
-                                            id = bucketId,
-                                            name = groupItems.first().bucketName,
-                                            coverUri = groupItems.firstOrNull()?.uri,
-                                            itemCount = groupItems.size,
-                                            bucketDisplayName = groupItems.first().bucketName,
-                                            topMediaUris = topSix.map { it.uri },
-                                            topMediaItems = topSix
+                                            id = bucket.bucketId,
+                                            name = bucket.bucketName ?: "Unknown",
+                                            coverUri = android.net.Uri.parse(topMedia.first().uri),
+                                            itemCount = bucket.count,
+                                            bucketDisplayName = bucket.bucketName ?: "Unknown",
+                                            topMediaUris = topMedia.map { android.net.Uri.parse(it.uri) },
+                                            topMediaItems = topMedia.map { it.toMediaItem() }
                                         )
-                                    }
-                                    .sortedByDescending { it.itemCount }
-                                    .toList()
+                                    } else null
+                                }
                             }
                         }
                     }
@@ -513,7 +466,7 @@ class MediaViewModel : ViewModel() {
         .conflate()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Lazily,
             initialValue = emptyList()
         )
     
@@ -524,43 +477,26 @@ class MediaViewModel : ViewModel() {
      * UI should observe this instead of categorizedAlbums.
      */
     /**
-     * ALBUMS FLOW: Album list from Room (Room-first - derived from mediaFlow)
+     * ALBUMS FLOW: Filtered album list
      * 
-     * Groups media by bucketId directly from mediaFlow.
-     * UI should observe this instead of categorizedAlbums.
+     * Derives from allAlbumsFlow and filters by selectedAlbums.
+     * This avoids heavy redundant .groupBy() operations caused by the incremental mediaFlow.
      */
-    val albumsFlow: StateFlow<List<Album>> = mediaFlow
-        .mapLatest { items ->
-            withContext(Dispatchers.Default) {
-                logPerfIfLarge("albumsFlow.groupSort", items.size)
-                if (items.isEmpty()) {
-                    emptyList()
-                } else {
-                    items
-                        .groupBy { it.bucketId }
-                        .map { (bucketId, groupItems) ->
-                            val topSix = groupItems.take(6)
-                            Album(
-                                id = bucketId,
-                                name = groupItems.first().bucketName,
-                                coverUri = groupItems.firstOrNull()?.uri,
-                                itemCount = groupItems.size,
-                                bucketDisplayName = groupItems.first().bucketName,
-                                topMediaUris = topSix.map { it.uri },
-                                topMediaItems = topSix
-                            )
-                        }
-                        .sortedByDescending { it.itemCount }
-                        .toList()
-                }
+    val albumsFlow: StateFlow<List<Album>> = allAlbumsFlow
+        .combine(_selectedAlbums) { albums, selected ->
+            if (selected == null) {
+                albums
+            } else if (selected.isEmpty()) {
+                emptyList()
+            } else {
+                albums.filter { it.id in selected }
             }
         }
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
-        .conflate()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Lazily,
             initialValue = emptyList()
         )
     
@@ -995,6 +931,80 @@ class MediaViewModel : ViewModel() {
             .flowOn(Dispatchers.Default)
             .conflate()
     }
+
+    /**
+     * PAGED ALBUM MEDIA FLOW: Media from specific album for Paging 3
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun pagedAlbumMediaFlow(context: Context, bucketId: String): kotlinx.coroutines.flow.Flow<PagingData<MediaGridItem>> {
+        if (bucketId == "all") {
+            return pagedMediaFlow
+        }
+        
+        if (SmartAlbumGenerator.isSmartAlbum(bucketId)) {
+            return _gridType.flatMapLatest { type ->
+                flow {
+                    val smartMedia = withContext(Dispatchers.IO) {
+                        try {
+                            SmartAlbumGenerator.getMediaForSmartAlbum(context, bucketId)
+                                .sortedByDescending { it.dateAdded }
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                    }
+                    
+                    val gridItems = mutableListOf<MediaGridItem>()
+                    var currentGroup: String? = null
+                    
+                    for (item in smartMedia) {
+                        val group = if (type == GridType.DAY) item.dateGroupDay else item.dateGroupMonth
+                        if (group != currentGroup) {
+                            currentGroup = group
+                            val displayDate = formatDisplayDate(item.dateAdded * 1000L, type == GridType.DAY)
+                            gridItems.add(MediaGridItem.Header(displayDate = displayDate, dateGroupKey = group))
+                        }
+                        gridItems.add(MediaGridItem.Media(item))
+                    }
+                    
+                    emit(PagingData.from(gridItems))
+                }
+            }
+        }
+        
+        return _databaseReady
+            .flatMapLatest { ready ->
+                if (!ready) {
+                    flowOf(PagingData.empty())
+                } else {
+                    Pager(
+                        config = PagingConfig(pageSize = 100, enablePlaceholders = true, prefetchDistance = 200),
+                        pagingSourceFactory = { database.mediaDao().getPagedMediaByBucketIdsDateDesc(listOf(bucketId)) }
+                    ).flow
+                }
+            }
+            .cachedIn(viewModelScope)
+            .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { pagingData, favIds ->
+                val favSet = favIds.toSet()
+                pagingData.map { entity ->
+                    MediaGridItem.Media(entity.toMediaItem(isFavorite = entity.id in favSet))
+                }
+            }
+            .combine(_gridType) { pagingData, type ->
+                pagingData.insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
+                    if (after == null) return@insertSeparators null
+                    
+                    val beforeGroup = before?.let { if (type == GridType.DAY) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
+                    val afterGroup = if (type == GridType.DAY) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
+                    
+                    if (beforeGroup != afterGroup) {
+                        val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type == GridType.DAY)
+                        MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
+                    } else {
+                        null
+                    }
+                }
+            }
+    }
     
     /**
      * FAVORITES FLOW: Favorite media from Room (Room-first)
@@ -1026,183 +1036,17 @@ class MediaViewModel : ViewModel() {
         }
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
-        .conflate()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Lazily,
             initialValue = emptyList()
         )
-    
-    /**
-     * IMAGES ONLY FLOW: Images from Room (Room-first)
-     */
-    /**
-     * IMAGES ONLY FLOW: Images from Room (Room-first - fully reactive)
-     * 
-     * Filters by selected albums from Photos View setting.
-     * Updates automatically when selectedAlbums preference changes.
-     */
-    val imagesFlow: StateFlow<List<MediaItem>> = _databaseReady
-        .flatMapLatest { ready ->
-            if (!ready) {
-                flowOf(emptyList())
-            } else {
-                _selectedAlbums.flatMapLatest { selectedBucketIds ->
-                    if (BuildConfig.DEBUG) {
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: Selected albums: ${selectedBucketIds.size} album(s)")
-                    }
-                    
-                    val bucketList = selectedBucketIds.toList()
-                    val imageDao = if (bucketList.isEmpty()) {
-                        // No albums selected - show no images
-                        if (BuildConfig.DEBUG) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: No albums selected → returning empty list")
-                        }
-                        flowOf(emptyList())
-                    } else {
-                        // Multiple or specific buckets - use filtered query
-                        database.mediaDao().getImagesByBucketIds(bucketList)
-                    }
-                    
-                    imageDao.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        if (BuildConfig.DEBUG) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: Media count before filter: ${entities.size}")
-                        }
-                        val items = withContext(Dispatchers.Default) {
-                            traceGalleryPerf("imagesFlow.filter") {
-                                logPerfIfLarge("imagesFlow.toMediaItems", entities.size)
-                                entities.toMediaItems(favIds.toSet()).toList()
-                            }
-                        }
-                        if (BuildConfig.DEBUG) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "imagesFlow: Media count after filter: ${items.size}")
-                        }
-                        items.toList()
-                    }
-                }
-            }
-        }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .conflate()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    
-    /**
-     * VIDEOS ONLY FLOW: Videos from Room (Room-first - fully reactive)
-     * 
-     * Filters by selected albums from Photos View setting.
-     * Updates automatically when selectedAlbums preference changes.
-     */
-    val videosFlow: StateFlow<List<MediaItem>> = _databaseReady
-        .flatMapLatest { ready ->
-            if (!ready) {
-                flowOf(emptyList())
-            } else {
-                _selectedAlbums.flatMapLatest { selectedBucketIds ->
-                    if (BuildConfig.DEBUG) {
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: Selected albums: ${selectedBucketIds.size} album(s)")
-                    }
-                    
-                    val bucketList = selectedBucketIds.toList()
-                    val videoDao = if (bucketList.isEmpty()) {
-                        // No albums selected - show no videos
-                        if (BuildConfig.DEBUG) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: No albums selected → returning empty list")
-                        }
-                        flowOf(emptyList())
-                    } else {
-                        // Multiple or specific buckets - use filtered query
-                        database.mediaDao().getVideosByBucketIds(bucketList)
-                    }
-                    
-                    videoDao.combine(database.favoriteDao().getAllFavoriteIdsFlow()) { entities, favIds ->
-                        if (BuildConfig.DEBUG) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: Media count before filter: ${entities.size}")
-                        }
-                        val items = withContext(Dispatchers.Default) {
-                            traceGalleryPerf("videosFlow.filter") {
-                                logPerfIfLarge("videosFlow.toMediaItems", entities.size)
-                                entities.toMediaItems(favIds.toSet()).toList()
-                            }
-                        }
-                        if (BuildConfig.DEBUG) {
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("PHOTOS_FILTER", "videosFlow: Media count after filter: ${items.size}")
-                        }
-                        items.toList()
-                    }
-                }
-            }
-        }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .conflate()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    
-    /**
-     * GROUPED MEDIA FLOW: Media grouped by date/month (Room-first)
-     * 
-     * Dynamically groups media based on current grid type (DAY or MONTH).
-     * Updates automatically when mediaFlow or gridType changes.
-     */
-    val groupedMediaFlow: StateFlow<List<MediaGroup>> = flow {
-        var previousMedia: List<MediaItem> = emptyList()
-        var previousGridType: GridType? = null
-        var previousGroups: List<MediaGroup> = emptyList()
 
-        mediaFlow.combine(_gridType) { media, gridType -> media to gridType }.collect { (media, gridType) ->
-            val groups = withContext(Dispatchers.Default) {
-                val canAppendIncrementally = previousGridType == gridType &&
-                    media.size >= previousMedia.size &&
-                    previousMedia.isNotEmpty() &&
-                    media.subList(0, previousMedia.size) == previousMedia
-
-                if (canAppendIncrementally) {
-                    traceGalleryPerf("groupedMediaFlow.appendGroups") {
-                        appendGroupedMedia(previousGroups, media.subList(previousMedia.size, media.size), gridType)
-                    }
-                } else {
-                    logPerfIfLarge("groupMediaForGrid", media.size)
-                    traceGalleryPerf("groupMediaForGrid") {
-                        groupMediaForGrid(media, gridType)
-                    }
-                }
-            }
-
-            previousMedia = media
-            previousGridType = gridType
-            previousGroups = groups
-            emit(groups)
-        }
-    }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .conflate()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    
+    // DELETED: groupedMediaFlow to prevent memory spikes. We use pagedMediaFlow with insertSeparators instead.
     // ─────────────────────────────────────────────────────────────────────────────────
     // LOADER STATE: Controlled by first Room emission
     // ─────────────────────────────────────────────────────────────────────────────────
-    init {
-        viewModelScope.launch {
-            mediaFlow.collect { media ->
-                if (media.isNotEmpty() && _isLoading.value) {
-                    _isLoading.value = false
-                }
-            }
-        }
-    }
+    // LOADER STATE: Handled reactively by Paging and refresh()
     
     // Background sync job for periodic updates (non-blocking)
     private var backgroundSyncJob: Job? = null
@@ -1243,35 +1087,8 @@ class MediaViewModel : ViewModel() {
     }
 
     private fun emitIncrementalMediaBatches(fullList: List<MediaItem>) = flow {
-        if (fullList.isEmpty()) {
-            emit(emptyList())
-            return@flow
-        }
-
-        val snapshot = withContext(Dispatchers.Default) { fullList.toList() }
-        val batchSizes = buildIncrementalBatchSizes(snapshot.size)
-
-        batchSizes.forEachIndexed { index, size ->
-            val batch = withContext(Dispatchers.Default) {
-                snapshot.subList(0, size).toList()
-            }
-
-            if (size > FINAL_STAGE_SPLIT_START) {
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Final dataset step emitted size=$size")
-            }
-
-            when {
-                index == 0 -> if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Initial media batch emitted size=$size")
-                size == snapshot.size -> if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Final media dataset emitted size=$size")
-                else -> if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(GALLERY_PERF_TAG, "Progressive media batch emitted size=$size")
-            }
-
-            emit(batch)
-
-            if (index < batchSizes.lastIndex && size >= FINAL_STAGE_SPLIT_START) {
-                delay(LARGE_BATCH_EMIT_DELAY_MS)
-            }
-        }
+        // Obsolete function. Return the full list immediately.
+        emit(fullList)
     }
 
     fun initialize(context: Context) {
@@ -1387,36 +1204,9 @@ class MediaViewModel : ViewModel() {
         startObserving(context)
 
         // Background sync on startup (no loader, keep UI responsive)
-        viewModelScope.launch {
-            val storedInitialSyncCompleted = settingsDataStore.initialSyncCompletedFlow.first()
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
-                "INIT_SETUP",
-                "[INIT] storedInitialSyncCompleted=$storedInitialSyncCompleted after reading from DataStore"
-            )
-            val hasLocalMedia = withContext(Dispatchers.IO) {
-                database.mediaDao().getAllIds().isNotEmpty()
-            }
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
-                "INIT_SETUP",
-                "[INIT] hasLocalMedia=$hasLocalMedia (${if (hasLocalMedia) "PASS" else "FAIL"} - DB empty)"
-            )
-            val effectiveInitialSyncCompleted = storedInitialSyncCompleted && hasLocalMedia
-            initialSyncCompletedCached = effectiveInitialSyncCompleted
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
-                "INIT_SETUP",
-                "[INIT] effectiveInitialSyncCompleted=$effectiveInitialSyncCompleted (will ${if (!effectiveInitialSyncCompleted) "SHOW" else "SKIP"} loader)"
-            )
-            if (!effectiveInitialSyncCompleted) {
-                if (storedInitialSyncCompleted) {
-                    settingsDataStore.setInitialSyncCompleted(false)
-                    initialSyncCompletedCached = false
-                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[INIT] Reset initial sync completed flag to false (empty DB detected)")
-                }
-                _initialSetupInProgress.value = true
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[INIT] Initial setup in progress = true → LOADER WILL SHOW")
-            } else {
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[INIT] Initial setup in progress = false → LOADER WILL NOT SHOW")
-            }
+        // Delayed to prevent fighting with the initial UI rendering for CPU/IO
+        viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(2000)
             refresh(context, showLoader = false)
         }
     }
@@ -1438,7 +1228,7 @@ class MediaViewModel : ViewModel() {
             initialize(context)
         }
         
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             // Defensive guard: Prevent overlapping loads
             synchronized(refreshStateLock) {
                 if (isSyncing) {
@@ -1451,16 +1241,13 @@ class MediaViewModel : ViewModel() {
                 isSyncing = true
             }
 
-            val initialSyncCompleted = initialSyncCompletedCached
-                ?: settingsDataStore.initialSyncCompletedFlow.first().also {
-                    initialSyncCompletedCached = it
-                }
-            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
-                "SYNC_ENGINE",
-                "[REFRESH-START] initialSyncCompleted=$initialSyncCompleted, permissionsGranted=${_mediaPermissionsGranted.value}"
-            )
+            if (BuildConfig.DEBUG) {
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
+                    "SYNC_ENGINE",
+                    "[REFRESH-START] permissionsGranted=${_mediaPermissionsGranted.value}"
+                )
+            }
             var roomWriteCompleted = false
-            var firstBatchWritten = false
             val streamedIds = LinkedHashSet<Long>()
             var streamedItemCount = 0
             if (showLoader) {
@@ -1482,45 +1269,56 @@ class MediaViewModel : ViewModel() {
                 // NO direct UI StateFlow updates
                 // ═════════════════════════════════════════════════════════════
                 
-                // STEP 1: Stream MediaStore rows in batches and sync incrementally to Room.
-                repository.streamAllMediaBatches().collect { mediaBatch ->
-                    streamedItemCount += mediaBatch.size
+                    val zoneId = java.time.ZoneId.systemDefault()
+                    val dayFormatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd", java.util.Locale.getDefault())
+                    val monthFormatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM", java.util.Locale.getDefault())
+                    
+                    val allMediaEntities = mutableListOf<MediaEntity>()
 
-                    withContext(Dispatchers.IO) {
-                        try {
-                            val mediaEntities = mediaBatch.map { item ->
-                                MediaEntity(
-                                    id = item.id,
-                                    uri = item.uri.toString(),
-                                    displayName = item.displayName,
-                                    dateAdded = item.dateAdded,
-                                    bucketId = item.bucketId,
-                                    bucketName = item.bucketName,
-                                    mimeType = item.mimeType,
-                                    width = item.width,
-                                    height = item.height,
-                                    size = item.size,
-                                    duration = if (item.isVideo) item.duration else null,
-                                    isVideo = item.isVideo,
-                                    path = item.path
-                                )
+                    // STEP 1: Stream MediaStore rows and accumulate into a single batch
+                    // Inserting all at once prevents multiple Paging 3 invalidations
+                    repository.streamAllMediaBatches().collect { mediaBatch ->
+                        streamedItemCount += mediaBatch.size
+                        
+                        val mediaEntities = mediaBatch.map { item ->
+                            val instant = java.time.Instant.ofEpochSecond(item.dateAdded)
+                            val zonedDateTime = instant.atZone(zoneId)
+                            val dayStr = dayFormatter.format(zonedDateTime)
+                            val monthStr = monthFormatter.format(zonedDateTime)
+                            
+                            MediaEntity(
+                                id = item.id,
+                                uri = item.uri.toString(),
+                                displayName = item.displayName,
+                                dateAdded = item.dateAdded,
+                                bucketId = item.bucketId,
+                                bucketName = item.bucketName,
+                                mimeType = item.mimeType,
+                                width = item.width,
+                                height = item.height,
+                                size = item.size,
+                                duration = if (item.isVideo) item.duration else null,
+                                isVideo = item.isVideo,
+                                path = item.path,
+                                dateGroupDay = dayStr,
+                                dateGroupMonth = monthStr
+                            )
+                        }
+
+                        streamedIds.addAll(mediaEntities.map { it.id })
+                        allMediaEntities.addAll(mediaEntities)
+                    }
+
+                    // Insert all media into Room in a single transaction
+                    if (allMediaEntities.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            try {
+                                database.mediaDao().upsertAll(allMediaEntities)
+                            } catch (e: Exception) {
+                                android.util.Log.e("SYNC_ENGINE", "Error syncing all media to Room", e)
                             }
-
-                            streamedIds.addAll(mediaEntities.map { it.id })
-                            database.mediaDao().upsertAll(mediaEntities)
-                        } catch (e: Exception) {
-                            android.util.Log.e("SYNC_ENGINE", "Error syncing streamed batch to Room", e)
                         }
                     }
-
-                    if (!firstBatchWritten && mediaBatch.isNotEmpty()) {
-                        firstBatchWritten = true
-                        if (_initialSetupInProgress.value) {
-                            _initialSetupInProgress.value = false
-                            if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[ROOM-WRITE-FIRST-BATCH] Initial setup in progress = false → LOADER STOPPED")
-                        }
-                    }
-                }
 
                 withContext(Dispatchers.IO) {
                     try {
@@ -1546,17 +1344,8 @@ class MediaViewModel : ViewModel() {
                     val permissionsGranted = _mediaPermissionsGranted.value
                     if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                         "SYNC_ENGINE",
-                        "[ROOM-WRITE-COMPLETE] items=$streamedItemCount, initialSyncCompleted=$initialSyncCompleted, permissionsGranted=$permissionsGranted"
+                        "[ROOM-WRITE-COMPLETE] items=$streamedItemCount, permissionsGranted=$permissionsGranted"
                     )
-                    if (!initialSyncCompleted && permissionsGranted) {
-                        settingsDataStore.setInitialSyncCompleted(true)
-                        initialSyncCompletedCached = true
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial sync completed flag set to true")
-                    }
-                    if (_initialSetupInProgress.value) {
-                        _initialSetupInProgress.value = false
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("INIT_SETUP", "[ROOM-WRITE] ✓ Initial setup in progress = false → LOADER STOPPED")
-                    }
                 }
                 
                 // STEP 3: Room flows auto-emit → UI updates automatically
@@ -1581,16 +1370,9 @@ class MediaViewModel : ViewModel() {
                 synchronized(refreshStateLock) {
                     isSyncing = false
                 }
-                if (!_mediaPermissionsGranted.value && (initialSyncCompletedCached == false)) {
-                    _initialSetupInProgress.value = true
-                    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
-                        "INIT_SETUP",
-                        "[REFRESH-END] Permissions not granted, keeping setup in progress true"
-                    )
-                }
                 if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d(
                     "SYNC_ENGINE",
-                    "[REFRESH-END] isSyncing=false, isLoading=${_isLoading.value}, initialSetupInProgress=${_initialSetupInProgress.value}"
+                    "[REFRESH-END] isSyncing=false, isLoading=${_isLoading.value}"
                 )
 
                 val triggerPendingRefresh = synchronized(refreshStateLock) {
@@ -1638,15 +1420,27 @@ class MediaViewModel : ViewModel() {
         mediaType: String,
         albumId: String,
         selectedIndex: Int,
-        searchQuery: String? = null
+        searchQuery: String? = null,
+        selectedItemId: Long? = null
     ) {
         _overlayState.value = MediaOverlayState(
             isVisible = true,
             mediaType = mediaType,
             albumId = albumId,
             selectedIndex = selectedIndex,
-            searchQuery = searchQuery
+            searchQuery = searchQuery,
+            selectedItemId = selectedItemId
         )
+    }
+
+    fun showMediaOverlayWithItem(
+        mediaType: String,
+        albumId: String,
+        item: MediaItem,
+        searchQuery: String? = null
+    ) {
+        val index = mediaFlow.value.indexOf(item).takeIf { it >= 0 } ?: 0
+        showMediaOverlay(mediaType, albumId, index, searchQuery, item.id)
     }
 
     fun hideMediaOverlay() {
@@ -1658,9 +1452,9 @@ class MediaViewModel : ViewModel() {
     }
     
     // Selection mode functions
-    fun enterSelectionMode(item: MediaItem) {
+    fun enterSelectionMode(itemId: Long) {
         _isSelectionMode.value = true
-        _selectedItems.value = setOf(item)
+        _selectedItems.value = setOf(itemId)
     }
     
     fun exitSelectionMode() {
@@ -1668,11 +1462,11 @@ class MediaViewModel : ViewModel() {
         _selectedItems.value = emptySet()
     }
     
-    fun toggleSelection(item: MediaItem) {
-        _selectedItems.value = if (_selectedItems.value.contains(item)) {
-            _selectedItems.value - item
+    fun toggleSelection(itemId: Long) {
+        _selectedItems.value = if (_selectedItems.value.contains(itemId)) {
+            _selectedItems.value - itemId
         } else {
-            _selectedItems.value + item
+            _selectedItems.value + itemId
         }
         // Exit selection mode if no items selected
         if (_selectedItems.value.isEmpty()) {
@@ -1680,20 +1474,55 @@ class MediaViewModel : ViewModel() {
         }
     }
     
-    fun selectAll(items: List<MediaItem>) {
-        _selectedItems.value = items.toSet()
+    fun selectAll(itemIds: List<Long>) {
+        _selectedItems.value = itemIds.toSet()
     }
     
-    fun selectAllInGroup(items: List<MediaItem>) {
+    fun selectAllInGroup(itemIds: List<Long>) {
         val currentSelection = _selectedItems.value.toMutableSet()
-        currentSelection.addAll(items)
+        currentSelection.addAll(itemIds)
         _selectedItems.value = currentSelection
     }
     
-    fun deselectAllInGroup(items: List<MediaItem>) {
-        _selectedItems.value = _selectedItems.value - items.toSet()
+    fun deselectAllInGroup(itemIds: List<Long>) {
+        _selectedItems.value = _selectedItems.value - itemIds.toSet()
         if (_selectedItems.value.isEmpty()) {
             _isSelectionMode.value = false
+        }
+    }
+
+    fun selectAllInDateGroup(dateGroupKey: String, isDay: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val items = if (isDay) {
+                database.mediaDao().getMediaByDateGroupDay(dateGroupKey)
+            } else {
+                database.mediaDao().getMediaByDateGroupMonth(dateGroupKey)
+            }
+            val ids = items.map { it.id }
+            
+            withContext(Dispatchers.Main) {
+                val currentSelection = _selectedItems.value.toMutableSet()
+                currentSelection.addAll(ids)
+                _selectedItems.value = currentSelection
+            }
+        }
+    }
+
+    fun deselectAllInDateGroup(dateGroupKey: String, isDay: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val items = if (isDay) {
+                database.mediaDao().getMediaByDateGroupDay(dateGroupKey)
+            } else {
+                database.mediaDao().getMediaByDateGroupMonth(dateGroupKey)
+            }
+            val ids = items.map { it.id }
+            
+            withContext(Dispatchers.Main) {
+                _selectedItems.value = _selectedItems.value - ids.toSet()
+                if (_selectedItems.value.isEmpty()) {
+                    _isSelectionMode.value = false
+                }
+            }
         }
     }
     
@@ -1712,8 +1541,8 @@ class MediaViewModel : ViewModel() {
                     }
                 } else {
                     // For older versions, use direct delete
-                    val selectedIds = _selectedItems.value.map { it.id }
-                    val uris = _selectedItems.value.map { it.uri }
+                    val selectedIds = _selectedItems.value.toList()
+                    val uris = database.mediaDao().getMediaByIds(selectedIds).map { android.net.Uri.parse(it.uri) }
                     val success = repository.deleteMediaItems(context, uris)
                     if (success) {
                         removeMediaFromRoom(selectedIds)
@@ -1732,15 +1561,11 @@ class MediaViewModel : ViewModel() {
     // Called when user confirms the trash request
     fun onDeleteConfirmed(context: Context) {
         viewModelScope.launch {
-            val deletedIds = _selectedItems.value.map { it.id }
-            val itemCount = _selectedItems.value.size
-            val itemType = if (_selectedItems.value.all { it.isVideo }) {
-                if (itemCount == 1) "video" else "videos"
-            } else if (_selectedItems.value.all { !it.isVideo }) {
-                if (itemCount == 1) "photo" else "photos"
-            } else {
-                if (itemCount == 1) "item" else "items"
-            }
+            val deletedIds = _selectedItems.value.toList()
+            val itemCount = deletedIds.size
+            
+            // Fast check for item type if needed, but for delete message just use item count
+            val itemType = if (itemCount == 1) "item" else "items"
             
             _deleteSuccessMessage.value = "$itemCount $itemType moved to trash"
             
@@ -1760,20 +1585,48 @@ class MediaViewModel : ViewModel() {
     }
     
     // Get trash request for Android 11+ (returns PendingIntent to launch)
-    fun getTrashRequest(): android.app.PendingIntent? {
-        val uris = _selectedItems.value.map { it.uri }
+    suspend fun getTrashRequest(): android.app.PendingIntent? {
+        val selectedIds = _selectedItems.value.toList()
+        val uris = database.mediaDao().getMediaByIds(selectedIds).map { android.net.Uri.parse(it.uri) }
         return repository.createTrashRequest(uris)
     }
     
     fun shareSelectedItems(context: Context) {
-        val uris = _selectedItems.value.map { it.uri }
-        repository.shareMediaItems(context, uris)
+        viewModelScope.launch(Dispatchers.IO) {
+            val selectedIds = _selectedItems.value.toList()
+            val uris = database.mediaDao().getMediaByIds(selectedIds).map { android.net.Uri.parse(it.uri) }
+            withContext(Dispatchers.Main) {
+                repository.shareMediaItems(context, uris)
+            }
+        }
+    }
+    
+    fun setAsWallpaper(context: Context, itemId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val items = database.mediaDao().getMediaByIds(listOf(itemId))
+            val item = items.firstOrNull()
+            
+            withContext(Dispatchers.Main) {
+                if (item != null) {
+                    if (!item.isVideo) {
+                        val uri = android.net.Uri.parse(item.uri)
+                        val wallpaperIntent = android.content.Intent(android.content.Intent.ACTION_ATTACH_DATA).apply {
+                            setDataAndType(uri, "image/*")
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(wallpaperIntent, "Set as"))
+                    } else {
+                        android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
     }
     
     /**
      * Hide selected items from a smart album by removing the associated labels
      */
-    suspend fun hideFromSmartAlbum(context: Context, smartAlbumId: String, items: List<MediaItem>) {
+    suspend fun hideFromSmartAlbum(context: Context, smartAlbumId: String, items: List<Long>) {
         try {
             val albumType = com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator.SmartAlbumType.fromId(smartAlbumId)
             if (albumType == null) {
@@ -1784,9 +1637,9 @@ class MediaViewModel : ViewModel() {
             val labelDao = database.mediaLabelDao()
             val labelsToRemove = albumType.labels.map { it.lowercase() }.toSet()
             
-            items.forEach { mediaItem ->
+            items.forEach { mediaItemId ->
                 // Get existing label entity
-                val existingEntity = labelDao.getLabelsForMedia(mediaItem.id)
+                val existingEntity = labelDao.getLabelsForMedia(mediaItemId)
                 if (existingEntity != null) {
                     // Parse existing labels
                     val parsedLabels = com.prantiux.pixelgallery.search.SearchResultFilter
@@ -1940,6 +1793,118 @@ class MediaViewModel : ViewModel() {
         }
     }
     
+
+
+    /**
+     * Recreates the smart formatting from MediaGrouping.kt
+     */
+    private fun formatDisplayDate(dateAddedMs: Long, isDay: Boolean): String {
+        val calendar = java.util.Calendar.getInstance()
+        val currentYear = calendar.get(java.util.Calendar.YEAR)
+        calendar.timeInMillis = dateAddedMs
+        val itemYear = calendar.get(java.util.Calendar.YEAR)
+
+        if (isDay) {
+            val today = java.util.Calendar.getInstance()
+            val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+
+            val isToday = itemYear == today.get(java.util.Calendar.YEAR) && calendar.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+            val isYesterday = itemYear == yesterday.get(java.util.Calendar.YEAR) && calendar.get(java.util.Calendar.DAY_OF_YEAR) == yesterday.get(java.util.Calendar.DAY_OF_YEAR)
+
+            return when {
+                isToday -> "Today"
+                isYesterday -> "Yesterday"
+                itemYear == currentYear -> java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(calendar.time)
+                else -> java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(calendar.time)
+            }
+        } else {
+            return if (itemYear == currentYear) {
+                java.text.SimpleDateFormat("MMMM", java.util.Locale.getDefault()).format(calendar.time)
+            } else {
+                java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault()).format(calendar.time)
+            }
+        }
+    }
+
+    /**
+     * Scrollbar fast query helpers
+     */
+    val photosDateGroups: StateFlow<List<com.prantiux.pixelgallery.ui.components.DateGroupInfo>> = kotlinx.coroutines.flow.combine(mediaFlow, _gridType) { items, type ->
+        val groups = mutableListOf<com.prantiux.pixelgallery.ui.components.DateGroupInfo>()
+        var currentGroupKey = ""
+        var currentCount = 0
+        var groupDateAdded = 0L
+
+        for (item in items) {
+            val key = if (type == GridType.DAY) item.dateGroupDay else item.dateGroupMonth
+            if (key != currentGroupKey) {
+                if (currentGroupKey.isNotEmpty()) {
+                    groups.add(
+                        com.prantiux.pixelgallery.ui.components.DateGroupInfo(
+                            date = currentGroupKey,
+                            displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                            itemCount = currentCount
+                        )
+                    )
+                }
+                currentGroupKey = key
+                currentCount = 1
+                groupDateAdded = item.dateAdded
+            } else {
+                currentCount++
+            }
+        }
+        if (currentGroupKey.isNotEmpty()) {
+            groups.add(
+                com.prantiux.pixelgallery.ui.components.DateGroupInfo(
+                    date = currentGroupKey,
+                    displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                    itemCount = currentCount
+                )
+            )
+        }
+        groups
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Lazily, emptyList())
+
+    fun getAlbumDateGroups(bucketId: String): kotlinx.coroutines.flow.Flow<List<com.prantiux.pixelgallery.ui.components.DateGroupInfo>> {
+        return kotlinx.coroutines.flow.combine(albumMediaFlow(bucketId), _gridType) { items, type ->
+            val groups = mutableListOf<com.prantiux.pixelgallery.ui.components.DateGroupInfo>()
+            var currentGroupKey = ""
+            var currentCount = 0
+            var groupDateAdded = 0L
+
+            for (item in items) {
+                val key = if (type == GridType.DAY) item.dateGroupDay else item.dateGroupMonth
+                if (key != currentGroupKey) {
+                    if (currentGroupKey.isNotEmpty()) {
+                        groups.add(
+                            com.prantiux.pixelgallery.ui.components.DateGroupInfo(
+                                date = currentGroupKey,
+                                displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                                itemCount = currentCount
+                            )
+                        )
+                    }
+                    currentGroupKey = key
+                    currentCount = 1
+                    groupDateAdded = item.dateAdded
+                } else {
+                    currentCount++
+                }
+            }
+            if (currentGroupKey.isNotEmpty()) {
+                groups.add(
+                    com.prantiux.pixelgallery.ui.components.DateGroupInfo(
+                        date = currentGroupKey,
+                        displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                        itemCount = currentCount
+                    )
+                )
+            }
+            groups
+        }
+    }
+    
     // Permanently delete multiple items from trash
     private fun permanentlyDeleteTrashedItems(context: Context, items: List<MediaItem>) {
         val uris = items.map { it.uri }
@@ -2019,7 +1984,7 @@ class MediaViewModel : ViewModel() {
     // Trash selection mode
     fun enterTrashSelectionMode(item: MediaItem) {
         _isTrashSelectionMode.value = true
-        _selectedTrashItems.value = setOf(item)
+        _selectedTrashItems.value = setOf(item.id)
     }
     
     fun exitTrashSelectionMode() {
@@ -2028,34 +1993,42 @@ class MediaViewModel : ViewModel() {
     }
     
     fun toggleTrashSelection(item: MediaItem) {
-        _selectedTrashItems.value = if (_selectedTrashItems.value.contains(item)) {
-            _selectedTrashItems.value - item
+        _selectedTrashItems.value = if (_selectedTrashItems.value.contains(item.id)) {
+            _selectedTrashItems.value - item.id
         } else {
-            _selectedTrashItems.value + item
+            _selectedTrashItems.value + item.id
         }
     }
     
     fun selectTrashGroup(items: List<MediaItem>) {
-        _selectedTrashItems.value = _selectedTrashItems.value + items
+        _selectedTrashItems.value = _selectedTrashItems.value + items.map { it.id }
     }
     
     fun deselectTrashGroup(items: List<MediaItem>) {
-        _selectedTrashItems.value = _selectedTrashItems.value - items.toSet()
+        _selectedTrashItems.value = _selectedTrashItems.value - items.map { it.id }.toSet()
     }
     
     // Restore selected items from trash (from RecycleBinScreen)
     fun restoreSelectedTrashItems(context: Context) {
-        val items = _selectedTrashItems.value.toList()
-        if (items.isNotEmpty()) {
-            restoreTrashedItems(context, items)
+        viewModelScope.launch {
+            val itemIds = _selectedTrashItems.value.toList()
+            if (itemIds.isNotEmpty()) {
+                val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
+                val items = database.mediaDao().getMediaByIds(itemIds).toMediaItems(favIds)
+                restoreTrashedItems(context, items)
+            }
         }
     }
     
     // Delete selected items from trash (from RecycleBinScreen)
     fun deleteSelectedTrashItems(context: Context) {
-        val items = _selectedTrashItems.value.toList()
-        if (items.isNotEmpty()) {
-            permanentlyDeleteTrashedItems(context, items)
+        viewModelScope.launch {
+            val itemIds = _selectedTrashItems.value.toList()
+            if (itemIds.isNotEmpty()) {
+                val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
+                val items = database.mediaDao().getMediaByIds(itemIds).toMediaItems(favIds)
+                permanentlyDeleteTrashedItems(context, items)
+            }
         }
     }
     
@@ -2138,8 +2111,8 @@ class MediaViewModel : ViewModel() {
     }
     
     // Copy to album functions
-    fun showCopyToAlbumDialog(items: List<MediaItem>) {
-        _itemsToCopy.value = items
+    fun showCopyToAlbumDialog(itemIds: List<Long>) {
+        _itemsToCopy.value = itemIds
         _showCopyToAlbumDialog.value = true
     }
     
@@ -2150,9 +2123,11 @@ class MediaViewModel : ViewModel() {
     
     suspend fun copyToAlbum(context: Context, targetAlbum: Album): Boolean {
         return if (::repository.isInitialized) {
-            val items = _itemsToCopy.value
-            if (items.isNotEmpty()) {
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Copying ${items.size} items to ${targetAlbum.name}")
+            val itemIds = _itemsToCopy.value
+            if (itemIds.isNotEmpty()) {
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Copying ${itemIds.size} items to ${targetAlbum.name}")
+                val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
+                val items = database.mediaDao().getMediaByIds(itemIds).toMediaItems(favIds)
                 val success = repository.copyMediaToAlbum(items, targetAlbum)
                 
                 if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Copy operation result: $success")
@@ -2164,37 +2139,22 @@ class MediaViewModel : ViewModel() {
                     } else {
                         "items"
                     }
-                    _copySuccessMessage.value = "${items.size} $itemType copied to ${targetAlbum.name}"
+                    _copySuccessMessage.value = "Copied ${items.size} $itemType to ${targetAlbum.name}"
                     
-                    // Exit selection mode immediately
+                    // Mark as mutated and dismiss selection
+                    markLocalMutation()
                     exitSelectionMode()
                     
-                    // Clear copy state and hide dialog
-                    hideCopyToAlbumDialog()
+                    // Trigger a refresh after a small delay to let MediaStore update
+                    kotlinx.coroutines.delay(500)
+                    refresh(context, showLoader = false)
                     
-                    // Force refresh with delay for MediaStore indexing
-                    viewModelScope.launch {
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Waiting 800ms before refresh...")
-                        kotlinx.coroutines.delay(800)
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refreshing after copy...")
-                        // Refresh media lists to show new items
-                        refresh(context)
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refresh complete")
-                    }
-                    
-                    // Auto-dismiss success message after 2 seconds
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(2000)
-                        _copySuccessMessage.value = null
-                    }
-                } else {
-                    android.util.Log.e("MediaViewModel", "Copy operation failed")
-                    // Still clear state even on failure to prevent stuck dialog
-                    hideCopyToAlbumDialog()
+                    // Auto-dismiss after 2 seconds
+                    kotlinx.coroutines.delay(2000)
+                    _copySuccessMessage.value = null
                 }
                 success
             } else {
-                android.util.Log.w("MediaViewModel", "No items to copy")
                 false
             }
         } else {
@@ -2204,8 +2164,8 @@ class MediaViewModel : ViewModel() {
     }
     
     // Move to album functions
-    fun showMoveToAlbumDialog(items: List<MediaItem>) {
-        _itemsToMove.value = items
+    fun showMoveToAlbumDialog(itemIds: List<Long>) {
+        _itemsToMove.value = itemIds
         _showMoveToAlbumDialog.value = true
     }
     
@@ -2216,9 +2176,11 @@ class MediaViewModel : ViewModel() {
     
     suspend fun moveToAlbum(context: Context, targetAlbum: Album): Boolean {
         return if (::repository.isInitialized) {
-            val items = _itemsToMove.value
-            if (items.isNotEmpty()) {
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Moving ${items.size} items to ${targetAlbum.name}")
+            val itemIds = _itemsToMove.value
+            if (itemIds.isNotEmpty()) {
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Moving ${itemIds.size} items to ${targetAlbum.name}")
+                val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
+                val items = database.mediaDao().getMediaByIds(itemIds).toMediaItems(favIds)
                 val result = repository.moveMediaToAlbum(items, targetAlbum)
                 
                 if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Move operation result: ${result.success}, message: ${result.message}")
@@ -2240,14 +2202,9 @@ class MediaViewModel : ViewModel() {
                     // Clear move state and hide dialog
                     hideMoveToAlbumDialog()
                     
-                    // Force immediate refresh with longer delay for MediaStore to fully update
-                    viewModelScope.launch {
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Waiting 600ms before refresh...")
-                        kotlinx.coroutines.delay(600)
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refreshing after move...")
-                        refresh(context)
-                        if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("MediaViewModel", "Refresh complete")
-                    }
+                    // Remove from room cache immediately for responsive UI
+                    removeMediaFromRoom(itemIds)
+                    markLocalMutation()
                     
                     // Auto-dismiss success message after 2 seconds
                     viewModelScope.launch {
@@ -2448,171 +2405,5 @@ class MediaViewModel : ViewModel() {
         super.onCleared()
     }
 
-    private fun groupMediaForGrid(media: List<MediaItem>, gridType: GridType): List<MediaGroup> {
-    return when (gridType) {
-        GridType.DAY -> groupMediaByDate(media)
-        GridType.MONTH -> groupMediaByMonth(media)
-    }
-}
 
-    private fun appendGroupedMedia(
-        previousGroups: List<MediaGroup>,
-        appendedItems: List<MediaItem>,
-        gridType: GridType
-    ): List<MediaGroup> {
-        if (appendedItems.isEmpty()) return previousGroups
-
-        val result = previousGroups.toMutableList()
-        appendedItems.forEach { item ->
-            val itemGroup = createMediaGroup(gridType, listOf(item))
-            val lastGroup = result.lastOrNull()
-
-            if (lastGroup != null && lastGroup.date == itemGroup.date) {
-                val mergedItems = lastGroup.items + item
-                result[result.lastIndex] = createMediaGroup(gridType, mergedItems)
-            } else {
-                result.add(itemGroup)
-            }
-        }
-
-        return result.toList()
-    }
-
-    private fun createMediaGroup(gridType: GridType, items: List<MediaItem>): MediaGroup {
-        return when (gridType) {
-            GridType.DAY -> createDayMediaGroup(items)
-            GridType.MONTH -> createMonthMediaGroup(items)
-        }
-    }
-
-    private fun createDayMediaGroup(items: List<MediaItem>): MediaGroup {
-        val calendar = Calendar.getInstance()
-        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-        val anchorItem = items.first()
-        calendar.timeInMillis = anchorItem.dateAdded * 1000
-        val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
-        val itemYear = calendar.get(Calendar.YEAR)
-
-        val displayDate = when {
-            isToday(calendar) -> "Today"
-            isYesterday(calendar) -> "Yesterday"
-            itemYear == currentYear -> SimpleDateFormat("d MMM", Locale.getDefault()).format(calendar.time)
-            else -> SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(calendar.time)
-        }
-
-        val mostCommonLocation = items
-            .mapNotNull { it.location }
-            .groupingBy { it }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-
-        return MediaGroup(date, displayDate, items, mostCommonLocation)
-    }
-
-    private fun createMonthMediaGroup(items: List<MediaItem>): MediaGroup {
-        val calendar = Calendar.getInstance()
-        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-        val anchorItem = items.first()
-        calendar.timeInMillis = anchorItem.dateAdded * 1000
-        val month = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(calendar.time)
-        val itemYear = calendar.get(Calendar.YEAR)
-
-        val displayDate = if (itemYear == currentYear) {
-            SimpleDateFormat("MMMM", Locale.getDefault()).format(calendar.time)
-        } else {
-            SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calendar.time)
-        }
-
-        val mostCommonLocation = items
-            .mapNotNull { it.location }
-            .groupingBy { it }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-
-        return MediaGroup(month, displayDate, items, mostCommonLocation)
-    }
-
-private fun groupMediaByDate(media: List<MediaItem>): List<MediaGroup> {
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val calendar = Calendar.getInstance()
-    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-
-    return media.groupBy { item ->
-        calendar.timeInMillis = item.dateAdded * 1000
-        dateFormat.format(calendar.time)
-    }.map { (date, items) ->
-        calendar.timeInMillis = items.first().dateAdded * 1000
-        val itemYear = calendar.get(Calendar.YEAR)
-
-        val displayDate = when {
-            isToday(calendar) -> "Today"
-            isYesterday(calendar) -> "Yesterday"
-            itemYear == currentYear -> {
-                // Same year: "12 Dec"
-                SimpleDateFormat("d MMM", Locale.getDefault()).format(calendar.time)
-            }
-            else -> {
-                // Different year: "28 Jan 2024"
-                SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(calendar.time)
-            }
-        }
-
-        // Find most common location for this date
-        val mostCommonLocation = items
-            .mapNotNull { it.location }
-            .groupingBy { it }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-
-        MediaGroup(date, displayDate, items, mostCommonLocation)
-    }.sortedByDescending { it.date }
-}
-
-private fun groupMediaByMonth(media: List<MediaItem>): List<MediaGroup> {
-    val monthFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
-    val calendar = Calendar.getInstance()
-    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-
-    return media.groupBy { item ->
-        calendar.timeInMillis = item.dateAdded * 1000
-        monthFormat.format(calendar.time)
-    }.map { (month, items) ->
-        calendar.timeInMillis = items.first().dateAdded * 1000
-        val itemYear = calendar.get(Calendar.YEAR)
-
-        val displayDate = if (itemYear == currentYear) {
-            // Current year: "January"
-            SimpleDateFormat("MMMM", Locale.getDefault()).format(calendar.time)
-        } else {
-            // Different year: "December 2025"
-            SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calendar.time)
-        }
-
-        // Find most common location for this month
-        val mostCommonLocation = items
-            .mapNotNull { it.location }
-            .groupingBy { it }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-
-        MediaGroup(month, displayDate, items, mostCommonLocation)
-    }.sortedByDescending { it.date }
-}
-
-private fun isToday(calendar: Calendar): Boolean {
-    val today = Calendar.getInstance()
-    return calendar.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-            calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
-}
-
-private fun isYesterday(calendar: Calendar): Boolean {
-    val yesterday = Calendar.getInstance()
-    yesterday.add(Calendar.DAY_OF_YEAR, -1)
-    return calendar.get(Calendar.YEAR) == yesterday.get(Calendar.YEAR) &&
-            calendar.get(Calendar.DAY_OF_YEAR) == yesterday.get(Calendar.DAY_OF_YEAR)
-}
 }

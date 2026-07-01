@@ -2,6 +2,7 @@
 
 package com.prantiux.pixelgallery.ui.screens
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -21,7 +22,9 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -64,6 +67,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
+import com.prantiux.pixelgallery.model.MediaGridItem
+import com.prantiux.pixelgallery.ui.utils.shimmerEffect
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -72,20 +79,20 @@ fun AlbumDetailScreen(
     albumId: String,
     onNavigateBack: () -> Unit,
     onNavigateToViewer: (Int) -> Unit,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
-    // ROOM-FIRST: Use unfiltered media flow for smart albums (independent of Photos View filters)
-    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
-    // ROOM-FIRST: Album media from pure DAO query (no in-memory filtering)
-    val albumMediaFromFlow by viewModel.albumMediaFlow(albumId).collectAsState(initial = emptyList())
+    // Get context
+    val context = LocalContext.current
+    
+    // ROOM-FIRST: Album media from Paged Flow
+    val pagedAlbumMediaFlow = remember(albumId) { viewModel.pagedAlbumMediaFlow(context, albumId) }
+    val pagedAlbumMedia = pagedAlbumMediaFlow.collectAsLazyPagingItems()
+    
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val view = LocalView.current
-    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val density = LocalDensity.current
@@ -94,7 +101,20 @@ fun AlbumDetailScreen(
     
     // Remember grid state for scrollbar
     val gridState = rememberLazyGridState()
+
+    // Shared element scroll guard
+    val isGridScrolling by remember { derivedStateOf { gridState.isScrollInProgress } }
+    var canAnimate by remember { mutableStateOf(true) }
+    LaunchedEffect(isGridScrolling) {
+        if (isGridScrolling) {
+            canAnimate = false
+        } else {
+            kotlinx.coroutines.delay(300)
+            canAnimate = true
+        }
+    }
     
+
     // Scrollbar state for overlay
     var scrollbarOverlayText by remember { mutableStateOf("") }
     var showScrollbarOverlay by remember { mutableStateOf(false) }
@@ -104,38 +124,8 @@ fun AlbumDetailScreen(
         viewModel.exitSelectionMode()
     }
     
-    // State for smart album media (populated asynchronously)
-    var smartAlbumMedia by remember { mutableStateOf<List<MediaItem>?>(null) }
-    
     // More menu state
     var showMoreMenu by remember { mutableStateOf(false) }
-    
-    // Check if this is a smart album and load media accordingly
-    val isSmartAlbum = SmartAlbumGenerator.isSmartAlbum(albumId)
-    
-    // Load smart album media if needed
-    LaunchedEffect(albumId, allMediaUnfiltered) {
-        if (isSmartAlbum) {
-            coroutineScope.launch {
-                val smartMedia = withContext(Dispatchers.Default) {
-                    SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
-                        .sortedByDescending { it.dateAdded }
-                }
-                smartAlbumMedia = smartMedia
-            }
-        }
-    }
-    
-    // Combine images and videos for this album (ROOM-FIRST: pure DAO)
-    val albumMedia = remember(albumMediaFromFlow, albumId, smartAlbumMedia) {
-        if (isSmartAlbum) {
-            // Use smart album results
-            smartAlbumMedia ?: emptyList()
-        } else {
-            // Regular album is already sorted in ViewModel flow.
-            albumMediaFromFlow
-        }
-    }
     
     // Determine column count based on grid type
     val columnCount = when (gridType) {
@@ -143,28 +133,22 @@ fun AlbumDetailScreen(
         com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> 5
     }
     
-    // Group by date or month based on grid type
-    val groupedMedia by produceState(initialValue = emptyList<MediaGroup>(), albumMedia, gridType) {
-        value = withContext(Dispatchers.Default) {
-            when (gridType) {
-                com.prantiux.pixelgallery.viewmodel.GridType.DAY -> groupMediaByDate(albumMedia)
-                com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> groupMediaByMonth(albumMedia)
-            }
-        }
-    }
-    
     // Prepare date group info for scrollbar
-    val dateGroupsForScrollbar = remember(groupedMedia) {
-        groupedMedia.map { group ->
-            com.prantiux.pixelgallery.ui.components.DateGroupInfo(
-                date = group.date,
-                displayDate = group.displayDate,
-                itemCount = group.items.size
-            )
+    val dateGroupsFlow = remember(albumId) { viewModel.getAlbumDateGroups(albumId) }
+    val dateGroupsForScrollbar by dateGroupsFlow.collectAsState(initial = emptyList())
+    
+    val isSmartAlbum = SmartAlbumGenerator.isSmartAlbum(albumId)
+    val album = remember(albumId, viewModel.allAlbumsFlow.value) {
+        viewModel.allAlbumsFlow.value.find { it.id == albumId }
+    }
+    val albumName = remember(albumId, album) {
+        if (isSmartAlbum) {
+            SmartAlbumGenerator.SmartAlbumType.fromId(albumId)?.displayName ?: "Smart Album"
+        } else {
+            album?.name ?: "Album"
         }
     }
-    
-    val albumName = albumMedia.firstOrNull()?.bucketName ?: "Album"
+    val albumItemCount = album?.itemCount ?: 0
     
     val navBarHeight = calculateFloatingNavBarHeight()
     
@@ -176,14 +160,16 @@ fun AlbumDetailScreen(
         MediumTopAppBar(
             title = {
                 Column {
-                    Text(
-                        text = albumName,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (albumMedia.isNotEmpty()) {
                         Text(
-                            text = "${albumMedia.size} ${if (albumMedia.size == 1) "item" else "items"}",
+                            text = albumName,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
+                            ),
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    if (albumItemCount > 0) {
+                        Text(
+                            text = "$albumItemCount ${if (albumItemCount == 1) "item" else "items"}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)
@@ -216,20 +202,55 @@ fun AlbumDetailScreen(
                     }
                 }
         ) {
-            if (albumMedia.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "No media in this album",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+            if (pagedAlbumMedia.itemCount == 0) {
+                if (!pagedAlbumMedia.loadState.append.endOfPaginationReached) {
+                    // Show expressive skeleton loader
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                            )
+                    ) {
+                        LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
+                            columns = GridCells.Fixed(columnCount),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(
+                                start = 2.dp,
+                                end = 2.dp,
+                                top = 16.dp,
+                                bottom = navBarHeight + 2.dp
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(30) {
+                                Box(
+                                    modifier = Modifier
+                                        .aspectRatio(1f)
+                                        .background(Color.LightGray.copy(alpha = 0.2f))
+                                        .shimmerEffect()
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No media in this album",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                 }
             } else {
                 Box(
@@ -241,6 +262,7 @@ fun AlbumDetailScreen(
                         )
                 ) {
                 LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
                     columns = GridCells.Fixed(columnCount),
                     state = gridState,
                     modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -253,104 +275,118 @@ fun AlbumDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    groupedMedia.forEachIndexed { index, group ->
-                        // Date Header - spans all columns with checkbox when in selection mode
-                        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columnCount) }) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
-                                    .then(
-                                        if (index == 0) {
-                                            Modifier.onGloballyPositioned { coords ->
-                                                if (firstHeaderTopPx == null) {
-                                                    firstHeaderTopPx = coords.positionInRoot().y
-                                                }
-                                            }
-                                        } else {
-                                            Modifier
-                                        }
-                                    ),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Date text
-                                Text(
-                                    text = group.displayDate,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                
-                                // Always reserve space for checkbox to prevent layout shift
-                                Box(
-                                    modifier = Modifier.size(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isSelectionMode) {
-                                        // Show checkbox in selection mode
-                                        val allSelected = group.items.all { selectedItems.contains(it) }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(CircleShape)
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = if (allSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    shape = CircleShape
-                                                )
-                                                .background(
-                                                    if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 1.0f) else androidx.compose.ui.graphics.Color.Transparent,
-                                                    CircleShape
-                                                )
-                                                .clickable {
-                                                    if (allSelected) {
-                                                        viewModel.deselectAllInGroup(group.items)
-                                                    } else {
-                                                        viewModel.selectAllInGroup(group.items)
+                    items(
+                        count = pagedAlbumMedia.itemCount,
+                        key = pagedAlbumMedia.itemKey { 
+                            when (it) {
+                                is MediaGridItem.Media -> it.mediaItem.id
+                                is MediaGridItem.Header -> "header_${it.dateGroupKey}"
+                            }
+                        },
+                        span = { index ->
+                            val item = pagedAlbumMedia[index]
+                            if (item is MediaGridItem.Header) {
+                                androidx.compose.foundation.lazy.grid.GridItemSpan(columnCount)
+                            } else {
+                                androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+                            }
+                        }
+                    ) { index ->
+                        val item = pagedAlbumMedia[index]
+                        
+                        if (item != null) {
+                            when (item) {
+                                is MediaGridItem.Header -> {
+                                    val isDay = gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
+                                            .then(
+                                                if (index == 0) {
+                                                    Modifier.onGloballyPositioned { coords ->
+                                                        if (firstHeaderTopPx == null) {
+                                                            firstHeaderTopPx = coords.positionInRoot().y
+                                                        }
                                                     }
-                                                },
+                                                } else {
+                                                    Modifier
+                                                }
+                                            ),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = item.displayDate,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        
+                                        Box(
+                                            modifier = Modifier.size(24.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            if (allSelected) {
-                                                FontIcon(
-                                                    unicode = FontIcons.Done,
-                                                    contentDescription = "Selected",
-                                                    size = 16.sp,
-                                                    tint = MaterialTheme.colorScheme.onPrimary
-                                                )
+                                            if (isSelectionMode) {
+                                                // We don't have allSelected logic here easily in paging. 
+                                                // If we need selection by day, we should query DB like in PhotosScreen
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(24.dp)
+                                                        .clip(CircleShape)
+                                                        .border(
+                                                            width = 2.dp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            shape = CircleShape
+                                                        )
+                                                        .background(Color.Transparent, CircleShape)
+                                                        .clickable {
+                                                            viewModel.selectAllInDateGroup(item.dateGroupKey, isDay)
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    // Empty checkbox that selects all when clicked
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                is MediaGridItem.Media -> {
+                                    val mediaItem = item.mediaItem
+                                    val isSelected = selectedItems.contains(mediaItem.id)
+                                    val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                        index = index, // Approximate corner shape for now
+                                        totalItems = pagedAlbumMedia.itemCount,
+                                        columns = columnCount,
+                                        cornerType = cornerType
+                                    )
+                                    
+                                    com.prantiux.pixelgallery.ui.components.MediaThumbnail(
+                                        item = mediaItem,
+                                        isSelected = isSelected,
+                                        isSelectionMode = isSelectionMode,
+                                        shape = gridShape,
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                viewModel.toggleSelection(mediaItem.id)
+                                            } else {
+                                                viewModel.showMediaOverlayWithItem(
+                                                    mediaType = "album",
+                                                    albumId = albumId,
+                                                    item = mediaItem
+                                                )
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (!isSelectionMode) {
+                                                view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                                                viewModel.enterSelectionMode(mediaItem.id)
+                                            }
+                                        },
+                                        showFavorite = true
+                                    )
+                                }
                             }
-                        }
-                        
-                        // Media items for this date
-                        items(group.items.size) { index ->
-                            val item = group.items[index]
-                            val globalIndex = albumMedia.indexOf(item)
-                            val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                                index = index,
-                                totalItems = group.items.size,
-                                columns = columnCount,
-                                cornerType = cornerType
-                            )
-                            
-                            SelectableMediaItem(
-                                item = item,
-                                isSelectionMode = isSelectionMode,
-                                selectedItems = selectedItems,
-                                viewModel = viewModel,
-                                view = view,
-                                shape = gridShape,
-                                mediaType = "album",
-                                albumId = albumId,
-                                index = globalIndex,
-                                showFavorite = true,
-                                sharedTransitionScope = sharedTransitionScope,
-                                animatedVisibilityScope = animatedVisibilityScope
-                            )
                         }
                     }
                 }
@@ -484,16 +520,8 @@ fun AlbumDetailScreen(
                         },
                         onClick = {
                             showMoreMenu = false
-                            selectedItems.firstOrNull()?.let { item ->
-                                if (!item.isVideo) {
-                                    val wallpaperIntent = Intent(Intent.ACTION_ATTACH_DATA).apply {
-                                        setDataAndType(item.uri, "image/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(wallpaperIntent, "Set as"))
-                                } else {
-                                    android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
-                                }
+                            selectedItems.firstOrNull()?.let { itemId ->
+                                viewModel.setAsWallpaper(context, itemId)
                             }
                         },
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -583,8 +611,7 @@ fun AlbumDetailScreen(
                                     viewModel.hideFromSmartAlbum(context, albumId, selectedItems.toList())
                                     viewModel.exitSelectionMode()
                                     // Reload smart album media
-                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
-                                    smartAlbumMedia = smartMedia
+                                    pagedAlbumMedia.refresh()
                                     android.widget.Toast.makeText(
                                         context,
                                         "Hidden ${selectedItems.size} ${if (selectedItems.size == 1) "item" else "items"} from this label",

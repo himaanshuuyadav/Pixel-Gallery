@@ -1,5 +1,7 @@
 package com.prantiux.pixelgallery.ui.dialogs
 
+
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +19,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.BottomSheetDefaults
+import com.prantiux.pixelgallery.ui.utils.bounceClick
 import coil.compose.rememberAsyncImagePainter
 import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.model.Album
@@ -89,15 +95,14 @@ fun MoveToAlbumDialog(
         albums.filter { !systemAlbums.contains(it) }
     }
     
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.8f)
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+            Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
                 // Header
                 Row(
                     modifier = Modifier
@@ -131,6 +136,7 @@ fun MoveToAlbumDialog(
                     }
                 } else {
                     LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -140,7 +146,8 @@ fun MoveToAlbumDialog(
                             item {
                                 Text(
                                     text = "System Albums",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
                                 )
@@ -169,7 +176,8 @@ fun MoveToAlbumDialog(
                             item {
                                 Text(
                                     text = "User Albums",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp)
                                 )
@@ -202,7 +210,6 @@ fun MoveToAlbumDialog(
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -216,7 +223,9 @@ private fun AlbumItem(
         enabled = enabled,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .bounceClick()
+            .fillMaxWidth()
     ) {
         Row(
             modifier = Modifier

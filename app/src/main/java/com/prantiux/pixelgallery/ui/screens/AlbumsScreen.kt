@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.screens
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,7 +72,9 @@ import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator
+import com.prantiux.pixelgallery.ui.utils.bounceClick
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
+import com.prantiux.pixelgallery.ui.utils.shimmerEffect
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
 import kotlinx.coroutines.launch
 import com.prantiux.pixelgallery.ui.icons.FontIcon
@@ -96,8 +99,6 @@ fun AlbumsScreen(
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     viewModel: MediaViewModel,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -110,7 +111,6 @@ fun AlbumsScreen(
     val favorites by viewModel.favoritesFlow.collectAsState()
     val trashedItems by viewModel.trashedItems.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val initialSetupInProgress by viewModel.initialSetupInProgress.collectAsState()
     val albumOrderMode by settingsDataStore.albumOrderModeFlow.collectAsState(initial = "Based on no. of images")
     val mainAlbumOrder by settingsDataStore.mainAlbumOrderFlow.collectAsState(initial = emptyList())
     val otherAlbumOrder by settingsDataStore.otherAlbumOrderFlow.collectAsState(initial = emptyList())
@@ -138,14 +138,8 @@ fun AlbumsScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (initialSetupInProgress) {
-            com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                label = "Setting up gallery..."
-            )
-        } else
-        // Only show "no albums" if loading is complete AND still no albums
-        // This prevents showing "no albums" briefly during initial load
+        val navBarHeight = calculateFloatingNavBarHeight()
+        
         if (!isLoading && allAlbums.isEmpty()) {
             Text(
                 text = "No albums found",
@@ -153,7 +147,9 @@ fun AlbumsScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-        } else if (!isLoading) {
+        } else if (isLoading && allAlbums.isEmpty()) {
+            AlbumsSkeletalLoader(navBarHeight = navBarHeight)
+        } else if (!isLoading || allAlbums.isNotEmpty()) {
             val albums = remember(allAlbums, effectiveAlbumOrderMode, effectiveMainAlbumOrder, effectiveOtherAlbumOrder) {
                 buildDisplayAlbums(
                     allAlbums = allAlbums,
@@ -162,7 +158,6 @@ fun AlbumsScreen(
                     otherOrderIds = effectiveOtherAlbumOrder
                 )
             }
-            val navBarHeight = calculateFloatingNavBarHeight()
             val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
             val backgroundColor = MaterialTheme.colorScheme.surface
             
@@ -184,6 +179,7 @@ fun AlbumsScreen(
             )
             
             LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
                 modifier = Modifier
                     .fillMaxSize(),
                 contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight)
@@ -214,7 +210,7 @@ fun AlbumsScreen(
                                     highlightCardWidth + cardSpacing
                                 }
 
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                view.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                                 dragOffset.animateTo(
                                     targetValue = targetOffset,
                                     animationSpec = AlbumCardSwipeAnimationSpec
@@ -348,8 +344,10 @@ fun AlbumsHeaderWithTabs(
             Text(
                 text = "Albums",
                 fontSize = 26.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 26.sp * 1.1f
             )
             
             // Settings icon button - same as Photos screen
@@ -410,8 +408,11 @@ fun AlbumsHeader() {
         ) {
             Text(
                 text = "Albums",
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                fontSize = 26.sp,
+                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont,
+                fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 26.sp * 1.1f,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
             )
         }
@@ -484,8 +485,7 @@ fun RectangularPillTab(
     index: Int,
     selectedIndex: Int,
     onClick: () -> Unit,
-    onLongPress: (() -> Unit)? = null
-) {
+    onLongPress: (() -> Unit)) {
     val isSelected = index == selectedIndex
     
     val contentColor = if (isSelected) {
@@ -639,7 +639,7 @@ fun HighlightAlbumSection(
     viewModel: com.prantiux.pixelgallery.viewmodel.MediaViewModel,
     currentTabIndex: Int,
     dragOffset: Animatable<Float, AnimationVector1D>,
-    transitionTargetIndex: Int? = null,
+    transitionTargetIndex: Int?,
     onCardWidthMeasured: (Float) -> Unit,
     onTabChange: (Int) -> Unit,
     onViewAllClick: () -> Unit,
@@ -688,7 +688,7 @@ fun HighlightAlbumSection(
                             
                             if (targetIndex != currentTabIndex) {
                                 // Complete the swipe transition
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                view.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                                 val targetOffset = if (targetIndex > currentTabIndex) -(cardWidth + cardSpacing) else (cardWidth + cardSpacing)
                                 dragOffset.animateTo(
                                     targetValue = targetOffset,
@@ -839,6 +839,9 @@ fun AlbumPreviewCard(
     onAlbumActionsClick: (Album) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val targetSize = remember { coil.size.Size(384, 384) }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = SmoothCornerShape(20.dp, 60),
@@ -865,8 +868,23 @@ fun AlbumPreviewCard(
                                     .weight(1f)
                                     .aspectRatio(1f)
                             ) {
+                                val mediaData = remember(mediaItem.uri, mediaItem.isVideo) {
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                        com.prantiux.pixelgallery.image.MediaThumbnailRequest(mediaItem.uri, mediaItem.isVideo)
+                                    } else {
+                                        mediaItem.uri
+                                    }
+                                }
+                                val imageRequest = remember(mediaData, targetSize) {
+                                    coil.request.ImageRequest.Builder(context)
+                                        .data(mediaData)
+                                        .size(targetSize)
+                                        .crossfade(true)
+                                        .build()
+                                }
+                                
                                 AsyncImage(
-                                    model = mediaItem.uri,
+                                    model = imageRequest,
                                     contentDescription = mediaItem.displayName,
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -929,8 +947,23 @@ fun AlbumPreviewCard(
                                     .weight(1f)
                                     .aspectRatio(1f)
                             ) {
+                                val mediaData = remember(mediaItem.uri, mediaItem.isVideo) {
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                        com.prantiux.pixelgallery.image.MediaThumbnailRequest(mediaItem.uri, mediaItem.isVideo)
+                                    } else {
+                                        mediaItem.uri
+                                    }
+                                }
+                                val imageRequest = remember(mediaData, targetSize) {
+                                    coil.request.ImageRequest.Builder(context)
+                                        .data(mediaData)
+                                        .size(targetSize)
+                                        .crossfade(true)
+                                        .build()
+                                }
+
                                 AsyncImage(
-                                    model = mediaItem.uri,
+                                    model = imageRequest,
                                     contentDescription = mediaItem.displayName,
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -1078,9 +1111,8 @@ fun OtherAlbumsSection(
     albums: List<Album>,
     onViewAllClick: () -> Unit,
     onAlbumClick: (String) -> Unit,
-    onAlbumLongPress: ((Album) -> Unit)? = null,
-    onAlbumMenuClick: ((Album) -> Unit)? = null
-) {
+    onAlbumLongPress: ((Album) -> Unit),
+    onAlbumMenuClick: ((Album) -> Unit)) {
     val carouselState = rememberCarouselState { albums.size }
 
     Column(
@@ -1097,7 +1129,8 @@ fun OtherAlbumsSection(
         ) {
             Text(
                 text = "More Albums",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
             )
             TextButton(onClick = onViewAllClick) {
@@ -1148,8 +1181,8 @@ fun OtherAlbumsSection(
 fun OtherAlbumPillButton(
     album: Album,
     onClick: () -> Unit,
-    onLongPress: (() -> Unit)? = null,
-    onMenuClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)?,
+    onMenuClick: (() -> Unit)?,
     showTitle: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -1158,6 +1191,7 @@ fun OtherAlbumPillButton(
 
     Box(
         modifier = modifier
+            .bounceClick()
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = if (onLongPress != null) {{
@@ -1249,7 +1283,7 @@ fun SpecialActionButtons(
     ) {
         Text(
             text = "Utilities",
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 0.dp, vertical = 8.dp)
         )
@@ -1336,7 +1370,9 @@ fun SpecialActionCard(
         onClick = onClick,
         shape = cardShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .bounceClick()
+            .fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -1356,8 +1392,8 @@ fun SpecialActionCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
@@ -1552,6 +1588,7 @@ fun ReorderBottomSheet(
                 
                 CompositionLocalProvider(LocalOverscrollFactory provides null) {
                 LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
                     state = listState,
                     userScrollEnabled = !(reorderHandleInUse || reorderableState.isAnyItemDragging || isLoadingNewOrder),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
@@ -1709,7 +1746,7 @@ fun ReorderBottomSheet(
                                     onDragStopped = {
                                         reorderHandleInUse = false
                                         dragStartMs = null
-                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        view.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
                                     }
                                 )
                             )
@@ -1846,12 +1883,14 @@ private fun AlbumOrderOption(
     onClick: () -> Unit,
     position: com.prantiux.pixelgallery.ui.screens.settings.SettingPosition
 ) {
-    val shape = when (position) {
-        com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
-        com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.MIDDLE -> RoundedCornerShape(8.dp)
-        com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        else -> RoundedCornerShape(0.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            com.prantiux.pixelgallery.ui.screens.settings.SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
     
     Surface(
         onClick = onClick,
@@ -2010,4 +2049,90 @@ private fun buildDisplayAlbums(
         mainAlbums = mainAlbums,
         otherAlbums = otherAlbums + remaining
     )
+}
+
+@Composable
+private fun AlbumsSkeletalLoader(navBarHeight: androidx.compose.ui.unit.Dp) {
+    LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 0.dp, bottom = navBarHeight)
+    ) {
+        item {
+            // Header: "Main albums" skeleton + settings skeleton
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 24.dp)
+                    .statusBarsPadding(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(180.dp)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .shimmerEffect()
+                )
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .shimmerEffect()
+                )
+            }
+        }
+        item {
+            // Pill tabs skeleton
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(modifier = Modifier.width(90.dp).height(50.dp).clip(CircleShape).shimmerEffect())
+                Box(modifier = Modifier.width(110.dp).height(50.dp).clip(CircleShape).shimmerEffect())
+                Box(modifier = Modifier.width(100.dp).height(50.dp).clip(CircleShape).shimmerEffect())
+            }
+        }
+        item {
+            // Hero card skeleton
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .shimmerEffect()
+            )
+        }
+        item {
+            // Other albums header skeleton
+            Box(
+                modifier = Modifier
+                    .padding(start = 24.dp, top = 40.dp, bottom = 20.dp)
+                    .width(160.dp)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .shimmerEffect()
+            )
+        }
+        item {
+            // Other albums grid skeleton - 2 rows
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Box(modifier = Modifier.weight(1f).height(160.dp).clip(RoundedCornerShape(24.dp)).shimmerEffect())
+                    Box(modifier = Modifier.weight(1f).height(160.dp).clip(RoundedCornerShape(24.dp)).shimmerEffect())
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Box(modifier = Modifier.weight(1f).height(160.dp).clip(RoundedCornerShape(24.dp)).shimmerEffect())
+                    Box(modifier = Modifier.weight(1f).height(160.dp).clip(RoundedCornerShape(24.dp)).shimmerEffect())
+                }
+            }
+        }
+    }
 }

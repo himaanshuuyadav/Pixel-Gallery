@@ -28,5 +28,7 @@ data class MediaEntity(
     val size: Long,
     val duration: Long?,
     val isVideo: Boolean,
-    val path: String = ""
+    val path: String = "",
+    val dateGroupDay: String = "",
+    val dateGroupMonth: String = ""
 )

@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.components
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -97,8 +98,10 @@ fun SubPageScaffold(
                     Column {
                         Text(
                             text = title,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
+                            ),
+                            fontWeight = FontWeight.ExtraBold
                         )
                         if (subtitle != null) {
                             Text(
@@ -129,6 +132,7 @@ fun SubPageScaffold(
         }
     ) { paddingValues ->
         LazyColumn(
+    flingBehavior = rememberZenithFlingBehavior(),
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),

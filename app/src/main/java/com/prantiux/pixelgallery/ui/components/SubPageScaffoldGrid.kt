@@ -1,5 +1,6 @@
 package com.prantiux.pixelgallery.ui.components
 
+import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridScope
@@ -100,6 +101,7 @@ fun SubPageScaffoldGrid(
         }
     ) { paddingValues ->
         LazyVerticalGrid(
+    flingBehavior = rememberZenithFlingBehavior(),
             columns = GridCells.Fixed(columns),
             state = gridState,
             modifier = Modifier

@@ -68,6 +68,7 @@ object ImageLabelScheduler {
      */
     fun scheduleDeferredLabeling(context: Context) {
         val oneTimeWork = OneTimeWorkRequestBuilder<ImageLabelWorker>()
+            .setInitialDelay(120, java.util.concurrent.TimeUnit.SECONDS) // Delay by 120 seconds to prioritize UI startup
             .addTag(LABEL_WORK_TAG)
             .build()
         

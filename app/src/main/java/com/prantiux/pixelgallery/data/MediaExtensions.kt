@@ -29,11 +29,13 @@ fun MediaEntity.toMediaItem(isFavorite: Boolean = false): MediaItem {
         width = width,
         height = height,
         path = path,
-        dateExpires = 0L, // Not used for regular media
+        dateExpires = 0, // This is overridden for trashed items when needed
         isFavorite = isFavorite,
         latitude = null, // Not stored in MediaEntity currently
-        longitude = null,
-        location = null
+        longitude = null, // Not stored in MediaEntity currently
+        location = null, // Resolved asynchronously
+        dateGroupDay = dateGroupDay,
+        dateGroupMonth = dateGroupMonth
     )
 }
 

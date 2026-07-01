@@ -660,16 +660,18 @@ private fun MetadataItem(
     value: String,
     position: SettingPosition
 ) {
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(8.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
     
     Surface(
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -800,12 +802,14 @@ private fun ShapeSelectionItem(
     position: SettingPosition,
     onClick: () -> Unit
 ) {
-    val shape = when (position) {
-        SettingPosition.TOP -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-        SettingPosition.MIDDLE -> RoundedCornerShape(12.dp)
-        SettingPosition.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-        SettingPosition.SINGLE -> RoundedCornerShape(24.dp)
-    }
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
 
     Surface(
         onClick = onClick,

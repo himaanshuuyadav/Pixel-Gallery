@@ -66,8 +66,13 @@ fun ExpandableTopAppBar(
     val collapsedTitleSize = 26.sp // Increased from 22sp for better readability
     val currentTitleSize = lerp(expandedTitleSize, collapsedTitleSize, scrollProgress)
     
-    // Title weight interpolation for smooth transition
-    val titleFontWeight = if (scrollProgress < 0.5f) FontWeight.Bold else FontWeight.Medium
+    // Font weight goes from ExtraBold/Black (900) when expanded to ExtraBold (800) when collapsed
+    val titleFontWeightFloat by animateFloatAsState(
+        targetValue = if (scrollProgress < 0.5f) 900f else 800f,
+        animationSpec = tween(150),
+        label = "titleWeight"
+    )
+    val titleFontWeight = FontWeight(titleFontWeightFloat.toInt())
     
     // Subtitle alpha - fade out smoothly but completely
     val subtitleAlpha = (1f - scrollProgress * 1.5f).coerceIn(0f, 1f)
@@ -75,14 +80,21 @@ fun ExpandableTopAppBar(
     // Title vertical alignment - perfectly centered in collapsed state
     val titleBottomPadding = lerp(46.dp, 15.dp, scrollProgress)
     
-    // Background color with proper opacity
-    val backgroundColor = MaterialTheme.colorScheme.surface
+    // Background color with proper opacity (glassy when collapsed)
+    val baseSurface = MaterialTheme.colorScheme.surface
+    val containerSurface = MaterialTheme.colorScheme.surfaceContainer
+    
+    val backgroundColor = androidx.compose.ui.graphics.lerp(
+        start = baseSurface,
+        stop = containerSurface.copy(alpha = 0.94f), // Glassy when collapsed
+        fraction = scrollProgress
+    )
     
     // Set status bar color
     SetStatusBarColor(backgroundColor)
     
     // Elevation only when fully collapsed
-    val elevation = if (scrollProgress > 0.95f) 2.dp else 0.dp
+    val elevation = 0.dp // Use tonal/container color instead of shadow for M3
     
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -113,6 +125,7 @@ fun ExpandableTopAppBar(
                     Text(
                         text = title,
                         fontSize = currentTitleSize,
+                        fontFamily = if (scrollProgress < 0.5f) com.prantiux.pixelgallery.ui.theme.zenithTimeFont else com.prantiux.pixelgallery.ui.theme.zenithHeadingFont,
                         fontWeight = titleFontWeight,
                         color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = currentTitleSize * 1.1f

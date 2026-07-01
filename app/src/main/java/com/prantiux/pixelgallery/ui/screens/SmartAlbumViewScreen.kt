@@ -33,6 +33,12 @@ import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -41,12 +47,9 @@ fun SmartAlbumViewScreen(
     albumId: String,
     onNavigateBack: () -> Unit,
     onNavigateToViewer: (Int) -> Unit,
-    sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
-    animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope?,
     settingsDataStore: com.prantiux.pixelgallery.data.SettingsDataStore
 ) {
     // ROOM-FIRST: Use unfiltered media flow for smart albums (independent of Photos View filters)
-    val allMediaUnfiltered by viewModel.allMediaUnfilteredFlow.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
@@ -59,25 +62,9 @@ fun SmartAlbumViewScreen(
         viewModel.exitSelectionMode()
     }
     
-    // State for smart album media (populated asynchronously)
-    var smartAlbumMedia by remember { mutableStateOf<List<MediaItem>?>(null) }
-    
-    // More menu state
-    var showMoreMenu by remember { mutableStateOf(false) }
-    
-    // Load smart album media
-    LaunchedEffect(albumId, allMediaUnfiltered) {
-        coroutineScope.launch {
-            val smartMedia = withContext(Dispatchers.Default) {
-                SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
-                    .sortedByDescending { it.dateAdded }
-            }
-            smartAlbumMedia = smartMedia
-        }
-    }
-    
-    // Get smart album media or empty list
-    val albumMedia = smartAlbumMedia ?: emptyList()
+    // ROOM-FIRST: Album media from Paged Flow
+    val pagedAlbumMediaFlow = remember(albumId) { viewModel.pagedAlbumMediaFlow(context, albumId) }
+    val pagedAlbumMedia = pagedAlbumMediaFlow.collectAsLazyPagingItems()
     
     // Get smart album name
     val albumType = SmartAlbumGenerator.SmartAlbumType.fromId(albumId)
@@ -86,15 +73,15 @@ fun SmartAlbumViewScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         SubPageScaffoldGrid(
             title = albumName,
-            subtitle = if (albumMedia.isEmpty()) null else "${albumMedia.size} ${if (albumMedia.size == 1) "item" else "items"}",
+            subtitle = if (pagedAlbumMedia.itemCount == 0) null else "${pagedAlbumMedia.itemCount} items",
             onNavigateBack = onNavigateBack,
             columns = 3,
             contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 44.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            if (albumMedia.isEmpty()) {
-                item {
+            if (pagedAlbumMedia.itemCount == 0 && pagedAlbumMedia.loadState.refresh !is androidx.paging.LoadState.Loading) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -120,32 +107,76 @@ fun SmartAlbumViewScreen(
                     }
                 }
             } else {
-                items(albumMedia.size) { index ->
-                    val item = albumMedia[index]
-                    val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                        index = index,
-                        totalItems = albumMedia.size,
-                        columns = 3,
-                        cornerType = cornerType
-                    )
-                    
-                    SelectableMediaItem(
-                        item = item,
-                        isSelectionMode = isSelectionMode,
-                        selectedItems = selectedItems,
-                        viewModel = viewModel,
-                        view = view,
-                        shape = gridShape,
-                        mediaType = "smartalbum",
-                        albumId = albumId,
-                        index = index,
-                        showFavorite = true,
-                        sharedTransitionScope = sharedTransitionScope,
-                        animatedVisibilityScope = animatedVisibilityScope
-                    )
+                items(
+                    count = pagedAlbumMedia.itemCount,
+                    key = pagedAlbumMedia.itemKey { item ->
+                        when (item) {
+                            is com.prantiux.pixelgallery.model.MediaGridItem.Header -> "header_${item.dateGroupKey}"
+                            is com.prantiux.pixelgallery.model.MediaGridItem.Media -> item.mediaItem.id
+                            else -> "unknown"
+                        }
+                    },
+                    span = { index ->
+                        val item = pagedAlbumMedia.peek(index)
+                        if (item is com.prantiux.pixelgallery.model.MediaGridItem.Header) {
+                            androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan)
+                        } else {
+                            androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+                        }
+                    }
+                ) { index ->
+                    val item = pagedAlbumMedia[index]
+                    when (item) {
+                        is com.prantiux.pixelgallery.model.MediaGridItem.Header -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = item.displayDate,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        is com.prantiux.pixelgallery.model.MediaGridItem.Media -> {
+                            val mediaItem = item.mediaItem
+                            val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                index = index,
+                                totalItems = pagedAlbumMedia.itemCount,
+                                columns = 3,
+                                cornerType = cornerType
+                            )
+                            
+                            SelectableMediaItem(
+                                item = mediaItem,
+                                isSelectionMode = isSelectionMode,
+                                selectedItems = selectedItems,
+                                viewModel = viewModel,
+                                view = view,
+                                shape = gridShape,
+                                mediaType = "smartalbum",
+                                albumId = albumId,
+                                index = index,
+                                showFavorite = true)
+                        }
+                        null -> {
+                            Box(modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant))
+                        }
+                    }
                 }
             }
         }
+        
+        // More menu state (needs to be inside the Box scope where it's used, or re-declared)
+        var showMoreMenu by remember { mutableStateOf(false) }
         
         // Floating navbar for selection mode
             if (isSelectionMode) {
@@ -238,16 +269,8 @@ fun SmartAlbumViewScreen(
                             },
                             onClick = {
                                 showMoreMenu = false
-                                selectedItems.firstOrNull()?.let { item ->
-                                    if (!item.isVideo) {
-                                        val wallpaperIntent = Intent(Intent.ACTION_ATTACH_DATA).apply {
-                                            setDataAndType(item.uri, "image/*")
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }
-                                        context.startActivity(Intent.createChooser(wallpaperIntent, "Set as"))
-                                    } else {
-                                        android.widget.Toast.makeText(context, "Cannot set video as wallpaper", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
+                                selectedItems.firstOrNull()?.let { itemId ->
+                                    viewModel.setAsWallpaper(context, itemId)
                                 }
                             },
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -293,9 +316,7 @@ fun SmartAlbumViewScreen(
                                 coroutineScope.launch {
                                     viewModel.hideFromSmartAlbum(context, albumId, selectedItems.toList())
                                     viewModel.exitSelectionMode()
-                                    // Reload smart album media
-                                    val smartMedia = SmartAlbumGenerator.getMediaForSmartAlbum(context, albumId, allMediaUnfiltered)
-                                    smartAlbumMedia = smartMedia
+                                    // Paging 3 will automatically refresh since the underlying flow updates
                                     android.widget.Toast.makeText(
                                         context,
                                         "Hidden ${selectedItems.size} ${if (selectedItems.size == 1) "item" else "items"} from this label",

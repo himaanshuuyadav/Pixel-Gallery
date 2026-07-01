@@ -30,6 +30,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     kotlinOptions {
@@ -58,6 +59,9 @@ android {
         kotlinCompilerExtensionVersion = "1.5.15"
     }
     packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -65,6 +69,7 @@ android {
 
     lint {
         disable += "NullSafeMutableLiveData"
+        checkReleaseBuilds = false
     }
 }
 
@@ -83,6 +88,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    
+    // Google Fonts
+    implementation("androidx.compose.ui:ui-text-google-fonts")
     
     // Material3 Expressive APIs (MaterialShapes, LoadingIndicator)
     implementation("androidx.compose.material3:material3:1.5.0-alpha15")
