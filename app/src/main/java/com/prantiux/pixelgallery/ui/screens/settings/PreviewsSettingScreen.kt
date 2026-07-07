@@ -20,7 +20,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -267,7 +268,7 @@ fun PreviewsSettingScreen(
     
     // Quality selection dialog
     if (showQualityDialog) {
-        QualitySelectionDialog(
+        QualitySelectionBottomSheet(
             currentQuality = thumbnailQuality,
             onQualitySelected = { 
                 thumbnailQuality = it
@@ -282,7 +283,7 @@ fun PreviewsSettingScreen(
     
     // Corner type selection dialog
     if (showCornerTypeDialog) {
-        CornerTypeSelectionDialog(
+        CornerTypeSelectionBottomSheet(
             currentCornerType = cornerType,
             onCornerTypeSelected = { 
                 cornerType = it
@@ -296,13 +297,36 @@ fun PreviewsSettingScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun QualitySelectionDialog(
+private fun QualitySelectionBottomSheet(
     currentQuality: String,
     onQualitySelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .width(32.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainer
+    ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -373,31 +397,42 @@ private fun QualitySelectionDialog(
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                // Cancel button
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text(
-                        text = "Cancel",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CornerTypeSelectionDialog(
+private fun CornerTypeSelectionBottomSheet(
     currentCornerType: String,
     onCornerTypeSelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .width(32.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainer
+    ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainer,

@@ -15,7 +15,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import com.prantiux.pixelgallery.ui.components.SubPageScaffold
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
@@ -119,9 +120,9 @@ fun ThemeSettingScreen(
         }
     }
     
-    // Theme selection dialog
+    // Theme selection bottom sheet
     if (showThemeDialog) {
-        ThemeSelectionDialog(
+        ThemeSelectionBottomSheet(
             currentTheme = selectedTheme,
             onThemeSelected = { 
                 selectedTheme = it
@@ -142,13 +143,36 @@ fun ThemeSettingScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ThemeSelectionDialog(
+private fun ThemeSelectionBottomSheet(
     currentTheme: String,
     onThemeSelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .width(32.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainer
+    ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -242,6 +266,8 @@ private fun ThemeSelectionDialog(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+                
+                Spacer(modifier = Modifier.height(32.dp)) // Extra padding at bottom for gesture navigation
             }
         }
     }

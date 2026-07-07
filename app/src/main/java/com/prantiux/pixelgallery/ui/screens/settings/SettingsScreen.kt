@@ -41,8 +41,10 @@ fun SettingsScreen(
     // Get current grid type
     val currentGridType by viewModel.gridType.collectAsState()
     val gridTypeText = when (currentGridType) {
-        com.prantiux.pixelgallery.viewmodel.GridType.DAY -> "Day"
-        com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> "Month"
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_3 -> "Day · 3"
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_4 -> "Day · 4"
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6 -> "Month · 6"
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9 -> "Month · 9"
     }
     
     SubPageScaffold(

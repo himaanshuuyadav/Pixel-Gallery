@@ -53,11 +53,11 @@ class SettingsDataStore(private val context: Context) {
      */
     val gridTypeFlow: Flow<GridType> = context.settingsDataStore.data
         .map { preferences ->
-            val gridTypeString = preferences[GRID_TYPE_KEY] ?: GridType.DAY.name
+            val gridTypeString = preferences[GRID_TYPE_KEY] ?: GridType.DAY_3.name
             try {
                 GridType.valueOf(gridTypeString)
             } catch (e: Exception) {
-                GridType.DAY
+                GridType.DAY_3
             }
         }
     

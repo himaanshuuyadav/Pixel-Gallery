@@ -1,9 +1,14 @@
 package com.prantiux.pixelgallery.ui.screens.settings
 
-import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -33,7 +39,6 @@ fun LayoutSettingScreen(
     onBackClick: () -> Unit
 ) {
     val currentGridType by viewModel.gridType.collectAsState()
-    var selectedGridType by remember { mutableStateOf(currentGridType) }
     var gestureChangeEnabled by remember { mutableStateOf(false) }
     var stickyDateHeaders by remember { mutableStateOf(true) }
     var hideEmptyAlbums by remember { mutableStateOf(false) }
@@ -74,7 +79,31 @@ fun LayoutSettingScreen(
             }
         }
     }
-    
+
+    var gridTypeExpanded by remember { mutableStateOf(false) }
+    var gridSizeExpanded by remember { mutableStateOf(false) }
+
+    val gridTypeRotation by animateFloatAsState(
+        targetValue = if (gridTypeExpanded) 180f else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "gridTypeRotation"
+    )
+
+    val gridSizeRotation by animateFloatAsState(
+        targetValue = if (gridSizeExpanded) 180f else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "gridSizeRotation"
+    )
+
+    val isDayMode = currentGridType.isDay
+    val currentGridTypeName = if (isDayMode) "Day" else "Month"
+    val currentGridSizeName = when (currentGridType) {
+        GridType.DAY_3 -> "3"
+        GridType.DAY_4 -> "4"
+        GridType.MONTH_6 -> "6"
+        GridType.MONTH_9 -> "9"
+    }
+
     SubPageScaffold(
         title = "Layout",
         subtitle = "Choose how to group your photos",
@@ -82,39 +111,182 @@ fun LayoutSettingScreen(
     ) {
         // Category header
         item {
-            CategoryHeader("Grid type")
+            CategoryHeader("Grid")
         }
         
-        // Day option
+        // Grid Type setting with dropdown
         item {
-            GridTypeOption(
-                title = "Day",
-                subtitle = "Group photos by day",
-                iconUnicode = FontIcons.Today,
-                isSelected = selectedGridType == GridType.DAY,
-                position = SettingPosition.TOP,
-                onClick = { 
-                    selectedGridType = GridType.DAY
-                    viewModel.setGridType(GridType.DAY) 
+            Surface(
+                onClick = { gridTypeExpanded = !gridTypeExpanded },
+                shape = if (gridTypeExpanded) RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 4.dp, bottomEnd = 4.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FontIcon(
+                        unicode = FontIcons.Today,
+                        contentDescription = null,
+                        size = 24.sp,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Grid type",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = currentGridTypeName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    FontIcon(
+                        unicode = FontIcons.KeyboardArrowDown,
+                        contentDescription = null,
+                        size = 24.sp,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.graphicsLayer { rotationZ = gridTypeRotation }
+                    )
                 }
-            )
+            }
         }
         
-        // Month option
+        // Expandable Grid Type options with animation
         item {
-            GridTypeOption(
-                title = "Month",
-                subtitle = "Group photos by month",
-                iconUnicode = FontIcons.CalendarMonth,
-                isSelected = selectedGridType == GridType.MONTH,
-                position = SettingPosition.BOTTOM,
-                onClick = { 
-                    selectedGridType = GridType.MONTH 
-                    viewModel.setGridType(GridType.MONTH)
+            AnimatedVisibility(
+                visible = gridTypeExpanded,
+                enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
+                exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    RadioExpandableOption(
+                        label = "Day",
+                        isSelected = isDayMode,
+                        onClick = {
+                            viewModel.setGridType(GridType.DAY_3)
+                            gridTypeExpanded = false
+                        },
+                        position = SettingPosition.TOP
+                    )
+                    RadioExpandableOption(
+                        label = "Month",
+                        isSelected = !isDayMode,
+                        onClick = {
+                            viewModel.setGridType(GridType.MONTH_6)
+                            gridTypeExpanded = false
+                        },
+                        position = SettingPosition.BOTTOM
+                    )
                 }
-            )
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+
+        // Grid Size setting with dropdown
+        item {
+            Surface(
+                onClick = { gridSizeExpanded = !gridSizeExpanded },
+                shape = if (gridSizeExpanded) RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp) else RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FontIcon(
+                        unicode = FontIcons.GridView,
+                        contentDescription = null,
+                        size = 24.sp,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Grid size",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = currentGridSizeName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    FontIcon(
+                        unicode = FontIcons.KeyboardArrowDown,
+                        contentDescription = null,
+                        size = 24.sp,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.graphicsLayer { rotationZ = gridSizeRotation }
+                    )
+                }
+            }
         }
         
+        // Expandable Grid Size options with animation
+        item {
+            AnimatedVisibility(
+                visible = gridSizeExpanded,
+                enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
+                exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (isDayMode) {
+                        RadioExpandableOption(
+                            label = "3",
+                            isSelected = currentGridType == GridType.DAY_3,
+                            onClick = {
+                                viewModel.setGridType(GridType.DAY_3)
+                                gridSizeExpanded = false
+                            },
+                            position = SettingPosition.TOP
+                        )
+                        RadioExpandableOption(
+                            label = "4",
+                            isSelected = currentGridType == GridType.DAY_4,
+                            onClick = {
+                                viewModel.setGridType(GridType.DAY_4)
+                                gridSizeExpanded = false
+                            },
+                            position = SettingPosition.BOTTOM
+                        )
+                    } else {
+                        RadioExpandableOption(
+                            label = "6",
+                            isSelected = currentGridType == GridType.MONTH_6,
+                            onClick = {
+                                viewModel.setGridType(GridType.MONTH_6)
+                                gridSizeExpanded = false
+                            },
+                            position = SettingPosition.TOP
+                        )
+                        RadioExpandableOption(
+                            label = "9",
+                            isSelected = currentGridType == GridType.MONTH_9,
+                            onClick = {
+                                viewModel.setGridType(GridType.MONTH_9)
+                                gridSizeExpanded = false
+                            },
+                            position = SettingPosition.BOTTOM
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -204,6 +376,76 @@ fun LayoutSettingScreen(
             },
             onDismiss = { showDefaultTabDialog = false }
         )
+    }
+}
+
+@Composable
+private fun RadioExpandableOption(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    position: SettingPosition
+) {
+    val haptic = LocalHapticFeedback.current
+    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
+        when (position) {
+            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
+            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
+            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
+        }
+    )
+    
+    Surface(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Spacer(modifier = Modifier.width(40.dp)) // Indent for the icon
+            
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            
+            Box(
+                modifier = Modifier
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .border(
+                        width = 2.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary 
+                               else MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = CircleShape
+                    )
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primary 
+                        else MaterialTheme.colorScheme.surface,
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(MaterialTheme.colorScheme.onPrimary, CircleShape)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -380,92 +622,6 @@ private fun TabOption(
                 size = 24.sp,
                 tint = MaterialTheme.colorScheme.primary
             )
-        }
-    }
-}
-
-@Composable
-private fun GridTypeOption(
-    title: String,
-    subtitle: String,
-    iconUnicode: String,
-    isSelected: Boolean,
-    position: SettingPosition,
-    onClick: () -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    val shape = com.prantiux.pixelgallery.ui.theme.ExpressiveListShape(
-        when (position) {
-            SettingPosition.TOP -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.TOP
-            SettingPosition.MIDDLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.MIDDLE
-            SettingPosition.BOTTOM -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.BOTTOM
-            SettingPosition.SINGLE -> com.prantiux.pixelgallery.ui.theme.ListItemPosition.SINGLE
-        }
-    )
-    
-    Surface(
-        onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onClick()
-        },
-        shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier
-            .bounceClick()
-            .fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FontIcon(
-                unicode = iconUnicode,
-                contentDescription = null,
-                size = 24.sp,
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            // Radio button
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .border(
-                        width = 2.dp,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary 
-                               else MaterialTheme.colorScheme.onSurfaceVariant,
-                        shape = CircleShape
-                    )
-                    .background(
-                        if (isSelected) MaterialTheme.colorScheme.primary 
-                        else MaterialTheme.colorScheme.surface,
-                        CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isSelected) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(MaterialTheme.colorScheme.onPrimary, CircleShape)
-                    )
-                }
-            }
         }
     }
 }

@@ -5,6 +5,49 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
+ * Calculates the local index and total items for a media item within its date group,
+ * given its global index in the flattened list (Headers + Media).
+ * 
+ * @param globalIndex The index of the item in the flattened list
+ * @param dateGroups The list of DateGroupInfo
+ * @param contentOffsetIndex The number of non-grid items at the start (e.g. tab header)
+ * @return A Pair of (indexInGroup, totalItemsInGroup), or null if it's a header
+ */
+fun getLocalPositionInDateGroup(
+    globalIndex: Int,
+    dateGroups: List<com.prantiux.pixelgallery.ui.components.DateGroupInfo>,
+    contentOffsetIndex: Int = 1
+): Pair<Int, Int>? {
+    var currentIndex = contentOffsetIndex
+    for (group in dateGroups) {
+        if (globalIndex == currentIndex) return null // Header
+        
+        val groupStart = currentIndex + 1
+        val groupEnd = currentIndex + group.itemCount
+        
+        if (globalIndex in groupStart..groupEnd) {
+            return Pair(globalIndex - groupStart, group.itemCount)
+        }
+        
+        currentIndex += group.itemCount + 1
+    }
+    return null
+}
+
+/**
+ * Returns the (accentRadius, defaultRadius) pair based on the grid type.
+ * DAY_3: 8/4, DAY_4: 6/3, MONTH_6: 4/2, MONTH_9: 2/1
+ */
+fun cornerRadiiForGridType(gridType: com.prantiux.pixelgallery.viewmodel.GridType): Pair<Dp, Dp> {
+    return when (gridType) {
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_3 -> Pair(8.dp, 4.dp)
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_4 -> Pair(6.dp, 3.dp)
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6 -> Pair(4.dp, 2.dp)
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9 -> Pair(2.dp, 1.dp)
+    }
+}
+
+/**
  * Calculate corner radius for grid items based on position
  * Provides Material 3 expressive rounded corners for grid layouts
  * 
