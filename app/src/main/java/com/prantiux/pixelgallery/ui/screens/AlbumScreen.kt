@@ -22,14 +22,19 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.mutableFloatStateOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
@@ -71,6 +76,8 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import com.prantiux.pixelgallery.model.MediaGridItem
 import com.prantiux.pixelgallery.ui.utils.shimmerEffect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -90,14 +97,21 @@ fun AlbumDetailScreen(
     
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
+    val fullySelectedDateGroups by viewModel.fullySelectedDateGroups.collectAsState()
+    
+    val scrollbarVisible by viewModel.scrollbarVisible.collectAsState()
     val gridType by viewModel.gridType.collectAsState()
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     val view = LocalView.current
     val coroutineScope = rememberCoroutineScope()
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val density = LocalDensity.current
     var contentTopPx by remember { mutableStateOf<Float?>(null) }
     var firstHeaderTopPx by remember { mutableStateOf<Float?>(null) }
+    
+    // Track last selected item during drag-to-select
+    var lastSelectedKey by remember { mutableStateOf<Any?>(null) }
     
     // Remember grid state for scrollbar
     val gridState = rememberLazyGridState()
@@ -129,8 +143,10 @@ fun AlbumDetailScreen(
     
     // Determine column count based on grid type
     val columnCount = when (gridType) {
-        com.prantiux.pixelgallery.viewmodel.GridType.DAY -> 3
-        com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> 5
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_3 -> 3
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_4 -> 4
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6 -> 6
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9 -> 9
     }
     
     // Prepare date group info for scrollbar
@@ -143,7 +159,7 @@ fun AlbumDetailScreen(
     }
     val albumName = remember(albumId, album) {
         if (isSmartAlbum) {
-            SmartAlbumGenerator.SmartAlbumType.fromId(albumId)?.displayName ?: "Smart Album"
+            SmartAlbumGenerator.fromId(albumId)?.displayName ?: "Smart Album"
         } else {
             album?.name ?: "Album"
         }
@@ -265,7 +281,108 @@ fun AlbumDetailScreen(
     flingBehavior = rememberZenithFlingBehavior(),
                     columns = GridCells.Fixed(columnCount),
                     state = gridState,
-                    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+                    modifier = Modifier
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                            .let {
+                                val currentIsSelectionMode by rememberUpdatedState(isSelectionMode)
+                                val currentSelectedItems by rememberUpdatedState(selectedItems)
+                                val autoScrollSpeed = remember { mutableFloatStateOf(0f) }
+                                LaunchedEffect(Unit) {
+                                    while (isActive) {
+                                        if (autoScrollSpeed.floatValue != 0f) {
+                                            gridState.scrollBy(autoScrollSpeed.floatValue)
+                                        }
+                                        delay(10)
+                                    }
+                                }
+                                it.pointerInput(Unit) {
+                                    var initialDragIndex: Int? = null
+                                    var currentDragIndex: Int? = null
+                                    var dragSelectState = true
+                                    var initialSelectedIds = setOf<Long>()
+                                    
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { offset ->
+                                            val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { 
+                                                offset.y >= it.offset.y && offset.y <= it.offset.y + it.size.height &&
+                                                offset.x >= it.offset.x && offset.x <= it.offset.x + it.size.width
+                                            }
+                                            if (item != null) {
+                                                val key = item.key
+                                                if (key is Long) {
+                                                    initialSelectedIds = currentSelectedItems.toSet()
+                                                    if (!currentIsSelectionMode) {
+                                                        viewModel.enterSelectionMode(key)
+                                                        dragSelectState = true
+                                                        initialSelectedIds = setOf(key)
+                                                    } else {
+                                                        val isSelected = initialSelectedIds.contains(key)
+                                                        dragSelectState = !isSelected
+                                                        val newSelection = initialSelectedIds.toMutableSet()
+                                                        if (dragSelectState) newSelection.add(key) else newSelection.remove(key)
+                                                        viewModel.setSelectedItems(newSelection)
+                                                    }
+                                                    initialDragIndex = item.index
+                                                    currentDragIndex = item.index
+                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                }
+                                            }
+                                        },
+                                        onDrag = { change, _ ->
+                                            val raw = change.position
+                                            if (initialDragIndex != null) {
+                                                val distB = gridState.layoutInfo.viewportSize.height - raw.y
+                                                val distT = raw.y
+                                                autoScrollSpeed.floatValue = when {
+                                                    distB < 150f -> 150f - distB
+                                                    distT < 150f -> -(150f - distT)
+                                                    else -> 0f
+                                                }
+
+                                                val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { 
+                                                    raw.y >= it.offset.y && raw.y <= it.offset.y + it.size.height &&
+                                                    raw.x >= it.offset.x && raw.x <= it.offset.x + it.size.width
+                                                }
+                                                if (item != null) {
+                                                    val newIdx = item.index
+                                                    if (newIdx != currentDragIndex) {
+                                                        val start = initialDragIndex!!
+                                                        val activeRange = if (newIdx >= start) start..newIdx else newIdx..start
+                                                        
+                                                        val activeIds = activeRange.mapNotNull { i -> 
+                                                            if (i >= 0 && i < pagedAlbumMedia.itemCount) {
+                                                                val itItem = pagedAlbumMedia.peek(i)
+                                                                if (itItem is com.prantiux.pixelgallery.model.MediaGridItem.Media) itItem.mediaItem.id else null
+                                                            } else null
+                                                        }.toSet()
+                                                        
+                                                        val newSelection = initialSelectedIds.toMutableSet()
+                                                        if (dragSelectState) {
+                                                            newSelection.addAll(activeIds)
+                                                        } else {
+                                                            newSelection.removeAll(activeIds)
+                                                        }
+                                                        
+                                                        viewModel.setSelectedItems(newSelection)
+                                                        currentDragIndex = newIdx
+                                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            initialDragIndex = null
+                                            currentDragIndex = null
+                                            autoScrollSpeed.floatValue = 0f
+                                        },
+                                        onDragCancel = {
+                                            initialDragIndex = null
+                                            currentDragIndex = null
+                                            autoScrollSpeed.floatValue = 0f
+                                        }
+                                    )
+                                }
+                            },
                     contentPadding = PaddingValues(
                         start = 2.dp,
                         end = 2.dp,
@@ -297,7 +414,7 @@ fun AlbumDetailScreen(
                         if (item != null) {
                             when (item) {
                                 is MediaGridItem.Header -> {
-                                    val isDay = gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY
+                                    val isDay = gridType.isDay
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -328,25 +445,15 @@ fun AlbumDetailScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             if (isSelectionMode) {
-                                                // We don't have allSelected logic here easily in paging. 
-                                                // If we need selection by day, we should query DB like in PhotosScreen
-                                                Box(
+                                                val isFullySelected = fullySelectedDateGroups.contains(item.dateGroupKey)
+                                                com.prantiux.pixelgallery.ui.components.SelectionCheckmark(
+                                                    isSelected = isFullySelected,
                                                     modifier = Modifier
-                                                        .size(24.dp)
-                                                        .clip(CircleShape)
-                                                        .border(
-                                                            width = 2.dp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            shape = CircleShape
-                                                        )
-                                                        .background(Color.Transparent, CircleShape)
                                                         .clickable {
+                                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                                             viewModel.selectAllInDateGroup(item.dateGroupKey, isDay)
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    // Empty checkbox that selects all when clicked
-                                                }
+                                                        }
+                                                )
                                             }
                                         }
                                     }
@@ -354,12 +461,31 @@ fun AlbumDetailScreen(
                                 is MediaGridItem.Media -> {
                                     val mediaItem = item.mediaItem
                                     val isSelected = selectedItems.contains(mediaItem.id)
-                                    val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                                        index = index, // Approximate corner shape for now
-                                        totalItems = pagedAlbumMedia.itemCount,
-                                        columns = columnCount,
-                                        cornerType = cornerType
+                                    val localPos = com.prantiux.pixelgallery.ui.utils.getLocalPositionInDateGroup(
+                                        globalIndex = index,
+                                        dateGroups = dateGroupsForScrollbar,
+                                        contentOffsetIndex = 0
                                     )
+                                    val (accentR, defaultR) = com.prantiux.pixelgallery.ui.utils.cornerRadiiForGridType(gridType)
+                                    val gridShape = if (localPos != null) {
+                                        com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                            index = localPos.first,
+                                            totalItems = localPos.second,
+                                            columns = columnCount,
+                                            accentRadius = accentR,
+                                            defaultRadius = defaultR,
+                                            cornerType = cornerType
+                                        )
+                                    } else {
+                                        com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                            index = 0,
+                                            totalItems = 1,
+                                            columns = columnCount,
+                                            accentRadius = accentR,
+                                            defaultRadius = defaultR,
+                                            cornerType = cornerType
+                                        )
+                                    }
                                     
                                     com.prantiux.pixelgallery.ui.components.MediaThumbnail(
                                         item = mediaItem,
@@ -368,6 +494,7 @@ fun AlbumDetailScreen(
                                         shape = gridShape,
                                         onClick = {
                                             if (isSelectionMode) {
+                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                                                 viewModel.toggleSelection(mediaItem.id)
                                             } else {
                                                 viewModel.showMediaOverlayWithItem(
@@ -377,12 +504,7 @@ fun AlbumDetailScreen(
                                                 )
                                             }
                                         },
-                                        onLongClick = {
-                                            if (!isSelectionMode) {
-                                                view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                                                viewModel.enterSelectionMode(mediaItem.id)
-                                            }
-                                        },
+                                        onLongClick = null,
                                         showFavorite = true
                                     )
                                 }
@@ -413,6 +535,7 @@ fun AlbumDetailScreen(
             }
         )
         
+
         // Selection Top Bar - overlay above navigation bar
         val copySuccessMessage by viewModel.copySuccessMessage.collectAsState()
         val moveSuccessMessage by viewModel.moveSuccessMessage.collectAsState()

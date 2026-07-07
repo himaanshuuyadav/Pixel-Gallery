@@ -16,10 +16,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.ui.components.SubPageScaffoldGrid
-import com.prantiux.pixelgallery.ui.components.MediaThumbnail
+import com.prantiux.pixelgallery.ui.components.PremiumEmptyState
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
+import com.prantiux.pixelgallery.ui.components.MediaThumbnail
 
 @Composable
 fun FavoritesScreen(
@@ -57,38 +58,13 @@ fun FavoritesScreen(
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         if (favoriteItems.isEmpty()) {
-            item {
-                // Empty state - spans all columns
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 64.dp, horizontal = 32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        FontIcon(
-                            unicode = FontIcons.Star,
-                            contentDescription = "No favorites",
-                            size = 64.sp,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "No favourites yet",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Tap the star icon on any photo or video to add it here",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                PremiumEmptyState(
+                    icon = FontIcons.Star,
+                    title = "No favourites yet",
+                    subtitle = "Tap the star icon on any photo or video to add it here",
+                    modifier = Modifier.padding(vertical = 64.dp)
+                )
             }
         } else {
             itemsIndexed(favoriteItems) { index, item ->

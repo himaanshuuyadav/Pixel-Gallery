@@ -54,19 +54,13 @@ fun AllAlbumsScreen(
                 )
             }
         } else if (allAlbums.isEmpty()) {
-            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(64.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No albums found",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                com.prantiux.pixelgallery.ui.components.PremiumEmptyState(
+                    icon = com.prantiux.pixelgallery.ui.icons.FontIcons.Folder,
+                    title = "No albums found",
+                    subtitle = "Albums created by apps or folders will appear here.",
+                    modifier = Modifier.padding(vertical = 64.dp)
+                )
             }
         } else {
             items(allAlbums.size) { index ->

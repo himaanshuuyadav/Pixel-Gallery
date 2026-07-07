@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +36,10 @@ import androidx.compose.material3.carousel.CarouselDefaults
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.toShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.foundation.gestures.animateScrollBy
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.Alignment
@@ -67,6 +72,9 @@ import com.prantiux.pixelgallery.ui.utils.shimmerEffect
 import com.prantiux.pixelgallery.search.SearchEngine
 import com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator
 import com.prantiux.pixelgallery.model.Album
+import com.prantiux.pixelgallery.ui.components.SelectionTopBar
+import com.prantiux.pixelgallery.ui.components.UnifiedScrollbar
+import com.prantiux.pixelgallery.ui.components.PremiumEmptyState
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
 import kotlinx.coroutines.launch
@@ -90,40 +98,30 @@ fun SearchScreen(
     // ROOM-FIRST: Use Room flows for base media lists
     val isLoading by viewModel.isLoading.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    // ROOM-FIRST: Use Room-based search flow instead of in-memory search
-    val searchResultsRaw by viewModel.searchMediaFlow(searchQuery).collectAsState(initial = emptyList())
-    val isSearching by viewModel.isSearching.collectAsState()
+    val searchState by viewModel.searchState.collectAsState()
     
-    // CALLING TAB LOG
-    if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SCREEN_TAB", "SearchScreen collected ${searchResultsRaw.size} results for query='$searchQuery'")
-    
-    // ROOM-FIRST: Compute search result structure from raw media list
-    val searchResults = remember(searchResultsRaw) {
-        val matchedAlbums = searchResultsRaw
-            .groupBy { it.bucketName }
-            .filter { it.key.isNotEmpty() }
-            .map { (albumName, items) ->
-                SearchEngine.AlbumMatch(
-                    albumName = albumName,
-                    items = items,
-                    matchPriority = 1
-                )
-            }
-            .sortedByDescending { it.items.size }
-        
-        SearchEngine.SearchResult(
-            matchedAlbums = matchedAlbums,
-            matchedMedia = searchResultsRaw,
-            query = searchQuery
-        )
+    // Derived values for backward compatibility in the rest of the file
+    val searchResults = remember(searchState) {
+        when (searchState) {
+            is com.prantiux.pixelgallery.viewmodel.SearchState.Success -> (searchState as com.prantiux.pixelgallery.viewmodel.SearchState.Success).results
+            else -> SearchEngine.SearchResult(emptyList(), emptyList(), searchQuery)
+        }
     }
+    
+    val showLoadingIndicator = searchState is com.prantiux.pixelgallery.viewmodel.SearchState.Loading
+    val isSearchEmpty = searchState is com.prantiux.pixelgallery.viewmodel.SearchState.Empty
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
     val cornerType by settingsDataStore.cornerTypeFlow.collectAsState(initial = "Rounded")
     
     // SearchBar active state
-    var isSearchBarActive by remember { mutableStateOf(false) }
+    // Multi-select state
+    var isMultiSelectMode by remember { mutableStateOf(false) }
+    var selectedItems by remember { mutableStateOf(emptySet<String>()) }
+    
+    // SearchBar active state
+    val isSearchBarActive by viewModel.isSearchBarActive.collectAsState()
     
     // Search filter state
     var selectedFilter by remember { mutableStateOf("All") }
@@ -147,51 +145,30 @@ fun SearchScreen(
         }
     }
     
-    // Material 3 Expressive: Adaptive loading with delay threshold
-    // Show loader only if search takes longer than 100ms (prevents flicker on fast searches)
-    var showLoadingIndicator by remember { mutableStateOf(false) }
-    
     // Animated values for search bar shape
     val bottomCornerRadius by animateDpAsState(
-        targetValue = if (isSearchBarActive) 8.dp else 24.dp,
+        targetValue = if (isSearchBarActive || searchQuery.isNotBlank()) 8.dp else 24.dp,
         animationSpec = tween(300),
         label = "SearchBarBottomCornerRadius"
     )
     
-    LaunchedEffect(isSearching) {
-        if (isSearching) {
-            // Show loader immediately for better feedback
-            showLoadingIndicator = true
-        } else {
-            // Hide immediately when results arrive
-            showLoadingIndicator = false
-        }
-    }
-
-    // REFACTORED: Removed viewModel.refresh() call
-    // Data is already loaded by PhotosScreen on app startup
-    // SearchScreen now only observes StateFlows (images, videos)
+    val topMlLabels by viewModel.topMlLabels.collectAsState()
     
-    // Handle back gesture
-    BackHandler(enabled = isSearchBarActive || searchQuery.isNotEmpty()) {
-        if (searchQuery.isNotEmpty()) {
-            viewModel.clearSearch()
-            isSearchBarActive = false
-            focusManager.clearFocus()
-            keyboardController?.hide()
-        } else if (isSearchBarActive) {
-            isSearchBarActive = false
-            focusManager.clearFocus()
-            keyboardController?.hide()
-        }
+    val quickFilters = remember(topMlLabels) { 
+        val dates = SearchEngine.getDateShortcuts().take(3).map { it.label }
+        val types = SearchEngine.getQuickFilters().map { it.label }
+        val ml = topMlLabels.map { label -> label.replaceFirstChar { it.uppercase() } }
+        (dates + types + ml).distinct()
     }
 
-    // Handle back gesture
-    val quickFilters = remember { SearchEngine.getQuickFilters() }
+    LaunchedEffect(Unit) {
+        viewModel.loadTopMlLabels()
+    }
 
     val navBarHeight = calculateFloatingNavBarHeight()
     val showSearchCards = isSearchBarActive && searchQuery.isBlank()
     val showFilterCard = searchQuery.isNotBlank()
+    var isSmartAlbumsExpanded by remember { mutableStateOf(false) }
     
     val headerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     
@@ -230,26 +207,24 @@ fun SearchScreen(
                     SearchBarDefaults.InputField(
                         query = searchQuery,
                         onQueryChange = { viewModel.setSearchQuery(it) },
-                        onSearch = { query ->
-                            if (query.isNotBlank()) {
-                                viewModel.setSearchQuery(query)
-                                viewModel.addRecentSearch(query.trim())
-                                isSearchBarActive = false
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                            }
+                        onSearch = {
+                            viewModel.setSearchBarActive(false)
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
                         },
                         expanded = isSearchBarActive,
-                        onExpandedChange = { isSearchBarActive = it },
+                        onExpandedChange = { viewModel.setSearchBarActive(it) },
                         placeholder = { Text("Search your photos") },
                         leadingIcon = {
                             if (isSearchBarActive) {
                                 IconButton(onClick = {
                                     // Clear search and close search bar
                                     if (searchQuery.isNotEmpty()) {
-                                        viewModel.clearSearch()
+                                        viewModel.clearSearchQuery()
                                     }
-                                    isSearchBarActive = false
+                                    viewModel.setSearchBarActive(false)
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
                                 }) {
                                     FontIcon(
                                         unicode = FontIcons.ArrowBack,
@@ -265,7 +240,7 @@ fun SearchScreen(
                         },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.clearSearch() }) {
+                                IconButton(onClick = { viewModel.clearSearchQuery() }) {
                                     FontIcon(unicode = FontIcons.Clear, contentDescription = "Clear")
                                 }
                             }
@@ -273,7 +248,7 @@ fun SearchScreen(
                     )
                 },
                 expanded = isSearchBarActive,
-                onExpandedChange = { isSearchBarActive = it },
+                onExpandedChange = { viewModel.setSearchBarActive(it) },
                 shape = RoundedCornerShape(
                     topStart = 24.dp,
                     topEnd = 24.dp,
@@ -349,7 +324,7 @@ fun SearchScreen(
                                             onClick = {
                                                 viewModel.setSearchQuery(search)
                                                 viewModel.addRecentSearch(search)
-                                                isSearchBarActive = false
+                                                viewModel.setSearchBarActive(false)
                                                 focusManager.clearFocus()
                                                 keyboardController?.hide()
                                             },
@@ -400,20 +375,22 @@ fun SearchScreen(
                                 )
                             }
                             item {
-                                LazyRow(
+                                @OptIn(ExperimentalLayoutApi::class)
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(quickFilters) { filter ->
+                                    quickFilters.forEach { filterText ->
                                         // Simple pill shape like recent searches - text only, no icon, no delete
                                         Surface(
                                             modifier = Modifier
                                                 .wrapContentWidth()
                                                 .clip(RoundedCornerShape(20.dp))
                                                 .clickable {
-                                                    viewModel.setSearchQuery(filter.label.lowercase())
-                                                    viewModel.addRecentSearch(filter.label)
-                                                    isSearchBarActive = false
+                                                    viewModel.setSearchQuery(filterText.lowercase())
+                                                    viewModel.addRecentSearch(filterText)
+                                                    viewModel.setSearchBarActive(false)
                                                     focusManager.clearFocus()
                                                     keyboardController?.hide()
                                                 },
@@ -422,7 +399,7 @@ fun SearchScreen(
                                             tonalElevation = 1.dp
                                         ) {
                                             Text(
-                                                text = filter.label,
+                                                text = filterText,
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -539,66 +516,143 @@ fun SearchScreen(
                         // Show loading state or actual albums in centered carousel
                         item {
                             if (isLoadingSmartAlbums) {
-                                // Loading placeholders - matches 2-column grid structure
-                                val cardHeight = 240.dp
-                                val rowCount = 2 // Show 4 skeletons (2 rows)
-                                val gridHeight = (cardHeight * rowCount) + (12.dp * (rowCount - 1).coerceAtLeast(0))
-                                
-                                LazyVerticalGrid(
-    flingBehavior = rememberZenithFlingBehavior(),
-                                    columns = GridCells.Fixed(2),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp),
-                                    userScrollEnabled = false,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(gridHeight)
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    items(4) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(cardHeight)
-                                                .clip(RoundedCornerShape(28.dp))
-                                                .shimmerEffect()
-                                        )
+                                    val dummyItems = List(4) { it }
+                                    val chunked = dummyItems.chunked(3)
+                                    val cardHeight = 240.dp
+                                    
+                                    chunked.forEachIndexed { index, chunk ->
+                                        val isLeftLarge = index % 2 == 0
+                                        if (chunk.size == 3) {
+                                            Row(modifier = Modifier.fillMaxWidth().height(cardHeight), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                if (isLeftLarge) {
+                                                    Box(modifier = Modifier.weight(2f).fillMaxHeight().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                    Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                    }
+                                                } else {
+                                                    Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                    }
+                                                    Box(modifier = Modifier.weight(2f).fillMaxHeight().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                }
+                                            }
+                                        } else if (chunk.size == 2) {
+                                            Row(modifier = Modifier.fillMaxWidth().height(160.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                Box(modifier = Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                                Box(modifier = Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                            }
+                                        } else if (chunk.size == 1) {
+                                            Box(modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(28.dp)).shimmerEffect())
+                                        }
                                     }
                                 }
                             } else if (smartAlbums.isNotEmpty()) {
-                                val cardHeight = 240.dp
-                                val rowCount = (smartAlbums.size + 1) / 2
-                                val gridHeight = (cardHeight * rowCount) + (12.dp * (rowCount - 1).coerceAtLeast(0))
-
-                                LazyVerticalGrid(
-    flingBehavior = rememberZenithFlingBehavior(),
-                                    columns = GridCells.Fixed(2),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp),
-                                    userScrollEnabled = false,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(gridHeight)
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    items(smartAlbums.size) { index ->
-                                        val album = smartAlbums[index]
-                                        val dominantColor = MaterialTheme.colorScheme.primaryContainer
-
-                                        SmartAlbumHeroCard(
-                                            album = album,
-                                            dominantColor = dominantColor,
-                                            cachedThumbnailUri = smartAlbumThumbnailCache[album.id],
-                                            onThumbnailCached = { uri ->
-                                                smartAlbumThumbnailCache[album.id] = uri
-                                            },
-                                            onClick = {
-                                                navController.navigate(
-                                                    com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id)
-                                                )
-                                            },
-                                            albumIndex = index
+                                    val chunked = smartAlbums.chunked(3)
+                                    val cardHeight = 240.dp
+                                    
+                                    val RenderChunk: @Composable (Int, List<Album>) -> Unit = { chunkIndex, chunk ->
+                                        val isLeftLarge = chunkIndex % 2 == 0
+                                        val baseIndex = chunkIndex * 3
+                                        
+                                        if (chunk.size == 3) {
+                                            Row(modifier = Modifier.fillMaxWidth().height(cardHeight), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                if (isLeftLarge) {
+                                                    Box(modifier = Modifier.weight(2f).fillMaxHeight()) {
+                                                        SmartAlbumHeroCardWrapped(chunk[0], baseIndex, smartAlbumThumbnailCache, navController, isSmallCard = false)
+                                                    }
+                                                    Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { SmartAlbumHeroCardWrapped(chunk[1], baseIndex+1, smartAlbumThumbnailCache, navController, isSmallCard = true) }
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { SmartAlbumHeroCardWrapped(chunk[2], baseIndex+2, smartAlbumThumbnailCache, navController, isSmallCard = true) }
+                                                    }
+                                                } else {
+                                                    Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { SmartAlbumHeroCardWrapped(chunk[0], baseIndex, smartAlbumThumbnailCache, navController, isSmallCard = true) }
+                                                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { SmartAlbumHeroCardWrapped(chunk[1], baseIndex+1, smartAlbumThumbnailCache, navController, isSmallCard = true) }
+                                                    }
+                                                    Box(modifier = Modifier.weight(2f).fillMaxHeight()) {
+                                                        SmartAlbumHeroCardWrapped(chunk[2], baseIndex+2, smartAlbumThumbnailCache, navController, isSmallCard = false)
+                                                    }
+                                                }
+                                            }
+                                        } else if (chunk.size == 2) {
+                                            Row(modifier = Modifier.fillMaxWidth().height(160.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                Box(modifier = Modifier.weight(1f).fillMaxHeight()) { SmartAlbumHeroCardWrapped(chunk[0], baseIndex, smartAlbumThumbnailCache, navController, isSmallCard = false) }
+                                                Box(modifier = Modifier.weight(1f).fillMaxHeight()) { SmartAlbumHeroCardWrapped(chunk[1], baseIndex+1, smartAlbumThumbnailCache, navController, isSmallCard = false) }
+                                            }
+                                        } else if (chunk.size == 1) {
+                                            Box(modifier = Modifier.fillMaxWidth().height(160.dp)) { SmartAlbumHeroCardWrapped(chunk[0], baseIndex, smartAlbumThumbnailCache, navController, isSmallCard = false) }
+                                        }
+                                    }
+                                    
+                                    // Visible chunks
+                                    chunked.take(2).forEachIndexed { index, chunk ->
+                                        RenderChunk(index, chunk)
+                                    }
+                                    
+                                    // Hidden chunks with AnimatedVisibility
+                                    if (chunked.size > 2) {
+                                        val springSpec = androidx.compose.animation.core.spring<androidx.compose.ui.unit.IntSize>(
+                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioLowBouncy,
+                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
                                         )
+                                        AnimatedVisibility(
+                                            visible = isSmartAlbumsExpanded,
+                                            enter = expandVertically(animationSpec = springSpec) + fadeIn(),
+                                            exit = shrinkVertically(animationSpec = springSpec) + fadeOut()
+                                        ) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                chunked.drop(2).forEachIndexed { index, chunk ->
+                                                    RenderChunk(index + 2, chunk)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (smartAlbums.size > 6) {
+                                        val rotation by androidx.compose.animation.core.animateFloatAsState(
+                                            targetValue = if (isSmartAlbumsExpanded) 180f else 0f
+                                        )
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    isSmartAlbumsExpanded = !isSmartAlbumsExpanded 
+                                                    if (isSmartAlbumsExpanded) {
+                                                        coroutineScope.launch {
+                                                            kotlinx.coroutines.delay(100)
+                                                            lazyListState.animateScrollBy(
+                                                                value = 1500f,
+                                                                animationSpec = androidx.compose.animation.core.spring(
+                                                                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioLowBouncy,
+                                                                    stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                                                                )
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                .padding(vertical = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.KeyboardArrowDown,
+                                                contentDescription = if (isSmartAlbumsExpanded) "Show less" else "Show more",
+                                                modifier = Modifier
+                                                    .size(36.dp) // Make icon larger and bolder
+                                                    .graphicsLayer { rotationZ = rotation },
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -610,47 +664,32 @@ fun SearchScreen(
                         
                     }
                 }
-                // Material 3 Expressive: Adaptive loading with 100ms delay
-                // Shows LoadingIndicator only if search takes longer than 100ms
+                // Material 3 Expressive: Skeletal Shimmer Loader
                 showLoadingIndicator && searchQuery.isNotBlank() -> {
-                    Box(
+                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+                        contentPadding = PaddingValues(top = 16.dp, bottom = navBarHeight + 16.dp, start = 8.dp, end = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+                        userScrollEnabled = false
                     ) {
-                        com.prantiux.pixelgallery.ui.components.EchoLoadingIndicator(
-                            modifier = Modifier.padding(32.dp)
-                        )
-                    }
-                }
-                searchQuery.isNotBlank() && !showLoadingIndicator && searchResults.matchedAlbums.isEmpty() && searchResults.matchedMedia.isEmpty() -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            FontIcon(
-                                unicode = FontIcons.SearchOff,
-                                contentDescription = null,
-                                size = 64.sp,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                "No results found",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "Try a different search term",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        items(24) {
+                            Box(
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .shimmerEffect()
                             )
                         }
                     }
+                }
+                searchQuery.isNotBlank() && isSearchEmpty -> {
+                    PremiumEmptyState(
+                        icon = FontIcons.SearchOff,
+                        title = "No results found",
+                        subtitle = "Try a different search term or filter"
+                    )
                 }
                 else -> {
                     // Show search results with filter applied
@@ -1123,12 +1162,11 @@ fun SmartAlbumHeroCard(
     cachedThumbnailUri: android.net.Uri?,
     onThumbnailCached: (android.net.Uri) -> Unit,
     onClick: () -> Unit,
-    albumIndex: Int = 0
+    albumIndex: Int = 0,
+    isSmallCard: Boolean = false
 ) {
     val context = LocalContext.current
     val thumbnailUri = cachedThumbnailUri ?: album.coverUri
-    
-    val labelBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
 
     // Use a different expressive shape for each card's item-count badge.
     val countBadgeShape = when (albumIndex % 4) {
@@ -1140,51 +1178,53 @@ fun SmartAlbumHeroCard(
     
     Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(240.dp)
-            .clip(RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
+            .fillMaxSize()
+            .clip(RoundedCornerShape(28.dp)),
+        shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         onClick = onClick
     ) {
-        Column(
+        Box(
             modifier = Modifier.fillMaxSize()
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
-                // Full thumbnail area (no inner masking/clipping)
-                if (thumbnailUri != null) {
-                    AsyncImage(
-                        model = thumbnailUri,
-                        contentDescription = album.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
+            // Full thumbnail area
+            if (thumbnailUri != null) {
+                AsyncImage(
+                    model = thumbnailUri,
+                    contentDescription = album.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        strokeWidth = 2.dp
                     )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            strokeWidth = 2.dp
-                        )
-                    }
                 }
             }
 
+            // Gradient Label Overlay
             Column(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(labelBackgroundColor)
-                    .heightIn(min = 56.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.5f),
+                                Color.Black.copy(alpha = 0.85f)
+                            )
+                        )
+                    )
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1192,10 +1232,10 @@ fun SmartAlbumHeroCard(
                 ) {
                     Text(
                         text = album.name,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = if (isSmallCard) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
+                        color = Color.White,
+                        maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
@@ -1205,14 +1245,14 @@ fun SmartAlbumHeroCard(
                     Surface(
                         modifier = Modifier.size(36.dp),
                         shape = countBadgeShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                        color = Color.White.copy(alpha = 0.25f)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
                                 text = album.itemCount.toString(),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = if (isSmallCard) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = Color.White,
                                 maxLines = 1
                             )
                         }
@@ -1235,3 +1275,24 @@ private fun computePerceivedBrightness(color: Color): Int {
     return (0.299 * r + 0.587 * g + 0.114 * b).toInt()
 }
 
+@Composable
+private fun SmartAlbumHeroCardWrapped(
+    album: com.prantiux.pixelgallery.model.Album,
+    index: Int,
+    thumbnailCache: MutableMap<String, android.net.Uri?>,
+    navController: androidx.navigation.NavController,
+    isSmallCard: Boolean = false
+) {
+    val dominantColor = MaterialTheme.colorScheme.primaryContainer
+    SmartAlbumHeroCard(
+        album = album,
+        dominantColor = dominantColor,
+        cachedThumbnailUri = thumbnailCache[album.id],
+        onThumbnailCached = { uri -> thumbnailCache[album.id] = uri },
+        onClick = {
+            navController.navigate(com.prantiux.pixelgallery.navigation.Screen.SmartAlbumView.createRoute(album.id))
+        },
+        albumIndex = index,
+        isSmallCard = isSmallCard
+    )
+}

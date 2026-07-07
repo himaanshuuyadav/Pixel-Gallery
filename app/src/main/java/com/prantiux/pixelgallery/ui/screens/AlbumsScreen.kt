@@ -70,6 +70,9 @@ import com.prantiux.pixelgallery.data.AlbumRepository
 import com.prantiux.pixelgallery.data.SettingsDataStore
 import com.prantiux.pixelgallery.model.Album
 import com.prantiux.pixelgallery.model.CategorizedAlbums
+import com.prantiux.pixelgallery.ui.components.AlbumTabAnimation
+import com.prantiux.pixelgallery.ui.components.PremiumEmptyState
+import com.prantiux.pixelgallery.ui.components.UnifiedScrollbar
 import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.ExpressiveLoadingIndicator
 import com.prantiux.pixelgallery.ui.utils.bounceClick
@@ -141,11 +144,11 @@ fun AlbumsScreen(
         val navBarHeight = calculateFloatingNavBarHeight()
         
         if (!isLoading && allAlbums.isEmpty()) {
-            Text(
-                text = "No albums found",
-                modifier = Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+            PremiumEmptyState(
+                icon = FontIcons.GridView,
+                title = "No albums found",
+                subtitle = "Your photos will be grouped here\nwhen albums are created.",
+                modifier = Modifier.align(Alignment.Center)
             )
         } else if (isLoading && allAlbums.isEmpty()) {
             AlbumsSkeletalLoader(navBarHeight = navBarHeight)
@@ -276,6 +279,11 @@ fun AlbumsScreen(
                     )
                 }
             }
+            
+            // Top Status Bar Gradient
+            com.prantiux.pixelgallery.ui.components.TopStatusBarGradient(
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
             
             // Album Actions Bottom Sheet
             albumActionsSheet?.let { album ->
@@ -868,54 +876,22 @@ fun AlbumPreviewCard(
                                     .weight(1f)
                                     .aspectRatio(1f)
                             ) {
-                                val mediaData = remember(mediaItem.uri, mediaItem.isVideo) {
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                        com.prantiux.pixelgallery.image.MediaThumbnailRequest(mediaItem.uri, mediaItem.isVideo)
-                                    } else {
-                                        mediaItem.uri
-                                    }
-                                }
-                                val imageRequest = remember(mediaData, targetSize) {
-                                    coil.request.ImageRequest.Builder(context)
-                                        .data(mediaData)
-                                        .size(targetSize)
-                                        .crossfade(true)
-                                        .build()
-                                }
-                                
-                                AsyncImage(
-                                    model = imageRequest,
-                                    contentDescription = mediaItem.displayName,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .clickable {
-                                            viewModel.showMediaOverlay(
-                                                mediaType = "album",
-                                                albumId = album.id,
-                                                selectedIndex = index
-                                            )
-                                        },
-                                    contentScale = ContentScale.Crop
+                                com.prantiux.pixelgallery.ui.components.MediaThumbnail(
+                                    item = mediaItem,
+                                    isSelected = false,
+                                    isSelectionMode = false,
+                                    shape = com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index),
+                                    onClick = {
+                                        viewModel.showMediaOverlay(
+                                            mediaType = "album",
+                                            albumId = album.id,
+                                            selectedIndex = index
+                                        )
+                                    },
+                                    badgeType = "Duration with icon",
+                                    badgeEnabled = true,
+                                    modifier = Modifier.fillMaxSize()
                                 )
-                                
-                                // Video indicator
-                                if (mediaItem.isVideo) {
-                                    FontIcon(
-                                        unicode = FontIcons.PlayArrow,
-                                        contentDescription = "Video",
-                                        size = 32.sp,
-                                        tint = Color.White,
-                                        modifier = Modifier
-                                            .align(Alignment.Center)
-                                            .background(
-                                                color = Color.Black.copy(alpha = 0.6f),
-                                                shape = CircleShape
-                                            )
-                                            .padding(8.dp)
-                                    )
-                                }
                             }
                         }
                         // Fill empty slots if less than 3 items
@@ -947,43 +923,27 @@ fun AlbumPreviewCard(
                                     .weight(1f)
                                     .aspectRatio(1f)
                             ) {
-                                val mediaData = remember(mediaItem.uri, mediaItem.isVideo) {
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                        com.prantiux.pixelgallery.image.MediaThumbnailRequest(mediaItem.uri, mediaItem.isVideo)
-                                    } else {
-                                        mediaItem.uri
-                                    }
-                                }
-                                val imageRequest = remember(mediaData, targetSize) {
-                                    coil.request.ImageRequest.Builder(context)
-                                        .data(mediaData)
-                                        .size(targetSize)
-                                        .crossfade(true)
-                                        .build()
-                                }
-
-                                AsyncImage(
-                                    model = imageRequest,
-                                    contentDescription = mediaItem.displayName,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .clickable {
-                                            // If 6th image and more items exist, open album view
-                                            if (isSixthImage && remainingCount > 0) {
-                                                onViewAllClick()
-                                            } else {
-                                                viewModel.showMediaOverlay(
-                                                    mediaType = "album",
-                                                    albumId = album.id,
-                                                    selectedIndex = index
-                                                )
-                                            }
-                                        },
-                                    contentScale = ContentScale.Crop
+                                com.prantiux.pixelgallery.ui.components.MediaThumbnail(
+                                    item = mediaItem,
+                                    isSelected = false,
+                                    isSelectionMode = false,
+                                    shape = com.prantiux.pixelgallery.ui.utils.getAlbumPreviewCornerShape(index),
+                                    onClick = {
+                                        if (isSixthImage && remainingCount > 0) {
+                                            onViewAllClick()
+                                        } else {
+                                            viewModel.showMediaOverlay(
+                                                mediaType = "album",
+                                                albumId = album.id,
+                                                selectedIndex = index
+                                            )
+                                        }
+                                    },
+                                    badgeType = if (isSixthImage && remainingCount > 0) "None" else "Duration with icon",
+                                    badgeEnabled = true,
+                                    modifier = Modifier.fillMaxSize()
                                 )
-                                
+
                                 // Dark overlay with "+X more" text on 6th image
                                 if (isSixthImage && remainingCount > 0) {
                                     Box(
@@ -1004,22 +964,7 @@ fun AlbumPreviewCard(
                                     }
                                 }
                                 
-                                // Video indicator (only show if not 6th image with overlay)
-                                if (mediaItem.isVideo && !(isSixthImage && remainingCount > 0)) {
-                                    FontIcon(
-                                        unicode = FontIcons.PlayArrow,
-                                        contentDescription = "Video",
-                                        size = 32.sp,
-                                        tint = Color.White,
-                                        modifier = Modifier
-                                            .align(Alignment.Center)
-                                            .background(
-                                                color = Color.Black.copy(alpha = 0.6f),
-                                                shape = CircleShape
-                                            )
-                                            .padding(8.dp)
-                                    )
-                                }
+
                             }
                         }
                         // Fill empty slots if less than 6 items total

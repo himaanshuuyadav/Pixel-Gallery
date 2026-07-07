@@ -95,7 +95,7 @@ fun CopyToAlbumDialog(
         albums.filter { !systemAlbums.contains(it) }
     }
     
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -107,13 +107,13 @@ fun CopyToAlbumDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Copy to album",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
                     IconButton(onClick = onDismiss) {
@@ -124,8 +124,6 @@ fun CopyToAlbumDialog(
                         )
                     }
                 }
-                
-                HorizontalDivider()
                 
                 if (isLoading) {
                     Box(

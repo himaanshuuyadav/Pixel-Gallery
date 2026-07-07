@@ -39,6 +39,7 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -67,44 +68,84 @@ fun SmartAlbumViewScreen(
     val pagedAlbumMedia = pagedAlbumMediaFlow.collectAsLazyPagingItems()
     
     // Get smart album name
-    val albumType = SmartAlbumGenerator.SmartAlbumType.fromId(albumId)
+    val albumType = SmartAlbumGenerator.fromId(albumId)
     val albumName = albumType?.displayName ?: "Smart Album"
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        SubPageScaffoldGrid(
-            title = albumName,
-            subtitle = if (pagedAlbumMedia.itemCount == 0) null else "${pagedAlbumMedia.itemCount} items",
-            onNavigateBack = onNavigateBack,
-            columns = 3,
-            contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 44.dp, bottom = 16.dp),
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    
+    var headerImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    LaunchedEffect(pagedAlbumMedia.itemSnapshotList) {
+        if (headerImageUri == null && pagedAlbumMedia.itemCount > 0) {
+            for (i in 0 until pagedAlbumMedia.itemCount) {
+                val item = pagedAlbumMedia.peek(i)
+                if (item is com.prantiux.pixelgallery.model.MediaGridItem.Media) {
+                    headerImageUri = item.mediaItem.uri
+                    break
+                }
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            state = gridState,
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+            contentPadding = PaddingValues(bottom = 16.dp), // Minimal spacing around grid edges, 0 top to touch edges
             horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
-            if (pagedAlbumMedia.itemCount == 0 && pagedAlbumMedia.loadState.refresh !is androidx.paging.LoadState.Loading) {
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(400.dp) // Increased header area
+                        .padding(bottom = 6.dp)
+                ) {
+                    if (headerImageUri != null) {
+                        coil.compose.AsyncImage(
+                            model = headerImageUri,
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
+                    }
+                    
+                    // Gradient overlay
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 64.dp, horizontal = 32.dp),
-                        contentAlignment = Alignment.Center
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Black.copy(alpha = 0.3f), Color.Transparent, Color.Black.copy(alpha = 0.8f)),
+                                    startY = 0f,
+                                    endY = Float.POSITIVE_INFINITY
+                                )
+                            )
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            FontIcon(
-                                unicode = FontIcons.Image,
-                                contentDescription = "No items",
-                                size = 64.sp,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "No items in this album",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = albumName,
+                            style = MaterialTheme.typography.displayMedium,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(16.dp)
+                        )
                     }
+                }
+            }
+            
+            if (pagedAlbumMedia.itemCount == 0 && pagedAlbumMedia.loadState.refresh !is androidx.paging.LoadState.Loading) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    com.prantiux.pixelgallery.ui.components.PremiumEmptyState(
+                        icon = FontIcons.Image,
+                        title = "No items in this album",
+                        subtitle = "Photos or videos you add to this album will appear here.",
+                        modifier = Modifier.padding(vertical = 64.dp)
+                    )
                 }
             } else {
                 items(
@@ -173,6 +214,22 @@ fun SmartAlbumViewScreen(
                     }
                 }
             }
+        }
+        
+        // Sticky floating Back Button
+        // Top Status Bar Gradient
+        com.prantiux.pixelgallery.ui.components.TopStatusBarGradient(
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+        
+        IconButton(
+            onClick = onNavigateBack,
+            modifier = Modifier
+                .padding(start = 16.dp, top = 48.dp) // Account for status bar
+                .background(MaterialTheme.colorScheme.surface, CircleShape)
+                .align(Alignment.TopStart)
+        ) {
+            FontIcon(unicode = FontIcons.ArrowBack, tint = MaterialTheme.colorScheme.onSurface, contentDescription = "Back")
         }
         
         // More menu state (needs to be inside the Box scope where it's used, or re-declared)

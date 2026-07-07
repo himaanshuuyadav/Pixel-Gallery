@@ -6,9 +6,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,13 +19,18 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
@@ -43,16 +46,20 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.prantiux.pixelgallery.R
 import com.prantiux.pixelgallery.BuildConfig
-import com.prantiux.pixelgallery.model.MediaItem
+import com.prantiux.pixelgallery.ui.icons.FontIcons
 import com.prantiux.pixelgallery.viewmodel.MediaViewModel
-import com.prantiux.pixelgallery.viewmodel.SortMode
-import com.prantiux.pixelgallery.ui.components.ConsistentHeader
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import com.prantiux.pixelgallery.ui.components.MediaThumbnail
+import com.prantiux.pixelgallery.viewmodel.SortMode
+import com.prantiux.pixelgallery.ui.components.SelectionTopBar
+import com.prantiux.pixelgallery.ui.components.UnifiedScrollbar
+import com.prantiux.pixelgallery.ui.components.PremiumEmptyState
+import com.prantiux.pixelgallery.ui.components.ConsistentHeader
 import com.prantiux.pixelgallery.ui.components.PermissionRequestScreen
 import com.prantiux.pixelgallery.ui.components.SelectableMediaItem
 import com.prantiux.pixelgallery.ui.utils.calculateFloatingNavBarHeight
 import com.prantiux.pixelgallery.ui.icons.FontIcon
-import com.prantiux.pixelgallery.ui.icons.FontIcons
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -130,8 +137,10 @@ fun PhotosContent(
     val badgeType by settingsDataStore.badgeTypeFlow.collectAsState(initial = "Duration with icon")
     val badgeEnabled by settingsDataStore.showBadgeFlow.collectAsState(initial = true)
     val thumbnailQuality by settingsDataStore.thumbnailQualityFlow.collectAsState(initial = "Standard")
+    val fullySelectedDateGroups by viewModel.fullySelectedDateGroups.collectAsState()
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val coroutineScope = rememberCoroutineScope()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val density = LocalDensity.current
     var contentTopPx by remember { mutableStateOf<Float?>(null) }
     var firstHeaderTopPx by remember { mutableStateOf<Float?>(null) }
@@ -160,23 +169,38 @@ fun PhotosContent(
     // Handle grid type change based on pinch gesture
     LaunchedEffect(gestureInProgress, cumulativeScale, totalPanDistance) {
         if (gestureInProgress && pinchGestureEnabled) {
-            // Only trigger if pan distance is minimal (< 100px) - meaning it's a pinch, not a scroll
             val isPinchGesture = totalPanDistance < 100f
             
             if (isPinchGesture) {
-                // Zoom out (scale < 0.8) on Day view -> Switch to Month view
-                if (cumulativeScale < 0.8f && gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY) {
-                    viewModel.setGridType(com.prantiux.pixelgallery.viewmodel.GridType.MONTH)
-                    cumulativeScale = 1f
-                    gestureInProgress = false
-                    totalPanDistance = 0f
+                // Zoom out (pinch in) -> go to a smaller/more-column grid
+                if (cumulativeScale < 0.8f) {
+                    val next = when (gridType) {
+                        com.prantiux.pixelgallery.viewmodel.GridType.DAY_3 -> com.prantiux.pixelgallery.viewmodel.GridType.DAY_4
+                        com.prantiux.pixelgallery.viewmodel.GridType.DAY_4 -> com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6
+                        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6 -> com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9
+                        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9 -> null
+                    }
+                    if (next != null) {
+                        viewModel.setGridType(next)
+                        cumulativeScale = 1f
+                        gestureInProgress = false
+                        totalPanDistance = 0f
+                    }
                 }
-                // Zoom in (scale > 1.2) on Month view -> Switch to Day view
-                else if (cumulativeScale > 1.2f && gridType == com.prantiux.pixelgallery.viewmodel.GridType.MONTH) {
-                    viewModel.setGridType(com.prantiux.pixelgallery.viewmodel.GridType.DAY)
-                    cumulativeScale = 1f
-                    gestureInProgress = false
-                    totalPanDistance = 0f
+                // Zoom in (spread) -> go to a larger/fewer-column grid
+                else if (cumulativeScale > 1.2f) {
+                    val prev = when (gridType) {
+                        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9 -> com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6
+                        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6 -> com.prantiux.pixelgallery.viewmodel.GridType.DAY_4
+                        com.prantiux.pixelgallery.viewmodel.GridType.DAY_4 -> com.prantiux.pixelgallery.viewmodel.GridType.DAY_3
+                        com.prantiux.pixelgallery.viewmodel.GridType.DAY_3 -> null
+                    }
+                    if (prev != null) {
+                        viewModel.setGridType(prev)
+                        cumulativeScale = 1f
+                        gestureInProgress = false
+                        totalPanDistance = 0f
+                    }
                 }
             }
         }
@@ -225,46 +249,97 @@ fun PhotosContent(
 
     // Determine column count based on grid type
     val columnCount = when (gridType) {
-        com.prantiux.pixelgallery.viewmodel.GridType.DAY -> 3
-        com.prantiux.pixelgallery.viewmodel.GridType.MONTH -> 5
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_3 -> 3
+        com.prantiux.pixelgallery.viewmodel.GridType.DAY_4 -> 4
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_6 -> 6
+        com.prantiux.pixelgallery.viewmodel.GridType.MONTH_9 -> 9
     }
     
     // Remember scroll state to preserve position
     val gridState = rememberLazyGridState()
-
     
-    // Calculate scroll progress for expandable app bar
-    val scrollProgress = remember {
+    // Track last selected item during drag-to-select
+    var lastSelectedKey by remember { mutableStateOf<Any?>(null) }
+    
+    // Calculate Sticky Header State
+    val topInsetPx = with(density) { WindowInsets.statusBars.getTop(density).toFloat() }.toInt()
+    // Make the header stick 32dp higher so it is closer to the status bar (matching top padding)
+    val stickyThresholdPx = topInsetPx - with(density) { 32.dp.toPx() }.toInt()
+    
+    val stickyHeaderInfo by remember(gridState, pagedMedia.itemCount, topInsetPx, stickyThresholdPx, columnCount) {
         derivedStateOf {
-            com.prantiux.pixelgallery.ui.components.calculateScrollProgress(
-                firstVisibleItemIndex = gridState.firstVisibleItemIndex,
-                firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset,
-                collapseThreshold = 150
-            )
+            val visibleItems = gridState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) return@derivedStateOf null
+            
+            // The item just below the threshold
+            val topItem = visibleItems.firstOrNull { it.offset.y + it.size.height >= stickyThresholdPx } ?: visibleItems.first()
+            if (topItem.index == 0) return@derivedStateOf null // PhotosTabHeader is visible, no sticky needed
+            
+            var activeHeader: MediaGridItem.Header? = null
+            var activeHeaderIndex = -1
+            var i = topItem.index
+            while (i > 0) {
+                val pagedIndex = i - 1
+                val item = if (pagedIndex < pagedMedia.itemCount) pagedMedia.peek(pagedIndex) else null
+                if (item is MediaGridItem.Header) {
+                    val visibleHeader = visibleItems.find { it.index == i }
+                    if (visibleHeader != null && visibleHeader.offset.y > stickyThresholdPx) {
+                        // This header hasn't reached the threshold yet. Keep scanning backwards.
+                    } else {
+                        activeHeader = item
+                        activeHeaderIndex = i
+                        break
+                    }
+                }
+                i--
+            }
+            
+            if (activeHeader != null && activeHeaderIndex != -1) {
+                // Check if this date has <= columnCount items (1 row)
+                var isSingleRow = false
+                val startCheckIndex = activeHeaderIndex + 1
+                for (j in 0..columnCount) {
+                    val checkIndex = startCheckIndex + j
+                    if (checkIndex - 1 < pagedMedia.itemCount) {
+                        val checkItem = pagedMedia.peek(checkIndex - 1)
+                        if (checkItem is MediaGridItem.Header) {
+                            isSingleRow = true
+                            break
+                        }
+                    } else {
+                        isSingleRow = true
+                        break
+                    }
+                }
+                
+                if (isSingleRow) return@derivedStateOf null
+            }
+            
+            var pushUpOffset = 0
+            if (activeHeader != null) {
+                val nextVisibleHeader = visibleItems.firstOrNull { 
+                    it.index > 0 && it.offset.y > stickyThresholdPx && 
+                    (if (it.index - 1 < pagedMedia.itemCount) pagedMedia.peek(it.index - 1) else null) is MediaGridItem.Header
+                }
+                if (nextVisibleHeader != null) {
+                    val headerHeight = nextVisibleHeader.size.height
+                    // Add roughly 75% of a grid item's height (e.g. 75dp) to the threshold.
+                    // This makes the sticky header start pushing up when it covers 25% of the last row.
+                    val extraThreshold = (75f * density.density).toInt()
+                    val threshold = stickyThresholdPx + headerHeight + extraThreshold
+                    if (nextVisibleHeader.offset.y <= threshold) {
+                        pushUpOffset = nextVisibleHeader.offset.y - threshold
+                    }
+                }
+            }
+            
+            if (activeHeader == null) null else Pair(activeHeader, pushUpOffset)
         }
     }
     
-    // Snap animation for header - same behavior as SubPageScaffold
-    val snappedScrollProgress = remember { Animatable(0f) }
-    
-    // Track scrolling state to detect when scroll stops
-    LaunchedEffect(gridState.isScrollInProgress, scrollProgress.value) {
-        if (gridState.isScrollInProgress) {
-            // While scrolling, snap immediately to follow scroll position
-            snappedScrollProgress.snapTo(scrollProgress.value)
-        } else {
-            // When scroll stops, animate to nearest state (expanded or collapsed)
-            val targetProgress = if (scrollProgress.value < 0.5f) 0f else 1f
-            snappedScrollProgress.animateTo(
-                targetValue = targetProgress,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessLow
-                )
-            )
-        }
+    val activeStickyHeaderKey by remember {
+        derivedStateOf { stickyHeaderInfo?.first?.dateGroupKey }
     }
-    
     // Calculate navbar height for proper content padding
     val navBarHeight = calculateFloatingNavBarHeight()
     
@@ -283,14 +358,7 @@ fun PhotosContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Expandable Top App Bar - sticky header
-        com.prantiux.pixelgallery.ui.components.ExpandableTopAppBar(
-            title = "Photos",
-            scrollProgress = snappedScrollProgress.value,
-            onSettingsClick = onNavigateToSettings,
-            modifier = Modifier.fillMaxWidth()
-        )
-        
+
         // Content area with grid
         Box(
             modifier = Modifier
@@ -311,10 +379,11 @@ fun PhotosContent(
                 )
             } else if (pagedMedia.itemCount == 0) {
                 // Only show "no media" after loading is complete (when not loading)
-                Text(
-                    "No media found",
-                    modifier = Modifier.align(Alignment.Center),
-                    style = MaterialTheme.typography.bodyLarge
+                PremiumEmptyState(
+                    icon = FontIcons.Image,
+                    title = "No media found",
+                    subtitle = "Your photos and videos\nwill appear here.",
+                    modifier = Modifier.align(Alignment.Center)
                 )
             } else {
                 LazyVerticalGrid(
@@ -326,7 +395,107 @@ fun PhotosContent(
                             .transformable(
                                 state = transformableState,
                                 enabled = pinchGestureEnabled && !isSelectionMode
-                            ),
+                            )
+                            .let {
+                                val currentIsSelectionMode by rememberUpdatedState(isSelectionMode)
+                                val currentSelectedItems by rememberUpdatedState(selectedItems)
+                                val autoScrollSpeed = remember { mutableFloatStateOf(0f) }
+                                LaunchedEffect(Unit) {
+                                    while (isActive) {
+                                        if (autoScrollSpeed.floatValue != 0f) {
+                                            gridState.scrollBy(autoScrollSpeed.floatValue)
+                                        }
+                                        delay(10)
+                                    }
+                                }
+                                it.pointerInput(Unit) {
+                                    var initialDragIndex: Int? = null
+                                    var currentDragIndex: Int? = null
+                                    var dragSelectState = true
+                                    var initialSelectedIds = setOf<Long>()
+                                    
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { offset ->
+                                            val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { 
+                                                offset.y >= it.offset.y && offset.y <= it.offset.y + it.size.height &&
+                                                offset.x >= it.offset.x && offset.x <= it.offset.x + it.size.width
+                                            }
+                                            if (item != null) {
+                                                val key = item.key
+                                                if (key is Long) {
+                                                    initialSelectedIds = currentSelectedItems.toSet()
+                                                    if (!currentIsSelectionMode) {
+                                                        viewModel.enterSelectionMode(key)
+                                                        dragSelectState = true
+                                                        initialSelectedIds = setOf(key)
+                                                    } else {
+                                                        val isSelected = initialSelectedIds.contains(key)
+                                                        dragSelectState = !isSelected
+                                                        val newSelection = initialSelectedIds.toMutableSet()
+                                                        if (dragSelectState) newSelection.add(key) else newSelection.remove(key)
+                                                        viewModel.setSelectedItems(newSelection)
+                                                    }
+                                                    initialDragIndex = item.index
+                                                    currentDragIndex = item.index
+                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                }
+                                            }
+                                        },
+                                        onDrag = { change, _ ->
+                                            val raw = change.position
+                                            if (initialDragIndex != null) {
+                                                val distB = gridState.layoutInfo.viewportSize.height - raw.y
+                                                val distT = raw.y
+                                                autoScrollSpeed.floatValue = when {
+                                                    distB < 150f -> 150f - distB
+                                                    distT < 150f -> -(150f - distT)
+                                                    else -> 0f
+                                                }
+
+                                                val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { 
+                                                    raw.y >= it.offset.y && raw.y <= it.offset.y + it.size.height &&
+                                                    raw.x >= it.offset.x && raw.x <= it.offset.x + it.size.width
+                                                }
+                                                if (item != null) {
+                                                    val newIdx = item.index
+                                                    if (newIdx != currentDragIndex) {
+                                                        val start = initialDragIndex!!
+                                                        val activeRange = if (newIdx >= start) start..newIdx else newIdx..start
+                                                        
+                                                        val activeIds = activeRange.mapNotNull { i -> 
+                                                            if (i >= 0 && i < pagedMedia.itemCount) {
+                                                                val itItem = pagedMedia.peek(i)
+                                                                if (itItem is com.prantiux.pixelgallery.model.MediaGridItem.Media) itItem.mediaItem.id else null
+                                                            } else null
+                                                        }.toSet()
+                                                        
+                                                        val newSelection = initialSelectedIds.toMutableSet()
+                                                        if (dragSelectState) {
+                                                            newSelection.addAll(activeIds)
+                                                        } else {
+                                                            newSelection.removeAll(activeIds)
+                                                        }
+                                                        
+                                                        viewModel.setSelectedItems(newSelection)
+                                                        currentDragIndex = newIdx
+                                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            initialDragIndex = null
+                                            currentDragIndex = null
+                                            autoScrollSpeed.floatValue = 0f
+                                        },
+                                        onDragCancel = {
+                                            initialDragIndex = null
+                                            currentDragIndex = null
+                                            autoScrollSpeed.floatValue = 0f
+                                        }
+                                    )
+                                }
+                            },
                         contentPadding = PaddingValues(
                             bottom = navBarHeight + 2.dp,
                             start = 2.dp,
@@ -337,6 +506,14 @@ fun PhotosContent(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            com.prantiux.pixelgallery.ui.components.PhotosTabHeader(
+                                title = "Photos",
+                                onSettingsClick = onNavigateToSettings,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
                         items(
                             count = pagedMedia.itemCount,
                             key = pagedMedia.itemKey { item ->
@@ -359,11 +536,13 @@ fun PhotosContent(
                             if (item != null) {
                                 when (item) {
                                     is MediaGridItem.Header -> {
-                                        val isDay = gridType == com.prantiux.pixelgallery.viewmodel.GridType.DAY
+                                        val isDay = gridType.isDay
+                                        val isCurrentlySticky = stickyHeaderInfo?.first?.dateGroupKey == item.dateGroupKey
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(start = 8.dp, top = 28.dp, bottom = 8.dp, end = 8.dp)
+                                                .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
+                                                .alpha(if (isCurrentlySticky) 0f else 1f)
                                                 .then(
                                                     if (index == 0) {
                                                         Modifier.onGloballyPositioned { coords ->
@@ -392,24 +571,15 @@ fun PhotosContent(
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 if (isSelectionMode) {
-                                                    // Show checkbox in selection mode
-                                                    Box(
+                                                    val isFullySelected = fullySelectedDateGroups.contains(item.dateGroupKey)
+                                                    com.prantiux.pixelgallery.ui.components.SelectionCheckmark(
+                                                        isSelected = isFullySelected,
                                                         modifier = Modifier
-                                                            .size(24.dp)
-                                                            .clip(CircleShape)
-                                                            .border(
-                                                                width = 2.dp,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                shape = CircleShape
-                                                            )
-                                                            .background(Color.Transparent, CircleShape)
                                                             .clickable {
+                                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                                                 viewModel.selectAllInDateGroup(item.dateGroupKey, isDay)
-                                                            },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        // Render empty checkbox that can be clicked to select all
-                                                    }
+                                                            }
+                                                    )
                                                 }
                                             }
                                         }
@@ -417,13 +587,31 @@ fun PhotosContent(
                                     is MediaGridItem.Media -> {
                                         val mediaItem = item.mediaItem
                                         val isSelected = selectedItems.contains(mediaItem.id)
-                                        val gridShape = com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
-                                            index = index, // Approximate corner shape for now
-                                            totalItems = pagedMedia.itemCount,
-                                            columns = columnCount,
-                                            cornerType = cornerType
+                                        val localPos = com.prantiux.pixelgallery.ui.utils.getLocalPositionInDateGroup(
+                                            globalIndex = index,
+                                            dateGroups = dateGroupsForScrollbar,
+                                            contentOffsetIndex = 0
                                         )
-                            
+                                        val (accentR, defaultR) = com.prantiux.pixelgallery.ui.utils.cornerRadiiForGridType(gridType)
+                                        val gridShape = if (localPos != null) {
+                                            com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                                index = localPos.first,
+                                                totalItems = localPos.second,
+                                                columns = columnCount,
+                                                accentRadius = accentR,
+                                                defaultRadius = defaultR,
+                                                cornerType = cornerType
+                                            )
+                                        } else {
+                                            com.prantiux.pixelgallery.ui.utils.getGridItemCornerShape(
+                                                index = 0,
+                                                totalItems = 1,
+                                                columns = columnCount,
+                                                accentRadius = accentR,
+                                                defaultRadius = defaultR,
+                                                cornerType = cornerType
+                                            )
+                                        }
                                         MediaThumbnail(
                                             item = mediaItem,
                                             isSelected = isSelected,
@@ -434,6 +622,7 @@ fun PhotosContent(
                                             thumbnailQuality = thumbnailQuality,
                                             onClick = {
                                                 if (isSelectionMode) {
+                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                                                     viewModel.toggleSelection(mediaItem.id)
                                                 } else {
                                                     viewModel.showMediaOverlayWithItem(
@@ -443,13 +632,8 @@ fun PhotosContent(
                                                     )
                                                 }
                                             },
-                                            onLongClick = {
-                                                if (!isSelectionMode) {
-                                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                                                    viewModel.enterSelectionMode(mediaItem.id)
-                                                }
-                                            },
-                                            showFavorite = true
+                                            onLongClick = null,
+                                            modifier = Modifier.fillMaxSize()
                                         )
                                     }
                                 }
@@ -458,10 +642,62 @@ fun PhotosContent(
                 }
             }
             
+            // Top Status Bar Gradient (drawn under the sticky header)
+            com.prantiux.pixelgallery.ui.components.TopStatusBarGradient(
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+            
+            // Sticky Header Overlay
+            val currentStickyHeaderInfo = stickyHeaderInfo
+            if (currentStickyHeaderInfo != null) {
+                val (header, pushUpOffset) = currentStickyHeaderInfo
+                val totalOffsetY = stickyThresholdPx + pushUpOffset
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { androidx.compose.ui.unit.IntOffset(0, totalOffsetY) }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 10.dp, top = 32.dp, bottom = 8.dp, end = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = header.displayDate,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        
+                        Box(
+                            modifier = Modifier.size(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelectionMode) {
+                                val isFullySelected = fullySelectedDateGroups.contains(header.dateGroupKey)
+                                com.prantiux.pixelgallery.ui.components.SelectionCheckmark(
+                                    isSelected = isFullySelected,
+                                    modifier = Modifier
+                                        .clickable {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                            val isDay = gridType.isDay
+                                            viewModel.selectAllInDateGroup(header.dateGroupKey, isDay)
+                                        }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            
             // Unified Scrollbar Component - overlaid on grid
             com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
                 modifier = Modifier.align(Alignment.TopEnd),
                 gridState = gridState,
+                targetScrollOffset = -stickyThresholdPx,
+                contentOffsetIndex = 1,
                 mode = com.prantiux.pixelgallery.ui.components.ScrollbarMode.DATE_JUMPING,
                 topPadding = if (contentTopPx != null && firstHeaderTopPx != null) {
                     with(density) { (firstHeaderTopPx!! - contentTopPx!!).coerceAtLeast(0f).toDp() }
