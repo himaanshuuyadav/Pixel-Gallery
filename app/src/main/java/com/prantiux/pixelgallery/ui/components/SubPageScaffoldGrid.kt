@@ -69,8 +69,10 @@ fun SubPageScaffoldGrid(
                     Column {
                         Text(
                             text = title,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
+                            ),
+                            fontWeight = FontWeight.ExtraBold
                         )
                         if (subtitle != null) {
                             Text(

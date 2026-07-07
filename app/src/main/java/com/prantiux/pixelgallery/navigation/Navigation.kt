@@ -846,14 +846,14 @@ fun AppNavigation(
                         .zIndex(2f)
                 ) {
                     NavHost(
-                        navController = navController,
-                        startDestination = startDestination,
-                        modifier = Modifier.fillMaxSize(),
-                        enterTransition = HierarchicalNavMotion.enterTransition,
-                        exitTransition = HierarchicalNavMotion.exitTransition,
-                        popEnterTransition = HierarchicalNavMotion.popEnterTransition,
-                        popExitTransition = HierarchicalNavMotion.popExitTransition
-                    ) {
+                                navController = navController,
+                                startDestination = startDestination,
+                                modifier = Modifier.fillMaxSize(),
+                                enterTransition = HierarchicalNavMotion.enterTransition,
+                                exitTransition = HierarchicalNavMotion.exitTransition,
+                                popEnterTransition = HierarchicalNavMotion.popEnterTransition,
+                                popExitTransition = HierarchicalNavMotion.popExitTransition
+                            ) {
                         composable(
                             route = Screen.Photos.route
                         ) {
@@ -878,8 +878,29 @@ fun AppNavigation(
                         composable(
                             route = Screen.Search.route
                         ) {
+                            val searchQuery by viewModel.searchQuery.collectAsState()
+                            val isSearchBarActive by viewModel.isSearchBarActive.collectAsState()
+                            
+                            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+                            val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                            
+                            val searchBackHandled = isSearchBarActive || searchQuery.isNotEmpty()
+                            
+                            androidx.activity.compose.BackHandler(enabled = searchBackHandled) {
+                                if (searchQuery.isNotEmpty()) {
+                                    viewModel.clearSearchQuery()
+                                    viewModel.setSearchBarActive(false)
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                } else if (isSearchBarActive) {
+                                    viewModel.setSearchBarActive(false)
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                }
+                            }
+
                             TabPredictiveBackHandler(
-                                enabled = activeTabIndex != defaultTabIndex,
+                                enabled = activeTabIndex != defaultTabIndex && !searchBackHandled,
                                 activeTabIndex = activeTabIndex,
                                 defaultTabIndex = defaultTabIndex,
                                 screenWidthPx = screenWidthPx,
@@ -1052,10 +1073,10 @@ fun AppNavigation(
 
             AnimatedVisibility(
                 visible = isOverlayVisible && overlayState.mediaType != "trash",
-                enter = fadeIn(animationSpec = tween(400, easing = LinearOutSlowInEasing)) +
-                        scaleIn(initialScale = 0.85f, animationSpec = tween(400, easing = FastOutSlowInEasing)),
-                exit = fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing)) +
-                       scaleOut(targetScale = 0.85f, animationSpec = tween(250, easing = FastOutLinearInEasing)),
+                enter = fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing)) +
+                        scaleIn(initialScale = 0.85f, animationSpec = tween(200, easing = FastOutSlowInEasing)),
+                exit = fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing)) +
+                       scaleOut(targetScale = 0.85f, animationSpec = tween(150, easing = FastOutLinearInEasing)),
                 modifier = Modifier.fillMaxSize().zIndex(100f)
             ) {
                 com.prantiux.pixelgallery.ui.overlay.MediaOverlay(
@@ -1176,6 +1197,17 @@ fun AppNavigation(
                                 )
                             )
                     )
+
+                    // Gradient background behind status bar for screens that don't draw their own
+                    if (currentRoute != Screen.Photos.route && currentRoute != Screen.Albums.route && currentRoute?.startsWith("album/") != true && currentRoute?.startsWith("smartalbum/") != true) {
+                        com.prantiux.pixelgallery.ui.components.TopStatusBarGradient(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .graphicsLayer {
+                                    alpha = navBarAnimProgress // Fade with navbar
+                                }
+                        )
+                    }
                 }
 
                 // Use regular navbar layout but with different icons in selection mode

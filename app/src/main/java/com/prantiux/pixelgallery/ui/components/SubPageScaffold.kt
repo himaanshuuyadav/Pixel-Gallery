@@ -98,7 +98,7 @@ fun SubPageScaffold(
                     Column {
                         Text(
                             text = title,
-                            style = MaterialTheme.typography.headlineSmall.copy(
+                            style = MaterialTheme.typography.headlineMedium.copy(
                                 fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
                             ),
                             fontWeight = FontWeight.ExtraBold

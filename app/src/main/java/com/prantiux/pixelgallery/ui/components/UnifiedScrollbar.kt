@@ -104,6 +104,8 @@ fun UnifiedScrollbar(
     dateGroups: List<DateGroupInfo> = emptyList(),
     dayLeftGroups: List<DayLeftGroupInfo> = emptyList(),
     totalItems: Int = 0,
+    targetScrollOffset: Int = 0,
+    contentOffsetIndex: Int = 0,
     coroutineScope: CoroutineScope,
     isDarkTheme: Boolean = false,
     onScrollbarVisibilityChanged: (Boolean) -> Unit = {},
@@ -236,6 +238,7 @@ fun UnifiedScrollbar(
                                     handleDateJumping(
                                         newPercentage = newPercentage,
                                         dateGroups = dateGroups,
+                                        contentOffsetIndex = contentOffsetIndex,
                                         lastSnappedKey = lastSnappedKey,
                                         onKeyChanged = { lastSnappedKey = it },
                                         onHaptic = { 
@@ -246,7 +249,7 @@ fun UnifiedScrollbar(
                                         },
                                         onScroll = { index ->
                                             coroutineScope.launch {
-                                                gridState.scrollToItem(index)
+                                                gridState.scrollToItem(index, targetScrollOffset)
                                             }
                                         },
                                         onOverlayTextChanged = onOverlayTextChanged
@@ -256,6 +259,7 @@ fun UnifiedScrollbar(
                                     handleDayLeftJumping(
                                         newPercentage = newPercentage,
                                         dayLeftGroups = dayLeftGroups,
+                                        contentOffsetIndex = contentOffsetIndex,
                                         lastSnappedKey = lastSnappedKey,
                                         onKeyChanged = { lastSnappedKey = it },
                                         onHaptic = {
@@ -266,7 +270,7 @@ fun UnifiedScrollbar(
                                         },
                                         onScroll = { index ->
                                             coroutineScope.launch {
-                                                gridState.scrollToItem(index)
+                                                gridState.scrollToItem(index, targetScrollOffset)
                                             }
                                         },
                                         onOverlayTextChanged = onOverlayTextChanged
@@ -276,6 +280,8 @@ fun UnifiedScrollbar(
                                     handleSmoothScrolling(
                                         newPercentage = newPercentage,
                                         totalItems = totalItems,
+                                        targetScrollOffset = targetScrollOffset,
+                                        contentOffsetIndex = contentOffsetIndex,
                                         coroutineScope = coroutineScope,
                                         gridState = gridState
                                     )
@@ -351,7 +357,8 @@ fun UnifiedScrollbar(
 private fun handleDateJumping(
     newPercentage: Float,
     dateGroups: List<DateGroupInfo>,
-    lastSnappedKey: String,
+    contentOffsetIndex: Int,
+    lastSnappedKey: String?,
     onKeyChanged: (String) -> Unit,
     onHaptic: () -> Unit,
     onScroll: (Int) -> Unit,
@@ -359,25 +366,20 @@ private fun handleDateJumping(
 ) {
     if (dateGroups.isEmpty()) return
     
-    val targetGroupIndex = if (newPercentage >= 0.99f) {
-        dateGroups.lastIndex
-    } else {
-        (newPercentage * dateGroups.size).toInt().coerceIn(0, dateGroups.lastIndex)
-    }
-    
-    val targetDate = dateGroups[targetGroupIndex].date
-    
-    if (targetDate != lastSnappedKey) {
+    val targetGroupIndex = (newPercentage * (dateGroups.size - 1)).toInt()
+        .coerceIn(0, dateGroups.size - 1)
+        
+    val targetGroup = dateGroups[targetGroupIndex]
+    val targetDate = targetGroup.date
+    if (lastSnappedKey != targetDate) {
         onKeyChanged(targetDate)
         onHaptic()
+        onOverlayTextChanged(targetGroup.displayDate ?: targetDate)
         
-        // Calculate header index
-        var headerIndex = 0
+        var headerIndex = contentOffsetIndex
         for (i in 0 until targetGroupIndex) {
             headerIndex += dateGroups[i].itemCount + 1
         }
-        
-        // No overlay text needed
         
         onScroll(headerIndex)
     }
@@ -389,7 +391,8 @@ private fun handleDateJumping(
 private fun handleDayLeftJumping(
     newPercentage: Float,
     dayLeftGroups: List<DayLeftGroupInfo>,
-    lastSnappedKey: String,
+    contentOffsetIndex: Int,
+    lastSnappedKey: String?,
     onKeyChanged: (String) -> Unit,
     onHaptic: () -> Unit,
     onScroll: (Int) -> Unit,
@@ -397,25 +400,21 @@ private fun handleDayLeftJumping(
 ) {
     if (dayLeftGroups.isEmpty()) return
     
-    val targetGroupIndex = if (newPercentage >= 0.99f) {
-        dayLeftGroups.lastIndex
-    } else {
-        (newPercentage * dayLeftGroups.size).toInt().coerceIn(0, dayLeftGroups.lastIndex)
-    }
-    
-    val targetKey = dayLeftGroups[targetGroupIndex].daysLeft.toString()
+    val targetGroupIndex = (newPercentage * (dayLeftGroups.size - 1)).toInt()
+        .coerceIn(0, dayLeftGroups.size - 1)
+        
+    val targetGroup = dayLeftGroups[targetGroupIndex]
+    val targetKey = targetGroup.daysLeft.toString()
     
     if (targetKey != lastSnappedKey) {
         onKeyChanged(targetKey)
         onHaptic()
+        onOverlayTextChanged(targetGroup.displayText)
         
-        // Calculate header index
-        var headerIndex = 0
+        var headerIndex = contentOffsetIndex
         for (i in 0 until targetGroupIndex) {
             headerIndex += dayLeftGroups[i].itemCount + 1
         }
-        
-        // No overlay text needed
         
         onScroll(headerIndex)
     }
@@ -427,15 +426,19 @@ private fun handleDayLeftJumping(
 private fun handleSmoothScrolling(
     newPercentage: Float,
     totalItems: Int,
+    targetScrollOffset: Int,
+    contentOffsetIndex: Int,
     coroutineScope: CoroutineScope,
     gridState: LazyGridState
 ) {
     if (totalItems <= 0) return
     
-    val targetIndex = (newPercentage * totalItems).toInt().coerceIn(0, totalItems - 1)
-    
+    // Convert percentage directly to an item index with offset
+    val targetItemIndex = contentOffsetIndex + (newPercentage * (totalItems - 1)).toInt()
+        .coerceIn(0, totalItems - 1)
+        
     coroutineScope.launch {
-        gridState.scrollToItem(targetIndex)
+        gridState.scrollToItem(targetItemIndex, targetScrollOffset)
     }
 }
 

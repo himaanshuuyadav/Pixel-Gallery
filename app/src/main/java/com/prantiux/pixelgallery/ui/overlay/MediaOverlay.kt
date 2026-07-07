@@ -837,6 +837,7 @@ fun MediaOverlay(
     // Background scrim alpha - based on gesture state only
     val backgroundAlpha = when {
         isDismissing -> 0f
+        predictiveBackProgress > 0f -> 1f - predictiveBackProgress
         gestureMode == GestureMode.VERTICAL_DOWN ->
             1f - rawCloseProgress
         else -> animatedOpeningProgress
@@ -1472,7 +1473,7 @@ fun MediaOverlay(
             visible = barsRevealUnlocked && showControls && showBars && !isAnyVideoFullscreen &&
                 !isDetailsOpen && !isDismissing &&
                 gestureMode != GestureMode.VERTICAL_DOWN &&
-                currentVerticalOffset <= 0f,
+                currentVerticalOffset <= 0f && predictiveBackProgress == 0f,
             enter = fadeIn(
                 animationSpec = tween(
                     durationMillis = 200,
@@ -1580,7 +1581,7 @@ fun MediaOverlay(
         AnimatedVisibility(
             visible = barsRevealUnlocked && showControls && showBars && !isDetailsOpen &&
                 !isDismissing && gestureMode != GestureMode.VERTICAL_DOWN &&
-                currentVerticalOffset <= 0f,
+                currentVerticalOffset <= 0f && predictiveBackProgress == 0f,
             enter = fadeIn(
                 animationSpec = tween(
                     durationMillis = 200,
