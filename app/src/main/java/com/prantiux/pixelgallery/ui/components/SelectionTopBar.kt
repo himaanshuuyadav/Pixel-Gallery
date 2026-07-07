@@ -170,7 +170,7 @@ private fun SelectionTopBarContent(
                     Text(
                         text = successMessage ?: "$selectedCount selected",
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.ExtraBold
                         ),
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -187,7 +187,7 @@ private fun SelectionTopBarContent(
                         Text(
                             text = "Cancel",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.ExtraBold
                             )
                         )
                     }

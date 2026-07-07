@@ -9,6 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -17,9 +20,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -31,6 +36,7 @@ import coil.size.Size
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.ui.icons.FontIcon
 import com.prantiux.pixelgallery.ui.icons.FontIcons
+import com.prantiux.pixelgallery.ui.animation.bounceScale
 
 /**
  * CANONICAL MEDIA THUMBNAIL COMPONENT
@@ -56,7 +62,7 @@ fun MediaThumbnail(
     isSelectionMode: Boolean,
     shape: Shape,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
     badgeType: String = "Duration with icon",
@@ -94,11 +100,37 @@ fun MediaThumbnail(
     // Use 12dp for selected inner image, keep original shape for outer border
     val innerShape = if (isSelected) RoundedCornerShape(24.dp) else shape
     
-    Box(
+    // Staggered load animation
+    var isLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        isLoaded = true
+    }
+    
+    val entryAlpha by animateFloatAsState(
+        targetValue = if (isLoaded) 1f else 0f,
+        animationSpec = tween(durationMillis = 300, easing = LinearOutSlowInEasing),
+        label = "entryAlpha"
+    )
+    
+    val entryOffsetY by animateDpAsState(
+        targetValue = if (isLoaded) 0.dp else 16.dp,
+        animationSpec = spring(
+            dampingRatio = 0.8f,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "entryOffsetY"
+    )
+    
+    BoxWithConstraints(
         modifier = modifier
+            .graphicsLayer {
+                alpha = entryAlpha
+                translationY = entryOffsetY.toPx()
+            }
+            .bounceScale()
             .aspectRatio(1f)
             .then(
-                if (isSelected) {
+                if (borderWidth > 0.dp) {
                     Modifier
                         .background(
                             color = borderColor,
@@ -107,6 +139,7 @@ fun MediaThumbnail(
                 } else Modifier
             )
     ) {
+        val isSmall = maxWidth < 80.dp
         val context = androidx.compose.ui.platform.LocalContext.current
         val density = androidx.compose.ui.platform.LocalDensity.current.density
         
@@ -133,12 +166,26 @@ fun MediaThumbnail(
             }
         }
         
+        val viewConfiguration = androidx.compose.ui.platform.LocalViewConfiguration.current
+        var downTime by remember { mutableLongStateOf(0L) }
+        
         val clickModifier = Modifier
             .fillMaxSize()
-            .then(if (isSelected) Modifier.padding(borderWidth) else Modifier)
+            .padding(borderWidth)
+            .then(if (isSelectionMode && !isSelected) Modifier.alpha(0.6f) else Modifier)
             .clip(innerShape)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    downTime = System.currentTimeMillis()
+                }
+            }
             .combinedClickable(
-                onClick = { onClick() },
+                onClick = {
+                    if (System.currentTimeMillis() - downTime < viewConfiguration.longPressTimeoutMillis + 100L) {
+                        onClick()
+                    }
+                },
                 onLongClick = onLongClick
             )
 
@@ -170,9 +217,10 @@ fun MediaThumbnail(
             VideoDurationPill(
                 duration = item.duration,
                 badgeType = badgeType,
+                isSmall = isSmall,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(if (isSelected) borderWidth + 6.dp else 6.dp)
+                    .padding(if (isSelected) borderWidth + (if (isSmall) 3.dp else 6.dp) else (if (isSmall) 3.dp else 6.dp))
             )
         }
         
@@ -207,31 +255,38 @@ fun MediaThumbnail(
 fun VideoDurationPill(
     duration: Long,
     modifier: Modifier = Modifier,
-    badgeType: String = "Duration with icon"
+    badgeType: String = "Duration with icon",
+    isSmall: Boolean = false
 ) {
+    val paddingHorizontal = if (isSmall) 4.dp else 6.dp
+    val paddingVertical = if (isSmall) 2.dp else 3.dp
+    val iconSize = if (isSmall) 10.sp else 14.sp
+    val fontSize = if (isSmall) 9.sp else 11.sp
+    val spacing = if (isSmall) 1.dp else 3.dp
+
     Row(
         modifier = modifier
             .background(
                 color = Color.Black.copy(alpha = 0.75f),
                 shape = RoundedCornerShape(50) // Pill shape
             )
-            .padding(horizontal = 6.dp, vertical = 3.dp),
+            .padding(horizontal = paddingHorizontal, vertical = paddingVertical),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
+        horizontalArrangement = Arrangement.spacedBy(spacing)
     ) {
         when (badgeType) {
             "Duration with icon" -> {
                 FontIcon(
                     unicode = FontIcons.PlayArrow,
                     contentDescription = "Video",
-                    size = 14.sp,
+                    size = iconSize,
                     tint = Color.White
                 )
                 Text(
                     text = formatDuration(duration),
                     color = Color.White,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 11.sp,
+                        fontSize = fontSize,
                         fontWeight = FontWeight.Medium
                     )
                 )
@@ -240,7 +295,7 @@ fun VideoDurationPill(
                 FontIcon(
                     unicode = FontIcons.PlayArrow,
                     contentDescription = "Video",
-                    size = 14.sp,
+                    size = iconSize,
                     tint = Color.White
                 )
             }
@@ -249,7 +304,7 @@ fun VideoDurationPill(
                     text = formatDuration(duration),
                     color = Color.White,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 11.sp,
+                        fontSize = fontSize,
                         fontWeight = FontWeight.Medium
                     )
                 )

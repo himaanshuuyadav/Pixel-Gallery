@@ -22,6 +22,7 @@ object FontIcons {
     const val ArrowBack = "\ue5c4"
     const val Done = "\ue876"
     const val Check = "\ue5ca"
+    const val CheckCircle = "\ue86c"
     const val Clear = "\ue14c"
     const val Search = "\ue8b6"
     const val Refresh = "\ue5d5"
