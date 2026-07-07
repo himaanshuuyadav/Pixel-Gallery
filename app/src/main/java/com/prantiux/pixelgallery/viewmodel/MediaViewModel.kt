@@ -56,6 +56,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import androidx.paging.Pager
@@ -73,7 +76,17 @@ enum class SortMode {
 }
 
 enum class GridType {
-    DAY, MONTH
+    DAY_3, DAY_4, MONTH_6, MONTH_9;
+    
+    /** True when this is a day-level grouping */
+    val isDay: Boolean get() = this == DAY_3 || this == DAY_4
+}
+
+sealed interface SearchState {
+    data object Idle : SearchState
+    data object Loading : SearchState
+    data class Success(val results: SearchEngine.SearchResult) : SearchState
+    data object Empty : SearchState
 }
 
 /**
@@ -127,14 +140,14 @@ class MediaViewModel : ViewModel() {
     private val _mediaPermissionsGranted = MutableStateFlow(false)
     val mediaPermissionsGranted: StateFlow<Boolean> = _mediaPermissionsGranted.asStateFlow()
 
-    private val _isSearching = MutableStateFlow(false)
-    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
-
     private val _sortMode = MutableStateFlow(SortMode.DATE_DESC)
     val sortMode: StateFlow<SortMode> = _sortMode.asStateFlow()
 
     private val _selectedItems = MutableStateFlow<Set<Long>>(emptySet())
     val selectedItems: StateFlow<Set<Long>> = _selectedItems.asStateFlow()
+    
+    private val _fullySelectedDateGroups = MutableStateFlow<Set<String>>(emptySet())
+    val fullySelectedDateGroups: StateFlow<Set<String>> = _fullySelectedDateGroups.asStateFlow()
 
     private val _isSelectionMode = MutableStateFlow(false)
     val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
@@ -174,7 +187,7 @@ class MediaViewModel : ViewModel() {
     val isLabelingInProgress: StateFlow<Boolean> = _isLabelingInProgress.asStateFlow()
     
     // Grid type state
-    private val _gridType = MutableStateFlow(GridType.DAY)
+    private val _gridType = MutableStateFlow(GridType.DAY_3)
     val gridType: StateFlow<GridType> = _gridType.asStateFlow()
     
     // Selected albums for gallery view
@@ -244,8 +257,77 @@ class MediaViewModel : ViewModel() {
     // Search state
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    
+    private val _isSearchBarActive = MutableStateFlow(false)
+    val isSearchBarActive: StateFlow<Boolean> = _isSearchBarActive.asStateFlow()
 
-    private var searchDebounceJob: Job? = null
+    private val _topMlLabels = MutableStateFlow<List<String>>(emptyList())
+    val topMlLabels: StateFlow<List<String>> = _topMlLabels.asStateFlow()
+
+    fun loadTopMlLabels() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val allLabels = database.mediaLabelDao().getAllLabels()
+                val labelCounts = mutableMapOf<String, Int>()
+                allLabels.forEach { entity ->
+                    entity.labels.split(",").forEach { label ->
+                        val cleanLabel = label.trim().lowercase()
+                        if (cleanLabel.isNotEmpty()) {
+                            labelCounts[cleanLabel] = (labelCounts[cleanLabel] ?: 0) + 1
+                        }
+                    }
+                }
+                val top = labelCounts.entries
+                    .sortedByDescending { it.value }
+                    .take(3)
+                    .map { it.key }
+                _topMlLabels.value = top
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun setSearchBarActive(active: Boolean) {
+        _isSearchBarActive.value = active
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    val searchState: StateFlow<SearchState> = _searchQuery
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.isBlank()) {
+                flowOf<SearchState>(SearchState.Idle)
+            } else {
+                flow<SearchState> {
+                    emit(SearchState.Loading)
+                    searchMediaFlow(query).collect { rawMedia ->
+                        if (rawMedia.isEmpty()) {
+                            emit(SearchState.Empty)
+                        } else {
+                            val matchedAlbums = rawMedia
+                                .groupBy { it.bucketName }
+                                .filter { it.key.isNotEmpty() }
+                                .map { (albumName, items) ->
+                                    SearchEngine.AlbumMatch(
+                                        albumName = albumName,
+                                        items = items,
+                                        matchPriority = 1
+                                    )
+                                }
+                                .sortedByDescending { it.items.size }
+                                
+                            emit(SearchState.Success(SearchEngine.SearchResult(
+                                matchedAlbums = matchedAlbums,
+                                matchedMedia = rawMedia,
+                                query = query
+                            )))
+                        }
+                    }
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SearchState.Idle)
     
     // Recent searches from DataStore
     private val _recentSearches = MutableStateFlow<List<String>>(emptyList())
@@ -412,11 +494,11 @@ class MediaViewModel : ViewModel() {
                         pagingData.insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
                             if (after == null) return@insertSeparators null
                             
-                            val beforeGroup = before?.let { if (type == GridType.DAY) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
-                            val afterGroup = if (type == GridType.DAY) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
+                            val beforeGroup = before?.let { if (type.isDay) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
+                            val afterGroup = if (type.isDay) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
                             
                             if (beforeGroup != afterGroup) {
-                                val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type == GridType.DAY)
+                                val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type.isDay)
                                 MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
                             } else {
                                 null
@@ -583,7 +665,7 @@ class MediaViewModel : ViewModel() {
             }
             
             // GIF (special case)
-            normalizedQuery.contains("gif") -> {
+            normalizedQuery.contains("gif") || normalizedQuery.contains("animation") || normalizedQuery.contains("animated") -> {
                 if (cleanQuery.isBlank()) {
                     database.mediaDao().searchByGifOnly()
                 } else {
@@ -720,11 +802,11 @@ class MediaViewModel : ViewModel() {
     
     private fun detectSearchMediaTypeFilter(query: String): SearchEngine.MediaTypeFilter? {
         return when {
-            query.contains("video") -> SearchEngine.MediaTypeFilter.Videos
-            query.contains("photo") || query.contains("image") -> SearchEngine.MediaTypeFilter.Photos
-            query.contains("gif") -> SearchEngine.MediaTypeFilter.Gifs
-            query.contains("screenshot") -> SearchEngine.MediaTypeFilter.Screenshots
-            query.contains("camera") -> SearchEngine.MediaTypeFilter.Camera
+            query.contains("video") || query.contains("mp4") || query.contains("movie") || query.contains("recording") -> SearchEngine.MediaTypeFilter.Videos
+            query.contains("photo") || query.contains("image") || query.contains("picture") || query.contains("pic") -> SearchEngine.MediaTypeFilter.Photos
+            query.contains("gif") || query.contains("animation") || query.contains("animated") -> SearchEngine.MediaTypeFilter.Gifs
+            query.contains("screenshot") || query.contains("ss") || query.contains("capture") -> SearchEngine.MediaTypeFilter.Screenshots
+            query.contains("camera") || query.contains("dcim") || query.contains("shot") -> SearchEngine.MediaTypeFilter.Camera
             else -> null
         }
     }
@@ -752,15 +834,18 @@ class MediaViewModel : ViewModel() {
         cleaned = cleaned.replace(Regex("\\b(202[0-9]|201[0-9])\\b"), "")
         
         val typeKeywords = listOf(
-            "photo", "photos", "image", "images", "video", "videos",
-            "gif", "gifs", "screenshot", "screenshots", "camera", "dcim"
-        )
+            "photos", "photo", "images", "image", "pictures", "picture", "pics", "pic",
+            "videos", "video", "movies", "movie", "recordings", "recording", "mp4",
+            "animations", "animation", "animated", "gifs", "gif",
+            "screenshots", "screenshot", "screen capture", "ss",
+            "camera", "dcim", "shots", "shot", "captured"
+        ).sortedByDescending { it.length }
         typeKeywords.forEach { cleaned = cleaned.replace(it, "") }
         
-        val sizeKeywords = listOf("small", "medium", "large")
+        val sizeKeywords = listOf("small", "medium", "large").sortedByDescending { it.length }
         sizeKeywords.forEach { cleaned = cleaned.replace(it, "") }
         
-        val commonWords = listOf("from", "in", "on", "the", "a", "an")
+        val commonWords = listOf("from", "in", "on", "the", "a", "an", "file", "files")
         commonWords.forEach { cleaned = cleaned.replace(Regex("\\b$it\\b"), "") }
         
         return cleaned.trim().replace(Regex("\\s+"), " ")
@@ -953,18 +1038,7 @@ class MediaViewModel : ViewModel() {
                         }
                     }
                     
-                    val gridItems = mutableListOf<MediaGridItem>()
-                    var currentGroup: String? = null
-                    
-                    for (item in smartMedia) {
-                        val group = if (type == GridType.DAY) item.dateGroupDay else item.dateGroupMonth
-                        if (group != currentGroup) {
-                            currentGroup = group
-                            val displayDate = formatDisplayDate(item.dateAdded * 1000L, type == GridType.DAY)
-                            gridItems.add(MediaGridItem.Header(displayDate = displayDate, dateGroupKey = group))
-                        }
-                        gridItems.add(MediaGridItem.Media(item))
-                    }
+                    val gridItems = smartMedia.map { MediaGridItem.Media(it) }
                     
                     emit(PagingData.from(gridItems))
                 }
@@ -993,11 +1067,11 @@ class MediaViewModel : ViewModel() {
                 pagingData.insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
                     if (after == null) return@insertSeparators null
                     
-                    val beforeGroup = before?.let { if (type == GridType.DAY) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
-                    val afterGroup = if (type == GridType.DAY) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
+                    val beforeGroup = before?.let { if (type.isDay) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
+                    val afterGroup = if (type.isDay) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
                     
                     if (beforeGroup != afterGroup) {
-                        val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type == GridType.DAY)
+                        val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type.isDay)
                         MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
                     } else {
                         null
@@ -1117,6 +1191,38 @@ class MediaViewModel : ViewModel() {
         
         // Observe WorkManager for ML labeling progress
         observeLabelingProgress(context)
+        
+        // Update fully selected date groups whenever selection changes
+        viewModelScope.launch {
+            _selectedItems.collect { selectedIds ->
+                if (selectedIds.isEmpty()) {
+                    _fullySelectedDateGroups.value = emptySet()
+                    return@collect
+                }
+                
+                launch(Dispatchers.IO) {
+                    val entities = database.mediaDao().getMediaByIds(selectedIds.toList())
+                    val dayGroups = entities.groupBy { it.dateGroupDay }
+                    val monthGroups = entities.groupBy { it.dateGroupMonth }
+                    
+                    val fullySelected = mutableSetOf<String>()
+                    
+                    for ((dayKey, items) in dayGroups) {
+                        if (dayKey.isEmpty()) continue
+                        val totalInDb = database.mediaDao().getMediaByDateGroupDay(dayKey).size
+                        if (items.size == totalInDb) fullySelected.add(dayKey)
+                    }
+                    
+                    for ((monthKey, items) in monthGroups) {
+                        if (monthKey.isEmpty()) continue
+                        val totalInDb = database.mediaDao().getMediaByDateGroupMonth(monthKey).size
+                        if (items.size == totalInDb) fullySelected.add(monthKey)
+                    }
+                    
+                    _fullySelectedDateGroups.value = fullySelected
+                }
+            }
+        }
         
         // Load recent searches from DataStore (collect in viewModelScope - will cancel when VM is cleared)
         viewModelScope.launch {
@@ -1474,6 +1580,24 @@ class MediaViewModel : ViewModel() {
         }
     }
     
+    fun selectItem(itemId: Long) {
+        _selectedItems.value = _selectedItems.value + itemId
+    }
+    
+    fun deselectItem(itemId: Long) {
+        _selectedItems.value = _selectedItems.value - itemId
+        if (_selectedItems.value.isEmpty()) {
+            _isSelectionMode.value = false
+        }
+    }
+    
+    fun setSelectedItems(itemIds: Set<Long>) {
+        _selectedItems.value = itemIds
+        if (_selectedItems.value.isEmpty()) {
+            _isSelectionMode.value = false
+        }
+    }
+    
     fun selectAll(itemIds: List<Long>) {
         _selectedItems.value = itemIds.toSet()
     }
@@ -1498,29 +1622,22 @@ class MediaViewModel : ViewModel() {
             } else {
                 database.mediaDao().getMediaByDateGroupMonth(dateGroupKey)
             }
-            val ids = items.map { it.id }
+            val ids = items.map { it.id }.toSet()
             
             withContext(Dispatchers.Main) {
-                val currentSelection = _selectedItems.value.toMutableSet()
-                currentSelection.addAll(ids)
-                _selectedItems.value = currentSelection
-            }
-        }
-    }
-
-    fun deselectAllInDateGroup(dateGroupKey: String, isDay: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val items = if (isDay) {
-                database.mediaDao().getMediaByDateGroupDay(dateGroupKey)
-            } else {
-                database.mediaDao().getMediaByDateGroupMonth(dateGroupKey)
-            }
-            val ids = items.map { it.id }
-            
-            withContext(Dispatchers.Main) {
-                _selectedItems.value = _selectedItems.value - ids.toSet()
-                if (_selectedItems.value.isEmpty()) {
-                    _isSelectionMode.value = false
+                val currentSelection = _selectedItems.value
+                val isFullySelected = currentSelection.containsAll(ids)
+                
+                if (isFullySelected) {
+                    // Deselect
+                    _selectedItems.value = currentSelection - ids
+                    if (_selectedItems.value.isEmpty()) {
+                        _isSelectionMode.value = false
+                    }
+                } else {
+                    // Select
+                    _selectedItems.value = currentSelection + ids
+                    _isSelectionMode.value = true
                 }
             }
         }
@@ -1628,14 +1745,14 @@ class MediaViewModel : ViewModel() {
      */
     suspend fun hideFromSmartAlbum(context: Context, smartAlbumId: String, items: List<Long>) {
         try {
-            val albumType = com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator.SmartAlbumType.fromId(smartAlbumId)
+            val albumType = com.prantiux.pixelgallery.smartalbum.SmartAlbumGenerator.fromId(smartAlbumId)
             if (albumType == null) {
                 android.util.Log.e("MediaViewModel", "Invalid smart album ID: $smartAlbumId")
                 return
             }
             
             val labelDao = database.mediaLabelDao()
-            val labelsToRemove = albumType.labels.map { it.lowercase() }.toSet()
+            val labelsToRemove = albumType.positiveLabels.map { it.lowercase() }.toSet()
             
             items.forEach { mediaItemId ->
                 // Get existing label entity
@@ -1674,17 +1791,7 @@ class MediaViewModel : ViewModel() {
     }
     
     fun setSearchQuery(query: String) {
-        searchDebounceJob?.cancel()
         _searchQuery.value = query
-        if (query.isBlank()) {
-            _isSearching.value = false
-            return
-        }
-        _isSearching.value = true
-        searchDebounceJob = viewModelScope.launch {
-            delay(200)
-            _isSearching.value = false
-        }
     }
     
     /**
@@ -1747,11 +1854,8 @@ class MediaViewModel : ViewModel() {
         }
     }
     
-    fun clearSearch() {
-        searchDebounceJob?.cancel()
-        searchDebounceJob = null
+    fun clearSearchQuery() {
         _searchQuery.value = ""
-        _isSearching.value = false
     }
     
     fun getAllMedia(): List<MediaItem> {
@@ -1836,13 +1940,13 @@ class MediaViewModel : ViewModel() {
         var groupDateAdded = 0L
 
         for (item in items) {
-            val key = if (type == GridType.DAY) item.dateGroupDay else item.dateGroupMonth
+            val key = if (type.isDay) item.dateGroupDay else item.dateGroupMonth
             if (key != currentGroupKey) {
                 if (currentGroupKey.isNotEmpty()) {
                     groups.add(
                         com.prantiux.pixelgallery.ui.components.DateGroupInfo(
                             date = currentGroupKey,
-                            displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                            displayDate = formatDisplayDate(groupDateAdded * 1000L, type.isDay),
                             itemCount = currentCount
                         )
                     )
@@ -1858,7 +1962,7 @@ class MediaViewModel : ViewModel() {
             groups.add(
                 com.prantiux.pixelgallery.ui.components.DateGroupInfo(
                     date = currentGroupKey,
-                    displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                    displayDate = formatDisplayDate(groupDateAdded * 1000L, type.isDay),
                     itemCount = currentCount
                 )
             )
@@ -1874,13 +1978,13 @@ class MediaViewModel : ViewModel() {
             var groupDateAdded = 0L
 
             for (item in items) {
-                val key = if (type == GridType.DAY) item.dateGroupDay else item.dateGroupMonth
+            val key = if (type.isDay) item.dateGroupDay else item.dateGroupMonth
                 if (key != currentGroupKey) {
                     if (currentGroupKey.isNotEmpty()) {
                         groups.add(
                             com.prantiux.pixelgallery.ui.components.DateGroupInfo(
                                 date = currentGroupKey,
-                                displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                                displayDate = formatDisplayDate(groupDateAdded * 1000L, type.isDay),
                                 itemCount = currentCount
                             )
                         )
@@ -1896,7 +2000,7 @@ class MediaViewModel : ViewModel() {
                 groups.add(
                     com.prantiux.pixelgallery.ui.components.DateGroupInfo(
                         date = currentGroupKey,
-                        displayDate = formatDisplayDate(groupDateAdded * 1000L, type == GridType.DAY),
+                        displayDate = formatDisplayDate(groupDateAdded * 1000L, type.isDay),
                         itemCount = currentCount
                     )
                 )
@@ -2004,6 +2108,13 @@ class MediaViewModel : ViewModel() {
         _selectedTrashItems.value = _selectedTrashItems.value + items.map { it.id }
     }
     
+    fun setSelectedTrashItems(itemIds: Set<Long>) {
+        _selectedTrashItems.value = itemIds
+        if (itemIds.isEmpty()) {
+            _isTrashSelectionMode.value = false
+        }
+    }
+    
     fun deselectTrashGroup(items: List<MediaItem>) {
         _selectedTrashItems.value = _selectedTrashItems.value - items.map { it.id }.toSet()
     }
@@ -2011,10 +2122,9 @@ class MediaViewModel : ViewModel() {
     // Restore selected items from trash (from RecycleBinScreen)
     fun restoreSelectedTrashItems(context: Context) {
         viewModelScope.launch {
-            val itemIds = _selectedTrashItems.value.toList()
+            val itemIds = _selectedTrashItems.value.toSet()
             if (itemIds.isNotEmpty()) {
-                val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
-                val items = database.mediaDao().getMediaByIds(itemIds).toMediaItems(favIds)
+                val items = _trashedItems.value.filter { itemIds.contains(it.id) }
                 restoreTrashedItems(context, items)
             }
         }
@@ -2023,10 +2133,9 @@ class MediaViewModel : ViewModel() {
     // Delete selected items from trash (from RecycleBinScreen)
     fun deleteSelectedTrashItems(context: Context) {
         viewModelScope.launch {
-            val itemIds = _selectedTrashItems.value.toList()
+            val itemIds = _selectedTrashItems.value.toSet()
             if (itemIds.isNotEmpty()) {
-                val favIds = database.favoriteDao().getAllFavoriteIds().toSet()
-                val items = database.mediaDao().getMediaByIds(itemIds).toMediaItems(favIds)
+                val items = _trashedItems.value.filter { itemIds.contains(it.id) }
                 permanentlyDeleteTrashedItems(context, items)
             }
         }

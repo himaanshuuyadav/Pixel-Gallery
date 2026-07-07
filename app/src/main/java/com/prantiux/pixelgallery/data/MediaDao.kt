@@ -276,8 +276,9 @@ interface MediaDao {
     // ═════════════════════════════════════════════════════════════════════
     @Query("""
         SELECT * FROM media
-        WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
-        AND mimeType LIKE '%gif%'
+        WHERE (displayName LIKE '%' || :query || '%' 
+              OR bucketName LIKE '%' || :query || '%')
+          AND mimeType LIKE '%gif%'
         ORDER BY dateAdded DESC
     """)
     fun searchByGif(query: String): Flow<List<MediaEntity>>
@@ -295,9 +296,8 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE (displayName LIKE '%' || :query || '%' 
-              OR bucketName LIKE '%' || :query || '%'
-              OR bucketName LIKE '%screenshot%'
-              OR displayName LIKE '%screenshot%')
+              OR bucketName LIKE '%' || :query || '%')
+          AND (bucketName LIKE '%screenshot%' OR displayName LIKE '%screenshot%')
         ORDER BY dateAdded DESC
     """)
     fun searchByScreenshots(query: String): Flow<List<MediaEntity>>
@@ -316,9 +316,8 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE (displayName LIKE '%' || :query || '%' 
-              OR bucketName LIKE '%' || :query || '%'
-              OR bucketName LIKE '%camera%'
-              OR bucketName LIKE '%dcim%')
+              OR bucketName LIKE '%' || :query || '%')
+          AND (bucketName LIKE '%camera%' OR bucketName LIKE '%dcim%')
         ORDER BY dateAdded DESC
     """)
     fun searchByCamera(query: String): Flow<List<MediaEntity>>

@@ -318,9 +318,12 @@ object SearchEngine {
         return listOf(
             QuickFilter("Photos", MediaTypeFilter.Photos),
             QuickFilter("Videos", MediaTypeFilter.Videos),
+            QuickFilter("GIFs", MediaTypeFilter.Gifs),
             QuickFilter("Screenshots", MediaTypeFilter.Screenshots),
             QuickFilter("Camera", MediaTypeFilter.Camera),
-            QuickFilter("Large Files", SizeFilter.Large)
+            QuickFilter("Large Files", SizeFilter.Large),
+            QuickFilter("Medium Files", SizeFilter.Medium),
+            QuickFilter("Small Files", SizeFilter.Small)
         )
     }
     

@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Generator for ML-based smart albums using existing image labeling results.
- * Creates virtual/query-based albums without modifying the ML pipeline or file system.
+ * Creates virtual/query-based albums dynamically based on what labels exist in the library.
  * 
  * All albums are filtered using existing SearchResultFilter logic.
  */
@@ -26,58 +26,140 @@ object SmartAlbumGenerator {
     private const val SMART_PREFIX = "smart_"
     
     /**
-     * Smart album definitions with their query rules
+     * Smart album definition
      */
-    enum class SmartAlbumType(
+    data class SmartAlbumCategory(
         val id: String,
         val displayName: String,
         val icon: String, // Unicode emoji
-        val labels: Set<String>,
-        val minConfidence: Float
-    ) {
-        ANIMALS(
+        val positiveLabels: Set<String>,
+        val negativeLabels: Set<String> = emptySet(), // Strong negative signals (must be > 0.85 to suppress)
+        val minConfidence: Float = 0.70f
+    )
+    
+    /**
+     * Curated library of possible Smart Albums.
+     * Only categories where the user has >= 5 photos will be generated.
+     */
+    val CATEGORY_LIBRARY = listOf(
+        // The original 4 categories
+        SmartAlbumCategory(
             id = "${SMART_PREFIX}animals",
             displayName = "Animals",
             icon = "🐾",
-            labels = setOf("cat", "dog", "animal", "bird", "pet", "mammal", "wildlife", "feline", "canine"),
+            positiveLabels = setOf("cat", "dog", "animal", "bird", "pet", "mammal", "wildlife", "feline", "canine"),
+            negativeLabels = setOf("person", "people", "human", "portrait"),
             minConfidence = 0.75f
         ),
-        FOOD(
+        SmartAlbumCategory(
             id = "${SMART_PREFIX}food",
             displayName = "Food",
             icon = "🍽️",
-            labels = setOf("food", "dish", "meal", "cuisine", "dessert", "drink", "fruit", "vegetable"),
+            positiveLabels = setOf("food", "dish", "meal", "cuisine", "dessert", "drink", "fruit", "vegetable"),
+            negativeLabels = setOf("building", "architecture", "house"),
             minConfidence = 0.70f
         ),
-        NATURE(
+        SmartAlbumCategory(
             id = "${SMART_PREFIX}nature",
             displayName = "Nature",
             icon = "🌿",
-            labels = setOf("mountain", "beach", "forest", "sky", "sunset", "landscape", "nature", "outdoor", "tree", "water", "ocean"),
+            positiveLabels = setOf("mountain", "beach", "forest", "sky", "sunset", "landscape", "nature", "outdoor", "tree", "water", "ocean"),
             minConfidence = 0.70f
         ),
-        DOCUMENTS(
+        SmartAlbumCategory(
             id = "${SMART_PREFIX}documents",
             displayName = "Documents",
             icon = "📄",
-            labels = setOf("document", "text", "paper"),
+            positiveLabels = setOf("document", "text", "paper", "receipt", "screenshot"),
             minConfidence = 0.65f
-        );
+        ),
         
-        companion object {
-            fun fromId(id: String): SmartAlbumType? {
-                return values().find { it.id == id }
-            }
-            
-            fun isSmartAlbum(id: String): Boolean {
-                return id.startsWith(SMART_PREFIX)
-            }
-        }
+        // Expanded Dynamic Categories
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}vehicles",
+            displayName = "Vehicles",
+            icon = "🚗",
+            positiveLabels = setOf("car", "vehicle", "truck", "motorcycle", "bicycle", "bus", "transportation"),
+            minConfidence = 0.75f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}architecture",
+            displayName = "Architecture",
+            icon = "🏙️",
+            positiveLabels = setOf("building", "architecture", "house", "skyscraper", "monument", "city", "urban"),
+            negativeLabels = setOf("food", "dish", "meal"),
+            minConfidence = 0.75f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}people",
+            displayName = "People",
+            icon = "👥",
+            positiveLabels = setOf("person", "people", "human", "face", "portrait", "smile", "crowd", "child"),
+            negativeLabels = setOf("animal", "cat", "dog"),
+            minConfidence = 0.75f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}sports",
+            displayName = "Sports",
+            icon = "⚽",
+            positiveLabels = setOf("sport", "stadium", "ball", "athlete", "soccer", "basketball", "tennis", "gym"),
+            minConfidence = 0.70f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}concerts",
+            displayName = "Concerts",
+            icon = "🎸",
+            positiveLabels = setOf("concert", "stage", "music", "performance", "guitar", "band", "festival"),
+            minConfidence = 0.70f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}nightlife",
+            displayName = "Night",
+            icon = "🌃",
+            positiveLabels = setOf("night", "darkness", "midnight", "moon", "night sky", "neon", "fireworks"),
+            minConfidence = 0.75f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}water",
+            displayName = "Water",
+            icon = "🌊",
+            positiveLabels = setOf("ocean", "sea", "river", "swimming", "pool", "lake", "waterfall"),
+            minConfidence = 0.75f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}flowers",
+            displayName = "Flowers",
+            icon = "🌸",
+            positiveLabels = setOf("flower", "plant", "garden", "leaf", "petal", "blossom", "flora"),
+            minConfidence = 0.70f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}technology",
+            displayName = "Technology",
+            icon = "💻",
+            positiveLabels = setOf("computer", "phone", "screen", "gadget", "laptop", "keyboard", "electronics"),
+            minConfidence = 0.70f
+        ),
+        SmartAlbumCategory(
+            id = "${SMART_PREFIX}fashion",
+            displayName = "Fashion",
+            icon = "👗",
+            positiveLabels = setOf("clothing", "footwear", "dress", "accessory", "shoe", "glasses", "sunglasses", "apparel"),
+            minConfidence = 0.70f
+        )
+    )
+    
+    fun fromId(id: String): SmartAlbumCategory? {
+        return CATEGORY_LIBRARY.find { it.id == id }
+    }
+    
+    fun isSmartAlbum(id: String): Boolean {
+        return id.startsWith(SMART_PREFIX)
     }
     
     /**
      * Generate all smart albums with item counts
-     * Only returns albums that meet the minimum threshold
+     * Only returns albums that meet the minimum threshold, sorted by item count (descending)
      */
     suspend fun generateSmartAlbums(context: Context): List<Album> = withContext(Dispatchers.IO) {
         val database = AppDatabase.getDatabase(context)
@@ -94,31 +176,34 @@ object SmartAlbumGenerator {
             return@withContext emptyList()
         }
         
-        // Generate albums for each type
-        SmartAlbumType.values().mapNotNull { albumType ->
-            val matchingLabels = findMatchingLabels(allLabels, albumType)
+        // Generate albums dynamically from library
+        val generatedAlbums = CATEGORY_LIBRARY.mapNotNull { category ->
+            val matchingLabels = findMatchingLabels(allLabels, category)
             
             if (matchingLabels.size >= MIN_ITEMS_THRESHOLD) {
                 // Find the highest confidence item for cover image
                 val topItem = matchingLabels.maxByOrNull { labelEntity ->
                     val parsedLabels = SearchResultFilter.parseLabelsWithConfidence(labelEntity.labelsWithConfidence)
-                    parsedLabels.filter { it.label in albumType.labels }
+                    parsedLabels.filter { it.label in category.positiveLabels }
                         .maxOfOrNull { it.confidence } ?: 0f
                 }
                 val coverUriString = topItem?.mediaId?.let { database.mediaDao().getMediaByIdOnce(it)?.uri }
                 
                 Album(
-                    id = albumType.id,
-                    name = albumType.displayName,
+                    id = category.id,
+                    name = category.displayName,
                     coverUri = coverUriString?.let { android.net.Uri.parse(it) },
                     itemCount = matchingLabels.size,
-                    bucketDisplayName = albumType.displayName,
+                    bucketDisplayName = category.displayName,
                     isMainAlbum = false,
                     topMediaUris = emptyList(),
                     topMediaItems = emptyList()
                 )
             } else null
         }
+        
+        // Sort the albums so the most populated categories appear first
+        generatedAlbums.sortedByDescending { it.itemCount }
     }
     
     /**
@@ -129,13 +214,13 @@ object SmartAlbumGenerator {
         context: Context,
         smartAlbumId: String
     ): List<MediaItem> = withContext(Dispatchers.IO) {
-        val albumType = SmartAlbumType.fromId(smartAlbumId) ?: return@withContext emptyList()
+        val category = fromId(smartAlbumId) ?: return@withContext emptyList()
         val database = AppDatabase.getDatabase(context)
         val labelDao = database.mediaLabelDao()
         
         // Query for matching labels
         val matchingLabels = try {
-            albumType.labels.flatMap { label ->
+            category.positiveLabels.flatMap { label ->
                 labelDao.searchByLabel(label.lowercase())
             }.distinctBy { it.mediaId }
         } catch (e: Exception) {
@@ -149,7 +234,7 @@ object SmartAlbumGenerator {
             
             // Check if any of the album's labels match with sufficient confidence
             val hasMatchingLabel = parsedLabels.any { label ->
-                albumType.labels.contains(label.label) && label.confidence >= albumType.minConfidence
+                category.positiveLabels.contains(label.label) && label.confidence >= category.minConfidence
             }
             
             if (hasMatchingLabel) labelEntity.mediaId else null
@@ -160,47 +245,32 @@ object SmartAlbumGenerator {
         val entities = database.mediaDao().getMediaByIds(validMediaIds)
         val filteredResults = entities.map { it.toMediaItem(favIds.contains(it.id)) }
         
-        // Apply negative signal filtering for Animals & Food
-        when (albumType) {
-            SmartAlbumType.ANIMALS, SmartAlbumType.FOOD -> {
-                // Use stricter filtering to remove false positives
-                filteredResults.filter { mediaItem ->
-                    val labelEntity = matchingLabels.find { it.mediaId == mediaItem.id }
-                    labelEntity?.let { entity ->
-                        val parsedLabels = SearchResultFilter.parseLabelsWithConfidence(entity.labelsWithConfidence)
-                        !hasStrongNegativeSignal(parsedLabels, albumType)
-                    } ?: false
-                }
+        // Apply data-driven negative signal filtering if the category has negative labels
+        if (category.negativeLabels.isNotEmpty()) {
+            filteredResults.filter { mediaItem ->
+                val labelEntity = matchingLabels.find { it.mediaId == mediaItem.id }
+                labelEntity?.let { entity ->
+                    val parsedLabels = SearchResultFilter.parseLabelsWithConfidence(entity.labelsWithConfidence)
+                    !hasStrongNegativeSignal(parsedLabels, category)
+                } ?: false
             }
-            else -> filteredResults
+        } else {
+            filteredResults
         }
     }
     
     /**
-     * Check for strong negative signals that indicate false positives
+     * Check for strong negative signals that indicate false positives, based on the category's negative labels
      */
     private fun hasStrongNegativeSignal(
         labels: List<SearchResultFilter.LabelWithConfidence>,
-        albumType: SmartAlbumType
+        category: SmartAlbumCategory
     ): Boolean {
+        if (category.negativeLabels.isEmpty()) return false
         val STRONG_THRESHOLD = 0.85f
         
-        return when (albumType) {
-            SmartAlbumType.ANIMALS -> {
-                // Suppress if strong person signal
-                labels.any { 
-                    it.label in setOf("person", "people", "human", "portrait") && 
-                    it.confidence >= STRONG_THRESHOLD 
-                }
-            }
-            SmartAlbumType.FOOD -> {
-                // Suppress if strong building/architecture signal
-                labels.any {
-                    it.label in setOf("building", "architecture", "house") &&
-                    it.confidence >= STRONG_THRESHOLD
-                }
-            }
-            else -> false
+        return labels.any { 
+            it.label in category.negativeLabels && it.confidence >= STRONG_THRESHOLD 
         }
     }
     
@@ -209,23 +279,16 @@ object SmartAlbumGenerator {
      */
     private fun findMatchingLabels(
         allLabels: List<MediaLabelEntity>,
-        albumType: SmartAlbumType
+        category: SmartAlbumCategory
     ): List<MediaLabelEntity> {
         return allLabels.filter { labelEntity ->
             val parsedLabels = SearchResultFilter.parseLabelsWithConfidence(labelEntity.labelsWithConfidence)
             
             // Check if any label matches the album type with sufficient confidence
             parsedLabels.any { label ->
-                albumType.labels.contains(label.label) && 
-                label.confidence >= albumType.minConfidence
-            } && !hasStrongNegativeSignal(parsedLabels, albumType)
+                category.positiveLabels.contains(label.label) && 
+                label.confidence >= category.minConfidence
+            } && !hasStrongNegativeSignal(parsedLabels, category)
         }
-    }
-    
-    /**
-     * Check if an album ID represents a smart album
-     */
-    fun isSmartAlbum(albumId: String): Boolean {
-        return SmartAlbumType.isSmartAlbum(albumId)
     }
 }
