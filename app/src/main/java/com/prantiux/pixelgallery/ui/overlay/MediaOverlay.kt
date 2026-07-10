@@ -19,12 +19,23 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
+import androidx.graphics.shapes.Morph
+import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.material3.ripple
 import androidx.compose.material3.toShape
 import com.prantiux.pixelgallery.ui.shapes.SmoothCornerShape
@@ -34,11 +45,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -57,6 +74,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
@@ -82,6 +100,57 @@ private enum class GestureMode {
     VERTICAL_UP,
     VERTICAL_DOWN,
     ZOOM
+}
+
+enum class SeekIndicatorState {
+    LEFT, RIGHT
+}
+
+class MorphPolygonShape(
+    private val morph: Morph,
+    private val progress: Float,
+    private val rotationDegrees: Float = 0f
+) : Shape {
+    private val matrix = android.graphics.Matrix()
+
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: LayoutDirection,
+        density: Density
+    ): Outline {
+        val composePath = androidx.compose.ui.graphics.Path()
+        morph.toPath(progress, composePath)
+        val androidPath = composePath.asAndroidPath()
+
+        val bounds = android.graphics.RectF()
+        androidPath.computeBounds(bounds, true)
+
+        matrix.reset()
+        if (rotationDegrees != 0f) {
+            matrix.postRotate(rotationDegrees, bounds.centerX(), bounds.centerY())
+            androidPath.transform(matrix)
+            androidPath.computeBounds(bounds, true)
+            matrix.reset()
+        }
+
+        // Translate to origin (0,0)
+        matrix.postTranslate(-bounds.left, -bounds.top)
+        
+        // Scale to fit Box size uniformly
+        val scaleX = size.width / bounds.width()
+        val scaleY = size.height / bounds.height()
+        val scale = minOf(scaleX, scaleY)
+        matrix.postScale(scale, scale)
+        
+        // Center perfectly within the Box
+        val scaledWidth = bounds.width() * scale
+        val scaledHeight = bounds.height() * scale
+        matrix.postTranslate((size.width - scaledWidth) / 2f, (size.height - scaledHeight) / 2f)
+        
+        androidPath.transform(matrix)
+
+        return Outline.Generic(androidPath.asComposePath())
+    }
 }
 
 object OverlayConstants {
@@ -165,6 +234,37 @@ fun MediaOverlay(
     var currentIndex by remember { mutableIntStateOf(overlayState.selectedIndex) }
     var hasResolvedInitialIndex by remember { mutableStateOf(false) }
     
+    // Keep track of the currently viewed ID to maintain position when list updates
+    var currentlyViewedId by remember { mutableStateOf<Long?>(null) }
+    
+    LaunchedEffect(currentIndex, hasResolvedInitialIndex) {
+        if (hasResolvedInitialIndex && currentIndex >= 0 && currentIndex < mediaItems.size) {
+            currentlyViewedId = mediaItems[currentIndex].id
+        }
+    }
+    
+    // When mediaItems updates (e.g. after frame export), adjust currentIndex to keep looking at the same item
+    LaunchedEffect(mediaItems) {
+        if (hasResolvedInitialIndex && currentlyViewedId != null) {
+            val newIdx = mediaItems.indexOfFirst { it.id == currentlyViewedId }
+            if (newIdx >= 0 && newIdx != currentIndex) {
+                currentIndex = newIdx
+            }
+        }
+    }
+    // Determine the true active index synchronously for rendering
+    val activeIndex = remember(currentIndex, mediaItems, overlayState.selectedItemId, hasResolvedInitialIndex, currentlyViewedId) {
+        if (!hasResolvedInitialIndex && mediaItems.isNotEmpty() && overlayState.selectedItemId != null) {
+            val idx = mediaItems.indexOfFirst { it.id == overlayState.selectedItemId }
+            if (idx >= 0) idx else currentIndex
+        } else if (hasResolvedInitialIndex && currentlyViewedId != null) {
+            val idx = mediaItems.indexOfFirst { it.id == currentlyViewedId }
+            if (idx >= 0) idx else currentIndex
+        } else {
+            currentIndex
+        }
+    }
+
     // Zoom state
     var scale by remember { mutableFloatStateOf(OverlayConstants.MIN_ZOOM_SCALE) }
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -174,11 +274,12 @@ fun MediaOverlay(
     var exoPlayer: ExoPlayer? by remember { mutableStateOf(null) }
     var isPlaying by remember { mutableStateOf(false) }
     
-    // Keep screen on for video playback
-    DisposableEffect(keepScreenOn, isPlaying, currentIndex, mediaItems) {
+    val haptic = LocalHapticFeedback.current
+
+    DisposableEffect(keepScreenOn, isPlaying, currentlyViewedId) {
         val window = (view.context as? Activity)?.window
-        val currentItem = mediaItems.getOrNull(currentIndex)
-        if (window != null && keepScreenOn && currentItem?.isVideo == true && isPlaying) {
+        val isVideo = mediaItems.find { it.id == currentlyViewedId }?.isVideo == true
+        if (window != null && keepScreenOn && isVideo && isPlaying) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         onDispose {
@@ -200,6 +301,9 @@ fun MediaOverlay(
     // UI visibility
     var showControls by remember { mutableStateOf(false) }
     var showBars by remember { mutableStateOf(true) }
+    var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Autohide logic removed as requested by user
     var barsRevealUnlocked by remember { mutableStateOf(false) }
     var isDismissing by remember { mutableStateOf(false) }
     var openingProgress by remember { mutableStateOf(0f) }
@@ -369,18 +473,49 @@ fun MediaOverlay(
         }
     }
     
+    var videoIntrinsicSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    var isHoldingFor2x by remember { mutableStateOf(false) }
+    var holdJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var seekIndicatorState by remember { mutableStateOf<SeekIndicatorState?>(null) }
+    var seekAmount by remember { mutableIntStateOf(0) }
+    var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    
     // ExoPlayer lifecycle management
     DisposableEffect(context) {
         val player = ExoPlayer.Builder(context).build().apply {
+            setSeekParameters(SeekParameters.EXACT)
             // Set repeat mode based on loop setting
             repeatMode = if (loopVideos) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             // Set volume based on mute setting
             volume = if (muteByDefault) 0f else 1f
+            
+            addListener(object : androidx.media3.common.Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    videoIntrinsicSize = androidx.compose.ui.geometry.Size(
+                        videoSize.width.toFloat(), 
+                        videoSize.height.toFloat()
+                    )
+                }
+            })
         }
         exoPlayer = player
         onDispose {
             player.release()
             exoPlayer = null
+        }
+    }
+    
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                exoPlayer?.pause()
+                isPlaying = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
     
@@ -395,26 +530,21 @@ fun MediaOverlay(
     }
     
     // Update video playback when current item changes
-    LaunchedEffect(currentIndex, mediaItems, autoPlayVideos, resumePlayback) {
+    LaunchedEffect(currentlyViewedId, autoPlayVideos, resumePlayback) {
         exoPlayer?.let { player ->
-            // Save position of previous video before switching
-            val previousIndex = currentIndex - 1
-            if (previousIndex >= 0 && previousIndex < mediaItems.size) {
-                val previousItem = mediaItems.getOrNull(previousIndex)
-                if (previousItem?.isVideo == true && resumePlayback) {
-                    val position = player.currentPosition
-                    val duration = player.duration
-                    // Only save if video has meaningful progress (>2 sec) and isn't near the end
-                    if (position > 2000 && duration > 0 && position < duration - 3000) {
-                        videoPositionDataStore.savePosition(previousItem.uri.toString(), position)
-                    } else if (position >= duration - 3000 && duration > 0) {
-                        // Video completed, clear saved position
-                        videoPositionDataStore.clearPosition(previousItem.uri.toString())
-                    }
+            // Save position of previous video before switching using ExoPlayer's current media
+            val currentUri = player.currentMediaItem?.localConfiguration?.uri
+            if (currentUri != null && resumePlayback) {
+                val position = player.currentPosition
+                val duration = player.duration
+                if (position > 2000 && duration > 0 && position < duration - 3000) {
+                    videoPositionDataStore.savePosition(currentUri.toString(), position)
+                } else if (position >= duration - 3000 && duration > 0) {
+                    videoPositionDataStore.clearPosition(currentUri.toString())
                 }
             }
             
-            val currentItem = mediaItems.getOrNull(currentIndex)
+            val currentItem = mediaItems.find { it.id == currentlyViewedId }
             if (currentItem?.isVideo == true) {
                 val mediaItem = ExoMediaItem.fromUri(currentItem.uri)
                 player.setMediaItem(mediaItem)
@@ -440,9 +570,9 @@ fun MediaOverlay(
     }
     
     // Save video position periodically while playing
-    LaunchedEffect(currentIndex, mediaItems, resumePlayback) {
+    LaunchedEffect(currentlyViewedId, resumePlayback) {
         while (isActive && resumePlayback) {
-            val currentItem = mediaItems.getOrNull(currentIndex)
+            val currentItem = mediaItems.find { it.id == currentlyViewedId }
             if (currentItem?.isVideo == true && isPlaying) {
                 exoPlayer?.let { player ->
                     val position = player.currentPosition
@@ -598,15 +728,7 @@ fun MediaOverlay(
         }
     }
     
-    // Determine the true active index synchronously for rendering
-    val activeIndex = remember(currentIndex, mediaItems, overlayState.selectedItemId, hasResolvedInitialIndex) {
-        if (!hasResolvedInitialIndex && mediaItems.isNotEmpty() && overlayState.selectedItemId != null) {
-            val idx = mediaItems.indexOfFirst { it.id == overlayState.selectedItemId }
-            if (idx >= 0) idx else currentIndex
-        } else {
-            currentIndex
-        }
-    }
+
 
     // Current media item (use activeIndex for rendering to prevent blink)
     val currentItem = mediaItems.getOrNull(activeIndex)
@@ -716,8 +838,73 @@ fun MediaOverlay(
     }
     
     // Double-tap zoom handler (images only)
-    val handleDoubleTap: () -> Unit = {
-        if (currentItem?.isVideo != true && doubleTapToZoom) {
+    val handleDoubleTap: (Float) -> Unit = { touchX ->
+        if (currentItem?.isVideo == true) {
+            val screenW = screenWidth
+            if (touchX < screenW * 0.3f) {
+                // Seek back 10s
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                seekJob?.cancel()
+                if (seekIndicatorState != SeekIndicatorState.LEFT) seekAmount = 0
+                seekIndicatorState = SeekIndicatorState.LEFT
+                seekAmount -= 10
+                exoPlayer?.let { player ->
+                    val target = (player.currentPosition - 10000L).coerceAtLeast(0L)
+                    player.seekTo(target)
+                }
+                seekJob = scope.launch {
+                    delay(600)
+                    seekIndicatorState = null
+                    seekAmount = 0
+                }
+            } else if (touchX > screenW * 0.7f) {
+                // Seek forward 10s
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                seekJob?.cancel()
+                if (seekIndicatorState != SeekIndicatorState.RIGHT) seekAmount = 0
+                seekIndicatorState = SeekIndicatorState.RIGHT
+                seekAmount += 10
+                exoPlayer?.let { player ->
+                    val target = (player.currentPosition + 10000L).coerceAtMost(player.duration)
+                    player.seekTo(target)
+                }
+                seekJob = scope.launch {
+                    delay(600)
+                    seekIndicatorState = null
+                    seekAmount = 0
+                }
+            } else {
+                // Zoom to Fit for Video
+                scope.launch {
+                    if (scale == 1f) {
+                        val rawWidth = if (videoIntrinsicSize.width > 0f) videoIntrinsicSize.width else screenWidth
+                        val rawHeight = if (videoIntrinsicSize.height > 0f) videoIntrinsicSize.height else screenHeight
+                        val fitScale = kotlin.math.min(screenWidth / rawWidth, screenHeight / rawHeight)
+                        val fillScale = kotlin.math.max(screenWidth / rawWidth, screenHeight / rawHeight)
+                        val targetScale = (fillScale / fitScale).coerceAtLeast(1f)
+                        animate(
+                            initialValue = scale,
+                            targetValue = targetScale,
+                            animationSpec = tween(200, easing = FastOutSlowInEasing)
+                        ) { value, _ ->
+                            scale = value
+                            offsetX = 0f
+                            offsetY = 0f
+                        }
+                    } else {
+                        animate(
+                            initialValue = scale,
+                            targetValue = 1f,
+                            animationSpec = tween(200, easing = FastOutSlowInEasing)
+                        ) { value, _ ->
+                            scale = value
+                            offsetX = 0f
+                            offsetY = 0f
+                        }
+                    }
+                }
+            }
+        } else if (doubleTapToZoom) {
             scope.launch {
                 // Calculate target scale based on zoom level setting
                 val targetScale = if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
@@ -865,6 +1052,13 @@ fun MediaOverlay(
             showControls = false
         }
     }
+    
+    LaunchedEffect(isHoldingFor2x) {
+        if (isHoldingFor2x) {
+            showBars = false
+            showControls = false
+        }
+    }
 
 
     val controlsVisible = barsRevealUnlocked && showControls && 
@@ -888,6 +1082,28 @@ fun MediaOverlay(
     val latestIsAnyVideoFullscreen by rememberUpdatedState(isAnyVideoFullscreen)
     val latestIsCurrentItemVideo by rememberUpdatedState(currentItem?.isVideo == true)
 
+    val morphProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(seekIndicatorState) {
+        if (seekIndicatorState != null) {
+            morphProgress.snapTo(0f)
+            kotlinx.coroutines.delay(200) // Wait a bit for the enter animation so user can see the shape start as a square
+            morphProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+    
+    val baseMorph = remember { Morph(MaterialShapes.Square, MaterialShapes.Arrow) }
+    // Assuming Arrow points UP, rotate -90 for left and 90 for right.
+    // If it points right natively, we will need to change this to 180 and 0.
+    val leftMorphShape = remember(morphProgress.value) { 
+        MorphPolygonShape(baseMorph, morphProgress.value, rotationDegrees = -90f) 
+    }
+    val rightMorphShape = remember(morphProgress.value) { 
+        MorphPolygonShape(baseMorph, morphProgress.value, rotationDegrees = 90f) 
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -910,6 +1126,14 @@ fun MediaOverlay(
                         waitForUpOrCancellation()
                         return@awaitEachGesture
                     }
+                    
+                    if (latestIsCurrentItemVideo && exoPlayer?.isPlaying == true) {
+                        holdJob = scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            isHoldingFor2x = true
+                            exoPlayer?.setPlaybackSpeed(2f)
+                        }
+                    }
 
                     var currentGestureMode = GestureMode.NONE
                     var accumulatedDx = 0f
@@ -927,6 +1151,11 @@ fun MediaOverlay(
                         val change = event.changes.firstOrNull() ?: break
                         if (!change.pressed) {
                             upPosition = change.position
+                            holdJob?.cancel()
+                            if (isHoldingFor2x) {
+                                isHoldingFor2x = false
+                                exoPlayer?.setPlaybackSpeed(1f)
+                            }
                             break
                         }
 
@@ -964,6 +1193,11 @@ fun MediaOverlay(
                                     scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                                         horizontalOffset.stop()
                                     }
+                                }
+                                holdJob?.cancel()
+                                if (isHoldingFor2x) {
+                                    isHoldingFor2x = false
+                                    exoPlayer?.setPlaybackSpeed(1f)
                                 }
                             }
                         }
@@ -1041,11 +1275,14 @@ fun MediaOverlay(
                                     (touchPosition - lastTapPosition).getDistance() < 48f
 
                             if (isDoubleTap) {
-                                handleDoubleTap()
+                                handleDoubleTap(touchPosition.x)
                                 lastTapTimeMs = 0L
                             } else {
                                 if (!isDetailsOpen) {
                                     showBars = !showBars
+                                    if (showBars) {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                    }
                                     showControls = showBars
                                 }
                                 lastTapTimeMs = now
@@ -1219,160 +1456,127 @@ fun MediaOverlay(
 
             // Render previous, current, and next images for smooth horizontal swipe
             Box(modifier = Modifier.fillMaxSize().zIndex(imageZIndex.value)) {
-                // Previous image - use stable key to prevent rebinding
-                prevItem?.let { prev ->
-                    key(prev.id) {  // Stable key prevents recomposition
-                        SubcomposeAsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(prev.uri)
-                                .size(targetDecodeSize)
-                                .memoryCacheKey(prev.uri.toString())
-                                .diskCacheKey(prev.uri.toString())
-                                .crossfade(false)  // No crossfade to prevent blink
-                                .build(),
-                            contentDescription = prev.displayName,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(end = 4.dp)  // Small gap between images
-                                .graphicsLayer {
-                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                    this.translationX = horizontalOffset.value - screenWidth
-                                },
-                            loading = {
-                                // Show black background during load (matches overlay)
-                                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
-                            }
-                        )
-                    }
-                }
                 
-                // Current image - use stable key to prevent rebinding on index change
-                if (!item.isVideo) {
-                    key(item.id) {
-                        var imageIntrinsicSize by remember {
-                            mutableStateOf(androidx.compose.ui.geometry.Size.Zero)
-                        }
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(item.uri)
-                                    .size(targetDecodeSize)
-                                    .memoryCacheKey(item.uri.toString())
-                                    .diskCacheKey(item.uri.toString())
-                                    .crossfade(false)
-                                    .build(),
-                                contentDescription = item.displayName,
-                                contentScale = ContentScale.Fit,
-                                onSuccess = { state ->
-                                    imageIntrinsicSize = state.painter.intrinsicSize
-                                },
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                        val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
+                val MediaImagePage: @Composable (MediaItem, Float) -> Unit = { mediaItem, offsetXOffset ->
+                    var imageIntrinsicSize by remember {
+                        mutableStateOf(androidx.compose.ui.geometry.Size.Zero)
+                    }
+                    SubcomposeAsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(mediaItem.uri)
+                            .size(targetDecodeSize)
+                            .memoryCacheKey(mediaItem.uri.toString())
+                            .diskCacheKey(mediaItem.uri.toString())
+                            .crossfade(false)
+                            .build(),
+                        contentDescription = mediaItem.displayName,
+                        contentScale = ContentScale.Fit,
+                        onSuccess = { state ->
+                            imageIntrinsicSize = state.painter.intrinsicSize
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
+                                val rawImageWidth = if (imageIntrinsicSize.width > 0f) imageIntrinsicSize.width else screenWidth
+                                val rawImageHeight = if (imageIntrinsicSize.height > 0f) imageIntrinsicSize.height else screenHeight
+                                val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                                val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                                val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
+                                val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
+
+                                if (detailsProgress > 0.01f) {
+                                    val imageOffset = screenHeight * 0.25f * detailsProgress
+                                    this.translationY = -imageOffset
+                                    this.scaleX = detailsScale
+                                    this.scaleY = detailsScale
+                                    this.translationX = offsetXOffset
+                                } else {
+                                    this.translationX = horizontalOffset.value + offsetXOffset
+                                    if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
+                                        val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
+                                        this.scaleX = 1f - swipeProgress * 0.05f
+                                        this.scaleY = 1f - swipeProgress * 0.05f
+                                    }
+                                    this.translationY = currentVerticalOffset
+                                    if (gestureMode == GestureMode.VERTICAL_DOWN) {
+                                        this.scaleX = 1f - 0.25f * closeProgress
+                                        this.scaleY = 1f - 0.25f * closeProgress
+                                    }
+                                    if (predictiveBackProgress > 0f) {
+                                        val predScale = 1f - (predictiveBackProgress * 0.1f)
+                                        this.scaleX *= predScale
+                                        this.scaleY *= predScale
+                                        this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
+                                        this.clip = true
+                                    }
+                                    if (scale > OverlayConstants.MIN_ZOOM_SCALE && offsetXOffset == 0f) {
+                                        this.scaleX *= scale
+                                        this.scaleY *= scale
+                                        this.translationX += offsetX
+                                        this.translationY += offsetY
+                                    }
+                                }
+                            }
+                            .pointerInput(offsetXOffset == 0f) {
+                                if (!mediaItem.isVideo && offsetXOffset == 0f) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        val newScale = calculateScale(scale, zoom)
                                         val rawImageWidth = if (imageIntrinsicSize.width > 0f) imageIntrinsicSize.width else screenWidth
                                         val rawImageHeight = if (imageIntrinsicSize.height > 0f) imageIntrinsicSize.height else screenHeight
                                         val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                        val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                        val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
-                                        val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
-
-                                        if (detailsProgress > 0.01f) {
-                                            val imageOffset = screenHeight * 0.25f * detailsProgress
-                                            this.translationY = -imageOffset
-                                            this.scaleX = detailsScale
-                                            this.scaleY = detailsScale
+                                        val fittedImageWidth = rawImageWidth * fitScale
+                                        val fittedImageHeight = rawImageHeight * fitScale
+                                        if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
+                                            gestureMode = GestureMode.ZOOM
+                                            val (cx, cy) = clampOffset(
+                                                offsetX = offsetX + pan.x * newScale,
+                                                offsetY = offsetY + pan.y * newScale,
+                                                scale = newScale,
+                                                containerWidth = screenWidth,
+                                                containerHeight = screenHeight,
+                                                imageWidth = fittedImageWidth,
+                                                imageHeight = fittedImageHeight
+                                            )
+                                            scale = newScale
+                                            offsetX = cx
+                                            offsetY = cy
                                         } else {
-                                            this.translationX = horizontalOffset.value
-                                            if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
-                                                val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
-                                                this.scaleX = 1f - swipeProgress * 0.05f
-                                                this.scaleY = 1f - swipeProgress * 0.05f
-                                            }
-                                            this.translationY = currentVerticalOffset
-                                            if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                                this.scaleX = 1f - 0.25f * closeProgress
-                                                this.scaleY = 1f - 0.25f * closeProgress
-                                            }
-                                            if (predictiveBackProgress > 0f) {
-                                                val predScale = 1f - (predictiveBackProgress * 0.1f)
-                                                this.scaleX *= predScale
-                                                this.scaleY *= predScale
-                                                this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
-                                                this.clip = true
-                                            }
-                                            if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
-                                                this.scaleX *= scale
-                                                this.scaleY *= scale
-                                                this.translationX += offsetX
-                                                this.translationY += offsetY
-                                            }
+                                            scale = OverlayConstants.MIN_ZOOM_SCALE
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                            gestureMode = GestureMode.NONE
                                         }
                                     }
-                                    .pointerInput(Unit) {
-                                        if (!item.isVideo) {
-                                            detectTransformGestures { _, pan, zoom, _ ->
-                                                val newScale = calculateScale(scale, zoom)
-                                                val rawImageWidth = if (imageIntrinsicSize.width > 0f) imageIntrinsicSize.width else screenWidth
-                                                val rawImageHeight = if (imageIntrinsicSize.height > 0f) imageIntrinsicSize.height else screenHeight
-                                                val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                                val fittedImageWidth = rawImageWidth * fitScale
-                                                val fittedImageHeight = rawImageHeight * fitScale
-                                                if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
-                                                    gestureMode = GestureMode.ZOOM
-                                                    val (cx, cy) = clampOffset(
-                                                        offsetX = offsetX + pan.x * newScale,
-                                                        offsetY = offsetY + pan.y * newScale,
-                                                        scale = newScale,
-                                                        containerWidth = screenWidth,
-                                                        containerHeight = screenHeight,
-                                                        imageWidth = fittedImageWidth,
-                                                        imageHeight = fittedImageHeight
-                                                    )
-                                                    scale = newScale
-                                                    offsetX = cx
-                                                    offsetY = cy
-                                                } else {
-                                                    scale = OverlayConstants.MIN_ZOOM_SCALE
-                                                    offsetX = 0f
-                                                    offsetY = 0f
-                                                    gestureMode = GestureMode.NONE
-                                                }
-                                            }
-                                        }
-                                    }
-                            )
+                                }
+                            },
+                        loading = {
+                            Box(modifier = Modifier.fillMaxSize().background(Color.Black))
                         }
+                    )
+                }
+
+                // Previous image
+                prevItem?.let { prev ->
+                    key(prev.id) {
+                        val gap = 4f * density.density
+                        MediaImagePage(prev, -screenWidth - gap)
                     }
                 }
                 
-                // Next image - use stable key to prevent rebinding
+                // Current image
+                if (!item.isVideo) {
+                    key(item.id) {
+                        MediaImagePage(item, 0f)
+                    }
+                }
+                
+                // Next image
                 nextItem?.let { next ->
-                    key(next.id) {  // Stable key prevents recomposition
-                        SubcomposeAsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(next.uri)
-                                .size(targetDecodeSize)
-                                .memoryCacheKey(next.uri.toString())
-                                .diskCacheKey(next.uri.toString())
-                                .crossfade(false)  // No crossfade to prevent blink
-                                .build(),
-                            contentDescription = next.displayName,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(start = 4.dp)  // Small gap between images
-                                .graphicsLayer {
-                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                    this.translationX = horizontalOffset.value + screenWidth
-                                },
-                            loading = {
-                                // Show black background during load (matches overlay)
-                                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
-                            }
-                        )
+                    key(next.id) {
+                        val gap = 4f * density.density
+                        MediaImagePage(next, screenWidth + gap)
                     }
                 }
             }
@@ -1414,35 +1618,142 @@ fun MediaOverlay(
                         }
                     },
                     modifier = Modifier.fillMaxSize()
+                        .graphicsLayer {
+                            if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
+                                this.scaleX *= scale
+                                this.scaleY *= scale
+                                this.translationX += offsetX
+                                this.translationY += offsetY
+                            }
+                        }
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val newScale = calculateScale(scale, zoom)
+                                val rawWidth = if (videoIntrinsicSize.width > 0f) videoIntrinsicSize.width else screenWidth
+                                val rawHeight = if (videoIntrinsicSize.height > 0f) videoIntrinsicSize.height else screenHeight
+                                val fitScale = kotlin.math.min(screenWidth / rawWidth, screenHeight / rawHeight)
+                                val fittedWidth = rawWidth * fitScale
+                                val fittedHeight = rawHeight * fitScale
+                                if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
+                                    gestureMode = GestureMode.ZOOM
+                                    val (cx, cy) = clampOffset(
+                                        offsetX = offsetX + pan.x * newScale,
+                                        offsetY = offsetY + pan.y * newScale,
+                                        scale = newScale,
+                                        containerWidth = screenWidth,
+                                        containerHeight = screenHeight,
+                                        imageWidth = fittedWidth,
+                                        imageHeight = fittedHeight
+                                    )
+                                    scale = newScale
+                                    offsetX = cx
+                                    offsetY = cy
+                                } else {
+                                    scale = OverlayConstants.MIN_ZOOM_SCALE
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                    gestureMode = GestureMode.NONE
+                                }
+                            }
+                        }
                 )
                 
-                // Custom video controls overlay
+                // Seek Ripples
                 AnimatedVisibility(
-                    visible = controlsVisible && !isVideoFullscreen,
-                    enter = fadeIn(animationSpec = tween(300)),
-                    exit = fadeOut(animationSpec = tween(300))
+                    visible = seekIndicatorState == SeekIndicatorState.LEFT,
+                    enter = slideInHorizontally(animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)) { -it } + fadeIn(),
+                    exit = slideOutHorizontally() { -it } + fadeOut(),
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 32.dp)
                 ) {
-                    CustomVideoControls(
-                        exoPlayer = player,
-                        isPlaying = isPlaying,
-                        onPlayPauseClick = {
-                            if (player.isPlaying) {
-                                player.pause()
-                                isPlaying = false
-                            } else {
-                                player.play()
-                                isPlaying = true
-                            }
-                        },
-                        onFullscreenChange = { isFullscreen ->
-                            isVideoFullscreen = isFullscreen
-                            isAnyVideoFullscreen = isFullscreen
-                        },
-                        onControlsBoundsChanged = { bounds ->
-                            videoControlsBounds = bounds
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                shape = leftMorphShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Rounded.FastRewind,
+                                contentDescription = "Rewind",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "${abs(seekAmount)}s",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleMedium
+                            )
                         }
-                    )
+                    }
                 }
+
+                AnimatedVisibility(
+                    visible = seekIndicatorState == SeekIndicatorState.RIGHT,
+                    enter = slideInHorizontally(animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)) { it } + fadeIn(),
+                    exit = slideOutHorizontally() { it } + fadeOut(),
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 32.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                shape = rightMorphShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Rounded.FastForward,
+                                contentDescription = "Forward",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "${abs(seekAmount)}s",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                    }
+                }
+
+                // 2x Speed Pill
+                AnimatedVisibility(
+                    visible = isHoldingFor2x,
+                    enter = slideInVertically(animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)) { -it } + fadeIn(),
+                    exit = slideOutVertically() { -it } + fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
+                ) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        shape = androidx.compose.foundation.shape.CircleShape
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "2x Speed",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.FastForward,
+                                contentDescription = "Fast Forward",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
             }
         }
         val detailsTopBarLayerVisible = isDetailsOpen && !isAnyVideoFullscreen
@@ -1509,25 +1820,29 @@ fun MediaOverlay(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            brush = if (isZoomed) {
-                                Brush.verticalGradient(
-                                    colorStops = arrayOf(
-                                        0.0f to barColor.copy(alpha = 0.3f),
-                                        0.75f to barColor.copy(alpha = 0.3f),
-                                        0.78f to barColor.copy(alpha = 0.28f),
-                                        0.86f to barColor.copy(alpha = 0.16f),
-                                        0.93f to barColor.copy(alpha = 0.05f),
-                                        0.98f to barColor.copy(alpha = 0.01f),
-                                        1.0f to Color.Transparent
-                                    )
+                        .drawBehind {
+                            if (isZoomed) {
+                                val extraHeight = 48.dp.toPx()
+                                val totalHeight = size.height + extraHeight
+                                val brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        barColor,
+                                        barColor.copy(alpha = barColor.alpha * 0.7f),
+                                        barColor.copy(alpha = barColor.alpha * 0.3f),
+                                        barColor.copy(alpha = barColor.alpha * 0.1f),
+                                        Color.Transparent
+                                    ),
+                                    startY = 0f,
+                                    endY = totalHeight
+                                )
+                                drawRect(
+                                    brush = brush,
+                                    size = androidx.compose.ui.geometry.Size(size.width, totalHeight)
                                 )
                             } else {
-                                Brush.verticalGradient(
-                                    colors = listOf(barColor, barColor)
-                                )
+                                drawRect(color = barColor)
                             }
-                        )
+                        }
                         .onGloballyPositioned { coordinates ->
                             topBarBounds = coordinates.boundsInRoot()
                         }
@@ -1565,9 +1880,10 @@ fun MediaOverlay(
 
                             IconButton(onClick = toggleFavorite) {
                                 FontIcon(
-                                    unicode = if (isFavorited) FontIcons.Star else FontIcons.StarOutline,
+                                    unicode = FontIcons.Star,
                                     contentDescription = if (isFavorited) "Remove from favorites" else "Add to favorites",
-                                    tint = if (isFavorited) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface
+                                    tint = if (isFavorited) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface,
+                                    filled = isFavorited
                                 )
                             }
                         }
@@ -1617,25 +1933,75 @@ fun MediaOverlay(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            brush = if (isZoomed) {
-                                Brush.verticalGradient(
-                                    colorStops = arrayOf(
-                                        0.0f to Color.Transparent,
-                                        0.02f to barColor.copy(alpha = 0.01f),
-                                        0.07f to barColor.copy(alpha = 0.05f),
-                                        0.14f to barColor.copy(alpha = 0.16f),
-                                        0.22f to barColor.copy(alpha = 0.28f),
-                                        0.25f to barColor.copy(alpha = 0.3f),
-                                        1.0f to barColor.copy(alpha = 0.3f)
+                        .drawBehind {
+                            if (latestIsCurrentItemVideo) {
+                                val vcHeight = latestVideoControlsBounds?.height ?: 0f
+                                if (isZoomed) {
+                                    val totalHeight = size.height + vcHeight
+                                    val smoothGradient = listOf(
+                                        Color.Transparent,
+                                        barColor.copy(alpha = barColor.alpha * 0.1f),
+                                        barColor.copy(alpha = barColor.alpha * 0.3f),
+                                        barColor.copy(alpha = barColor.alpha * 0.7f),
+                                        barColor
                                     )
-                                )
+                                    val brush = Brush.verticalGradient(
+                                        colors = smoothGradient,
+                                        startY = -vcHeight,
+                                        endY = size.height
+                                    )
+                                    drawRect(
+                                        brush = brush,
+                                        topLeft = androidx.compose.ui.geometry.Offset(0f, -vcHeight),
+                                        size = androidx.compose.ui.geometry.Size(size.width, totalHeight)
+                                    )
+                                } else {
+                                    if (vcHeight > 0f) {
+                                        val smoothGradient = listOf(
+                                            Color.Transparent,
+                                            barColor.copy(alpha = barColor.alpha * 0.1f),
+                                            barColor.copy(alpha = barColor.alpha * 0.3f),
+                                            barColor.copy(alpha = barColor.alpha * 0.7f),
+                                            barColor
+                                        )
+                                        val brush = Brush.verticalGradient(
+                                            colors = smoothGradient,
+                                            startY = -vcHeight,
+                                            endY = 0f
+                                        )
+                                        drawRect(
+                                            brush = brush,
+                                            topLeft = androidx.compose.ui.geometry.Offset(0f, -vcHeight),
+                                            size = androidx.compose.ui.geometry.Size(size.width, vcHeight)
+                                        )
+                                    }
+                                    drawRect(color = barColor)
+                                }
                             } else {
-                                Brush.verticalGradient(
-                                    colors = listOf(barColor, barColor)
-                                )
+                                if (isZoomed) {
+                                    val extraHeight = 48.dp.toPx()
+                                    val totalHeight = size.height + extraHeight
+                                    val brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            barColor.copy(alpha = barColor.alpha * 0.1f),
+                                            barColor.copy(alpha = barColor.alpha * 0.3f),
+                                            barColor.copy(alpha = barColor.alpha * 0.7f),
+                                            barColor
+                                        ),
+                                        startY = -extraHeight,
+                                        endY = size.height
+                                    )
+                                    drawRect(
+                                        brush = brush,
+                                        topLeft = androidx.compose.ui.geometry.Offset(0f, -extraHeight),
+                                        size = androidx.compose.ui.geometry.Size(size.width, totalHeight)
+                                    )
+                                } else {
+                                    drawRect(color = barColor)
+                                }
                             }
-                        )
+                        }
                         .onGloballyPositioned { coordinates ->
                             bottomBarBounds = coordinates.boundsInRoot()
                         }
@@ -2027,6 +2393,47 @@ fun MediaOverlay(
             }
         }
         
+        // Custom video controls overlay (Placed here to draw natively on top of the bottom bar)
+        exoPlayer?.let { player ->
+            if (currentItem?.isVideo == true) {
+                AnimatedVisibility(
+                    visible = controlsVisible && !isVideoFullscreen,
+                    enter = fadeIn(animationSpec = tween(300)),
+                    exit = fadeOut(animationSpec = tween(300)),
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                ) {
+                    val bottomBarHeightDp = with(LocalDensity.current) {
+                        bottomBarBounds?.height?.toDp() ?: 0.dp
+                    }
+                    CustomVideoControls(
+                        exoPlayer = player,
+                        mediaItem = currentItem,
+                        isPlaying = isPlaying,
+                        bottomPadding = bottomBarHeightDp,
+                        onPlayPauseClick = {
+                            if (player.isPlaying) {
+                                player.pause()
+                                isPlaying = false
+                            } else {
+                                player.play()
+                                isPlaying = true
+                            }
+                        },
+                        onFullscreenChange = { isFullscreen ->
+                            isVideoFullscreen = isFullscreen
+                            isAnyVideoFullscreen = isFullscreen
+                        },
+                        onControlsBoundsChanged = { bounds ->
+                            videoControlsBounds = bounds
+                        },
+                        onInteraction = {
+                            lastInteractionTime = System.currentTimeMillis()
+                        }
+                    )
+                }
+            }
+        }
+
         if (detailsPanelProgress.value > 0f) {
             val progress = detailsPanelProgress.value.coerceIn(0f, 1f)
             val leadingAlpha = (progress * 1.5f).coerceIn(0f, 1f)
@@ -2167,38 +2574,43 @@ fun MediaOverlay(
 @Composable
 private fun CustomVideoControls(
     exoPlayer: ExoPlayer,
+    mediaItem: com.prantiux.pixelgallery.model.MediaItem?,
     isPlaying: Boolean,
+    bottomPadding: androidx.compose.ui.unit.Dp,
     onPlayPauseClick: () -> Unit,
-    onFullscreenChange: (Boolean) -> Unit = {},
-    onControlsBoundsChanged: (Rect) -> Unit = {}
+    onFullscreenChange: (Boolean) -> Unit,
+    onControlsBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit,
+    onInteraction: () -> Unit
 ) {
-    var currentPosition by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
-    var videoEnded by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     var isMuted by remember { mutableStateOf(exoPlayer.volume == 0f) }
     var isFullscreen by remember { mutableStateOf(false) }
     
+    // Track duration and ended state
+    var duration by remember { mutableLongStateOf(exoPlayer.duration.coerceAtLeast(0L)) }
+    var videoEnded by remember { mutableStateOf(exoPlayer.playbackState == androidx.media3.common.Player.STATE_ENDED) }
+    
+    // Shared scrub and position state between slider and time text
+    val scrubPosition = remember { mutableStateOf<Long?>(null) }
+    val currentPositionState = remember { mutableLongStateOf(exoPlayer.currentPosition.coerceAtLeast(0L)) }
+    
+    // Continually check for end state and duration changes
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            duration = exoPlayer.duration.coerceAtLeast(0L)
+            videoEnded = exoPlayer.playbackState == androidx.media3.common.Player.STATE_ENDED
+            kotlinx.coroutines.delay(200L)
+        }
+    }
+    
     val context = LocalContext.current
     val activity = context as? Activity
+    val coroutineScope = rememberCoroutineScope()
+    var isExportingFrame by remember { mutableStateOf(false) }
     
     // Notify parent about fullscreen changes
     LaunchedEffect(isFullscreen) {
         onFullscreenChange(isFullscreen)
-    }
-    
-    // Calculate bottom bar height: IconButton (48dp) + vertical padding (12dp * 2) + navigation bars
-    val density = LocalDensity.current
-    val navigationBarsPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomBarHeight = 48.dp + 24.dp + navigationBarsPadding // Total height of bottom action bar
-    
-    // Update position continuously
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            currentPosition = exoPlayer.currentPosition
-            duration = exoPlayer.duration.coerceAtLeast(0L)
-            videoEnded = exoPlayer.playbackState == Player.STATE_ENDED
-            delay(100)
-        }
     }
     
     // Animated button shape for play/pause with spring animation
@@ -2228,41 +2640,33 @@ private fun CustomVideoControls(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .onGloballyPositioned { coordinates ->
-                    onControlsBoundsChanged(coordinates.boundsInRoot())
+                    onControlsBoundsChanged(coordinates.boundsInWindow())
                 }
-                .padding(bottom = bottomBarHeight) // Attached to bottom bar, no spacing
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent, // Top: transparent (merges with video)
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f) // Bottom: theme-based color with opacity
-                        )
-                    )
-                )
+                .padding(bottom = bottomPadding) // Attached to bottom bar, no spacing
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent()
+                            onInteraction()
+                        }
+                    }
+                }
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Seek bar
-                Slider(
-                    value = if (duration > 0) currentPosition.toFloat() else 0f,
-                    onValueChange = { newPosition ->
-                        exoPlayer.seekTo(newPosition.toLong())
-                    },
-                    valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
                 // Play/Pause button and Time display - button left, time center
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    // Play/Pause/Restart button (left-aligned)
-                    val playShape = if (playButtonShape > 0.5f) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    // Play/Pause/Restart button (left-aligned as a pill with bounce effect)
+                    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
+                    val scale by animateFloatAsState(
+                        targetValue = if (isPressed) 0.85f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "playScale"
+                    )
                     
                     Surface(
                         onClick = {
@@ -2275,11 +2679,17 @@ private fun CustomVideoControls(
                                 onPlayPauseClick()
                             }
                         },
-                        shape = playShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                        interactionSource = interactionSource,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
                         modifier = Modifier
-                            .size(36.dp)
+                            .height(36.dp)
+                            .width(64.dp)
                             .align(Alignment.CenterStart)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
                     ) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -2296,54 +2706,56 @@ private fun CustomVideoControls(
                                     isPlaying -> "Pause"
                                     else -> "Play"
                                 },
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onSurface,
                                 size = 20.sp,
-                                filled = true
+                                filled = true // Play, Pause and Restart look best filled
                             )
                         }
                     }
                     
                     // Time display (center-aligned)
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.align(Alignment.Center)
                     ) {
-                        Text(
-                            text = formatVideoTime(currentPosition),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "/",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
-                        Text(
-                            text = formatVideoTime(duration),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.9f)
+                        VideoTime(
+                            duration = duration, 
+                            scrubPosition = scrubPosition, 
+                            currentPositionState = currentPositionState
                         )
                     }
                     
                     // Right-aligned controls: Mute/Unmute and Fullscreen
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.align(Alignment.CenterEnd)
                     ) {
-                        // Mute/Unmute button with animated rounded square background
-                        val muteShape = if (muteButtonShape > 0.5f) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                        // Mute/Unmute button (left half of split pill)
+                        val muteInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        val isMutePressed by muteInteraction.collectIsPressedAsState()
+                        val muteScale by animateFloatAsState(
+                            targetValue = if (isMutePressed) 0.85f else 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            ),
+                            label = "muteScale"
+                        )
                         
                         Surface(
                             onClick = {
                                 isMuted = !isMuted
                                 exoPlayer.volume = if (isMuted) 0f else 1f
                             },
-                            shape = muteShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                            modifier = Modifier.size(36.dp)
+                            interactionSource = muteInteraction,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp, topEnd = 4.dp, bottomEnd = 4.dp),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                            modifier = Modifier
+                                .size(width = 44.dp, height = 36.dp)
+                                .graphicsLayer {
+                                    scaleX = muteScale
+                                    scaleY = muteScale
+                                }
                         ) {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -2352,55 +2764,85 @@ private fun CustomVideoControls(
                                 FontIcon(
                                     unicode = if (isMuted) FontIcons.VolumeOff else FontIcons.VolumeUp,
                                     contentDescription = if (isMuted) "Unmute" else "Mute",
-                                    tint = Color.White,
+                                    tint = MaterialTheme.colorScheme.onSurface,
                                     size = 20.sp
                                 )
                             }
                         }
                         
-                        // Fullscreen button
+                        // Frame Export button (right half of split pill)
+                        val exportInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        val isExportPressed by exportInteraction.collectIsPressedAsState()
+                        val exportScale by animateFloatAsState(
+                            targetValue = if (isExportPressed) 0.85f else 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            ),
+                            label = "exportScale"
+                        )
+                        
                         Surface(
                             onClick = {
-                                activity?.let { act ->
-                                    val window = act.window
-                                    val insetsController = WindowInsetsControllerCompat(window, window.decorView)
-                                    
-                                    isFullscreen = !isFullscreen
-                                    if (isFullscreen) {
-                                        // Enter fullscreen landscape mode
-                                        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                        
-                                        // Hide system bars with modern API
-                                        insetsController.hide(WindowInsetsCompat.Type.systemBars())
-                                        insetsController.systemBarsBehavior = 
-                                            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                                    } else {
-                                        // Exit fullscreen - restore portrait
-                                        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                        
-                                        // Show system bars
-                                        insetsController.show(WindowInsetsCompat.Type.systemBars())
+                                if (isExportingFrame) return@Surface
+                                isExportingFrame = true
+                                if (mediaItem != null) {
+                                    val position = exoPlayer.currentPosition
+                                    coroutineScope.launch {
+                                        extractAndSaveFrame(context, mediaItem.uri, position, mediaItem.dateAdded * 1000L) { success ->
+                                            isExportingFrame = false
+                                            Toast.makeText(context, if (success) "Frame saved to gallery!" else "Failed to save frame", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
+                                } else {
+                                    isExportingFrame = false
                                 }
                             },
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                            modifier = Modifier.size(36.dp)
+                            interactionSource = exportInteraction,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 18.dp, bottomEnd = 18.dp),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                            modifier = Modifier
+                                .size(width = 44.dp, height = 36.dp)
+                                .graphicsLayer {
+                                    scaleX = exportScale
+                                    scaleY = exportScale
+                                }
                         ) {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center
                             ) {
-                                FontIcon(
-                                    unicode = if (isFullscreen) FontIcons.FullscreenExit else FontIcons.Fullscreen,
-                                    contentDescription = if (isFullscreen) "Exit Fullscreen" else "Fullscreen",
-                                    tint = Color.White,
-                                    size = 20.sp
-                                )
+                                if (isExportingFrame) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    FontIcon(
+                                        unicode = FontIcons.FrameExport,
+                                        contentDescription = "Export Frame",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        size = 18.sp,
+                                        filled = isExportPressed
+                                    )
+                                }
                             }
                         }
                     }
                 }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Seek bar
+                VideoSlider(
+                    exoPlayer = exoPlayer,
+                    duration = duration,
+                    haptic = haptic,
+                    scrubPosition = scrubPosition,
+                    currentPositionState = currentPositionState,
+                    isPlaying = isPlaying
+                )
             }
         }
     }
@@ -2446,9 +2888,101 @@ private fun formatVideoTime(timeMs: Long): String {
     val seconds = totalSeconds % 60
     
     return if (hours > 0) {
-        String.format("%d:%02d:%02d", hours, minutes, seconds)
+        String.format(java.util.Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds)
     } else {
-        String.format("%d:%02d", minutes, seconds)
+       return String.format(java.util.Locale.getDefault(), "%02d:%02d", minutes, seconds)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VideoSlider(
+    exoPlayer: androidx.media3.exoplayer.ExoPlayer,
+    duration: Long,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    scrubPosition: androidx.compose.runtime.MutableState<Long?>,
+    currentPositionState: androidx.compose.runtime.MutableLongState,
+    isPlaying: Boolean
+) {
+    var isScrubbing by remember { mutableStateOf(false) }
+    var lastSeekTime by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(isPlaying, isScrubbing) {
+        while (isPlaying && !isScrubbing) {
+            currentPositionState.longValue = exoPlayer.currentPosition
+            kotlinx.coroutines.delay(16L) // ~60fps updates for smoother slider
+        }
+    }
+
+    LaunchedEffect(isScrubbing, isPlaying) {
+        while (isActive && !isScrubbing && !isPlaying) {
+            currentPositionState.longValue = exoPlayer.currentPosition
+            kotlinx.coroutines.delay(100L)
+        }
+    }
+
+    Slider(
+        value = currentPositionState.longValue.toFloat(),
+        onValueChange = { newValue ->
+            if (!isScrubbing) {
+                exoPlayer.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
+            }
+            isScrubbing = true
+            currentPositionState.longValue = newValue.toLong()
+            scrubPosition.value = currentPositionState.longValue
+            
+            // Throttle seeks during scrub to avoid decoder lag
+            val now = System.currentTimeMillis()
+            if (now - lastSeekTime > 40) {
+                lastSeekTime = now
+                exoPlayer.seekTo(currentPositionState.longValue)
+            }
+        },
+        onValueChangeFinished = {
+            isScrubbing = false
+            scrubPosition.value = null
+            exoPlayer.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+            exoPlayer.seekTo(currentPositionState.longValue)
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+        },
+        valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
+        colors = SliderDefaults.colors(
+            thumbColor = MaterialTheme.colorScheme.onSurface,
+            activeTrackColor = MaterialTheme.colorScheme.onSurface,
+            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+        ),
+        modifier = Modifier.fillMaxWidth().scale(scaleX = 1f, scaleY = 0.7f)
+    )
+}
+
+@Composable
+private fun VideoTime(
+    duration: Long,
+    scrubPosition: androidx.compose.runtime.MutableState<Long?>,
+    currentPositionState: androidx.compose.runtime.State<Long>
+) {
+    val displayPosition = scrubPosition.value ?: currentPositionState.value
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = formatVideoTime(displayPosition),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium
+        )
+        Text(
+            text = "/",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+        )
+        Text(
+            text = formatVideoTime(duration),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+        )
     }
 }
 
@@ -2468,5 +3002,99 @@ fun DetailSection(label: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+/**
+ * Extracts a frame from a video at a specific time and saves it to the MediaStore.
+ */
+private suspend fun extractAndSaveFrame(context: Context, uri: android.net.Uri, positionMs: Long, mediaDateAddedMs: Long, onResult: (Boolean) -> Unit) {
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            // Use OPTION_CLOSEST for exact frame extraction instead of closest keyframe
+            val bitmap = retriever.getFrameAtTime(positionMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST)
+            if (bitmap != null) {
+                // Use exact timestamp from source video
+                val exactFrameTimeMs = mediaDateAddedMs
+                val exactFrameTimeSeconds = exactFrameTimeMs / 1000
+                
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "Frame_${System.currentTimeMillis()}.jpg")
+                    put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(android.provider.MediaStore.Images.Media.DATE_ADDED, exactFrameTimeSeconds)
+                    put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, exactFrameTimeSeconds)
+                    put(android.provider.MediaStore.Images.Media.DATE_TAKEN, exactFrameTimeMs)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/PixelGallery")
+                        put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+
+                val imageUri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                if (imageUri != null) {
+                    context.contentResolver.openOutputStream(imageUri)?.use { out ->
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, out)
+                    }
+
+                    // Write EXIF Date so MediaStore picks it up on Android Q+
+                    try {
+                        context.contentResolver.openFileDescriptor(imageUri, "rw")?.use { pfd ->
+                            val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                            val date = java.util.Date(exactFrameTimeMs)
+                            
+                            val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                            val dateString = sdf.format(date)
+                            exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL, dateString)
+                            exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME, dateString)
+                            exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_DIGITIZED, dateString)
+                            
+                            val offsetSdf = java.text.SimpleDateFormat("XXX", java.util.Locale.US)
+                            val offsetString = offsetSdf.format(date)
+                            exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME, offsetString)
+                            exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME_ORIGINAL, offsetString)
+                            exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME_DIGITIZED, offsetString)
+                            
+                            exif.saveAttributes()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        values.clear()
+                        values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                        values.put(android.provider.MediaStore.Images.Media.DATE_TAKEN, exactFrameTimeMs)
+                        values.put(android.provider.MediaStore.Images.Media.DATE_ADDED, exactFrameTimeSeconds)
+                        values.put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, exactFrameTimeSeconds)
+                        context.contentResolver.update(imageUri, values, null, null)
+                    }
+                    
+                    // Request media scan
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(imageUri.toString()), arrayOf("image/jpeg"), null)
+
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        onResult(true)
+                    }
+                } else {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        onResult(false)
+                    }
+                }
+            } else {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    onResult(false)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onResult(false)
+            }
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {}
+        }
     }
 }
