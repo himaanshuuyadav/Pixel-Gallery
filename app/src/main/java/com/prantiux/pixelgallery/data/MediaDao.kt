@@ -18,10 +18,10 @@ interface MediaDao {
     // ═════════════════════════════════════════════════════════════════════
     // PRIMARY QUERY - ALL MEDIA (Room-first architecture)
     // ═════════════════════════════════════════════════════════════════════
-    @Query("SELECT * FROM media ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media ORDER BY dateAdded DESC, id DESC")
     fun getAllMedia(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media ORDER BY dateAdded DESC, id DESC")
     fun getPagedMedia(): androidx.paging.PagingSource<Int, MediaEntity>
 
 
@@ -29,52 +29,52 @@ interface MediaDao {
     // ═════════════════════════════════════════════════════════════════════
     // DATE SORTING (Primary sort mode)
     // ═════════════════════════════════════════════════════════════════════
-    @Query("SELECT * FROM media ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media ORDER BY dateAdded DESC, id DESC")
     fun getMediaByDateDesc(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media ORDER BY dateAdded DESC, id DESC")
     fun getPagedMediaByDateDesc(): androidx.paging.PagingSource<Int, MediaEntity>
 
-    @Query("SELECT * FROM media ORDER BY dateAdded ASC")
+    @Query("SELECT * FROM media ORDER BY dateAdded ASC, id ASC")
     fun getMediaByDateAsc(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY dateAdded ASC")
+    @Query("SELECT * FROM media ORDER BY dateAdded ASC, id ASC")
     fun getPagedMediaByDateAsc(): androidx.paging.PagingSource<Int, MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // NAME SORTING
     // ═════════════════════════════════════════════════════════════════════
-    @Query("SELECT * FROM media ORDER BY displayName ASC")
+    @Query("SELECT * FROM media ORDER BY displayName ASC, id ASC")
     fun getMediaByNameAsc(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY displayName ASC")
+    @Query("SELECT * FROM media ORDER BY displayName ASC, id ASC")
     fun getPagedMediaByNameAsc(): androidx.paging.PagingSource<Int, MediaEntity>
 
-    @Query("SELECT * FROM media ORDER BY displayName DESC")
+    @Query("SELECT * FROM media ORDER BY displayName DESC, id DESC")
     fun getMediaByNameDesc(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY displayName DESC")
+    @Query("SELECT * FROM media ORDER BY displayName DESC, id DESC")
     fun getPagedMediaByNameDesc(): androidx.paging.PagingSource<Int, MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // SIZE SORTING
     // ═════════════════════════════════════════════════════════════════════
-    @Query("SELECT * FROM media ORDER BY size DESC")
+    @Query("SELECT * FROM media ORDER BY size DESC, id DESC")
     fun getMediaBySizeDesc(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY size DESC")
+    @Query("SELECT * FROM media ORDER BY size DESC, id DESC")
     fun getPagedMediaBySizeDesc(): androidx.paging.PagingSource<Int, MediaEntity>
 
-    @Query("SELECT * FROM media ORDER BY size ASC")
+    @Query("SELECT * FROM media ORDER BY size ASC, id ASC")
     fun getMediaBySizeAsc(): Flow<List<MediaEntity>>
 
-    @Query("SELECT * FROM media ORDER BY size ASC")
+    @Query("SELECT * FROM media ORDER BY size ASC, id ASC")
     fun getPagedMediaBySizeAsc(): androidx.paging.PagingSource<Int, MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
     // TYPE FILTERING (by video/image)
     // ═════════════════════════════════════════════════════════════════════
-    @Query("SELECT * FROM media WHERE isVideo = 0 ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media WHERE isVideo = 0 ORDER BY dateAdded DESC, id DESC")
     fun getAllImages(): Flow<List<MediaEntity>>
 
     @Query("SELECT * FROM media WHERE isVideo = 0")
@@ -86,53 +86,53 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE isVideo = 0 AND bucketId IN (:bucketIds)
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun getImagesByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
 
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun getPagedMediaByBucketIdsDateDesc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY dateAdded ASC
+        ORDER BY dateAdded ASC, id ASC
     """)
     fun getPagedMediaByBucketIdsDateAsc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY displayName ASC
+        ORDER BY displayName ASC, id ASC
     """)
     fun getPagedMediaByBucketIdsNameAsc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY displayName DESC
+        ORDER BY displayName DESC, id DESC
     """)
     fun getPagedMediaByBucketIdsNameDesc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY size DESC
+        ORDER BY size DESC, id DESC
     """)
     fun getPagedMediaByBucketIdsSizeDesc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY size ASC
+        ORDER BY size ASC, id ASC
     """)
     fun getPagedMediaByBucketIdsSizeAsc(bucketIds: List<String>): androidx.paging.PagingSource<Int, MediaEntity>
 
-    @Query("SELECT * FROM media WHERE isVideo = 1 ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media WHERE isVideo = 1 ORDER BY dateAdded DESC, id DESC")
     fun getAllVideos(): Flow<List<MediaEntity>>
 
     // ═════════════════════════════════════════════════════════════════════
@@ -141,7 +141,7 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE isVideo = 1 AND bucketId IN (:bucketIds)
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun getVideosByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
 
@@ -152,7 +152,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE displayName LIKE '%' || :query || '%'
         OR bucketName LIKE '%' || :query || '%'
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchMedia(query: String): Flow<List<MediaEntity>>
 
@@ -160,7 +160,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE displayName LIKE '%' || :query || '%'
         OR bucketName LIKE '%' || :query || '%'
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchPagedMedia(query: String): androidx.paging.PagingSource<Int, MediaEntity>
 
@@ -171,7 +171,7 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE bucketId = :bucketId
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun getMediaByBucket(bucketId: String): Flow<List<MediaEntity>>
 
@@ -180,7 +180,7 @@ interface MediaDao {
         FROM media 
         WHERE bucketId IS NOT NULL 
         GROUP BY bucketId, bucketName 
-        ORDER BY count DESC
+        ORDER BY count DESC, bucketId ASC
     """)
     fun getAllBuckets(): List<BucketInfo>
 
@@ -189,11 +189,11 @@ interface MediaDao {
         FROM media 
         WHERE bucketId IS NOT NULL 
         GROUP BY bucketId, bucketName 
-        ORDER BY count DESC
+        ORDER BY count DESC, bucketId ASC
     """)
     fun getAllBucketsFlow(): Flow<List<BucketInfo>>
 
-    @Query("SELECT * FROM media WHERE bucketId = :bucketId ORDER BY dateAdded DESC LIMIT :limit")
+    @Query("SELECT * FROM media WHERE bucketId = :bucketId ORDER BY dateAdded DESC, id DESC LIMIT :limit")
     fun getTopMediaForBucket(bucketId: String, limit: Int): List<MediaEntity>
 
     // ═════════════════════════════════════════════════════════════════════
@@ -214,7 +214,7 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE bucketId IN (:bucketIds)
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun getMediaByBucketIds(bucketIds: List<String>): Flow<List<MediaEntity>>
 
@@ -224,7 +224,7 @@ interface MediaDao {
     @Query("""
         SELECT * FROM media
         WHERE dateAdded >= :threshold
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun getRecentlyAdded(threshold: Long): Flow<List<MediaEntity>>
 
@@ -234,7 +234,7 @@ interface MediaDao {
     @Query("""
         SELECT m.* FROM media m
         INNER JOIN favorites f ON m.id = f.mediaId
-        ORDER BY f.timestamp DESC
+        ORDER BY f.timestamp DESC, m.id DESC
     """)
     fun getFavoriteMedia(): Flow<List<MediaEntity>>
 
@@ -245,7 +245,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
         AND dateAdded >= :startMs AND dateAdded <= :endMs
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByDateRange(query: String, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
 
@@ -256,7 +256,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
         AND isVideo = :isVideo
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByMediaType(query: String, isVideo: Boolean): Flow<List<MediaEntity>>
 
@@ -267,7 +267,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
         AND size BETWEEN :minSize AND :maxSize
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchBySize(query: String, minSize: Long, maxSize: Long): Flow<List<MediaEntity>>
 
@@ -279,14 +279,14 @@ interface MediaDao {
         WHERE (displayName LIKE '%' || :query || '%' 
               OR bucketName LIKE '%' || :query || '%')
           AND mimeType LIKE '%gif%'
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByGif(query: String): Flow<List<MediaEntity>>
 
     @Query("""
         SELECT * FROM media
         WHERE mimeType LIKE '%gif%'
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByGifOnly(): Flow<List<MediaEntity>>
 
@@ -298,7 +298,7 @@ interface MediaDao {
         WHERE (displayName LIKE '%' || :query || '%' 
               OR bucketName LIKE '%' || :query || '%')
           AND (bucketName LIKE '%screenshot%' OR displayName LIKE '%screenshot%')
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByScreenshots(query: String): Flow<List<MediaEntity>>
 
@@ -306,7 +306,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE bucketName LIKE '%screenshot%'
            OR displayName LIKE '%screenshot%'
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchScreenshotsOnly(): Flow<List<MediaEntity>>
 
@@ -318,7 +318,7 @@ interface MediaDao {
         WHERE (displayName LIKE '%' || :query || '%' 
               OR bucketName LIKE '%' || :query || '%')
           AND (bucketName LIKE '%camera%' OR bucketName LIKE '%dcim%')
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByCamera(query: String): Flow<List<MediaEntity>>
 
@@ -326,7 +326,7 @@ interface MediaDao {
         SELECT * FROM media
         WHERE bucketName LIKE '%camera%'
            OR bucketName LIKE '%dcim%'
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByCameraOnly(): Flow<List<MediaEntity>>
 
@@ -337,7 +337,7 @@ interface MediaDao {
         SELECT DISTINCT m.* FROM media m
         INNER JOIN media_labels ml ON m.id = ml.mediaId
         WHERE ml.labels LIKE '%' || :label || '%'
-        ORDER BY m.dateAdded DESC
+        ORDER BY m.dateAdded DESC, m.id DESC
     """)
     fun searchByLabel(label: String): Flow<List<MediaEntity>>
 
@@ -351,7 +351,7 @@ interface MediaDao {
         WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
         AND isVideo = :isVideo
         AND dateAdded >= :startMs AND dateAdded <= :endMs
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByTypeAndDate(query: String, isVideo: Boolean, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
 
@@ -361,7 +361,7 @@ interface MediaDao {
         WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
         AND isVideo = :isVideo
         AND size BETWEEN :minSize AND :maxSize
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByTypeAndSize(query: String, isVideo: Boolean, minSize: Long, maxSize: Long): Flow<List<MediaEntity>>
 
@@ -371,7 +371,7 @@ interface MediaDao {
         WHERE (displayName LIKE '%' || :query || '%' OR bucketName LIKE '%' || :query || '%')
         AND size BETWEEN :minSize AND :maxSize
         AND dateAdded >= :startMs AND dateAdded <= :endMs
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchBySizeAndDate(query: String, minSize: Long, maxSize: Long, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
 
@@ -382,7 +382,7 @@ interface MediaDao {
         AND isVideo = :isVideo
         AND size BETWEEN :minSize AND :maxSize
         AND dateAdded >= :startMs AND dateAdded <= :endMs
-        ORDER BY dateAdded DESC
+        ORDER BY dateAdded DESC, id DESC
     """)
     fun searchByTypeAndSizeAndDate(query: String, isVideo: Boolean, minSize: Long, maxSize: Long, startMs: Long, endMs: Long): Flow<List<MediaEntity>>
 
