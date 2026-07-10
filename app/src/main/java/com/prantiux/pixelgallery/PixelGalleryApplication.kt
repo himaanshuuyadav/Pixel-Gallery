@@ -19,6 +19,7 @@ class PixelGalleryApplication : Application(), ImageLoaderFactory {
                 add(VideoFrameDecoder.Factory())
                 add(com.prantiux.pixelgallery.image.MediaStoreThumbnailFetcher.Factory(this@PixelGalleryApplication))
             }
+            .bitmapConfig(android.graphics.Bitmap.Config.RGB_565)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.25)

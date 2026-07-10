@@ -79,6 +79,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Ensure gallery stays up-to-date with any changes (e.g. photos taken) that happened while the app was in the background.
+        if (uiReady) {
+            viewModel.refresh(this, showLoader = false)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         splashScreen.setKeepOnScreenCondition { !uiReady }
@@ -241,35 +249,18 @@ class MainActivity : ComponentActivity() {
                 amoledMode = amoledMode
             ) {
                 if (startupReady) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showAppContent,
-                        enter = androidx.compose.animation.fadeIn(
-                            animationSpec = androidx.compose.animation.core.tween(
-                                durationMillis = 400,
-                                easing = androidx.compose.animation.core.LinearOutSlowInEasing
-                            )
-                        ) + androidx.compose.animation.scaleIn(
-                            initialScale = 0.92f,
-                            animationSpec = androidx.compose.animation.core.tween(
-                                durationMillis = 400,
-                                easing = androidx.compose.animation.core.FastOutSlowInEasing
-                            )
-                        ),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        AppNavigation(
-                            viewModel = viewModel,
-                            settingsDataStore = settingsDataStore,
-                            defaultTab = defaultTab,
-                            lastUsedTab = lastUsedTab,
-                            onTabChanged = { tab ->
-                                lastUsedTab = tab
-                                lifecycleScope.launch {
-                                    settingsDataStore.saveLastUsedTab(tab)
-                                }
+                    AppNavigation(
+                        viewModel = viewModel,
+                        settingsDataStore = settingsDataStore,
+                        defaultTab = defaultTab,
+                        lastUsedTab = lastUsedTab,
+                        onTabChanged = { tab ->
+                            lastUsedTab = tab
+                            lifecycleScope.launch {
+                                settingsDataStore.saveLastUsedTab(tab)
                             }
-                        )
-                    }
+                        }
+                    )
                 }
             }
         }

@@ -47,3 +47,26 @@ fun List<MediaEntity>.toMediaItems(favoriteIds: Set<Long> = emptySet()): List<Me
         entity.toMediaItem(isFavorite = entity.id in favoriteIds)
     }
 }
+
+/**
+ * Convert MediaItem (UI model) to MediaEntity (Room)
+ */
+fun MediaItem.toMediaEntity(): MediaEntity {
+    return MediaEntity(
+        id = this.id,
+        uri = this.uri.toString(),
+        displayName = this.displayName,
+        dateAdded = this.dateAdded,
+        bucketId = this.bucketId,
+        bucketName = this.bucketName,
+        mimeType = this.mimeType,
+        width = this.width,
+        height = this.height,
+        size = this.size,
+        duration = this.duration,
+        isVideo = this.isVideo,
+        path = this.path,
+        dateGroupDay = this.dateGroupDay,
+        dateGroupMonth = this.dateGroupMonth
+    )
+}

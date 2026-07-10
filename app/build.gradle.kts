@@ -94,6 +94,7 @@ dependencies {
     
     // Material3 Expressive APIs (MaterialShapes, LoadingIndicator)
     implementation("androidx.compose.material3:material3:1.5.0-alpha15")
+    implementation("androidx.graphics:graphics-shapes:1.0.1")
     
     // Material Icons Extended (for DragIndicator and other rounded icons)
     implementation("androidx.compose.material:material-icons-extended")

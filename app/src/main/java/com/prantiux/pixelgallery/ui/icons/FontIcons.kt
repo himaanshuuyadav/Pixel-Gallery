@@ -38,6 +38,8 @@ object FontIcons {
     const val Pause = "\ue034"  // filled pause
     const val Fullscreen = "\ue5d0"
     const val FullscreenExit = "\ue5d1"
+    const val ScreenRotation = "\ue1c1"
+    const val FrameExport = "\uF677"
     
     // Gallery & Media
     const val Image = "\ue3f4"

@@ -26,6 +26,7 @@ import com.prantiux.pixelgallery.data.RecentSearchesDataStore
 import com.prantiux.pixelgallery.data.SettingsDataStore
 import com.prantiux.pixelgallery.data.toMediaItem
 import com.prantiux.pixelgallery.data.toMediaItems
+import com.prantiux.pixelgallery.data.toMediaEntity
 import com.prantiux.pixelgallery.BuildConfig
 import com.prantiux.pixelgallery.ml.ImageLabelWorker
 import com.prantiux.pixelgallery.model.Album
@@ -458,7 +459,12 @@ class MediaViewModel : ViewModel() {
                     }
                     .flatMapLatest { (selected, sortMode) ->
                         Pager(
-                            config = PagingConfig(pageSize = 100, enablePlaceholders = true, prefetchDistance = 200),
+                            config = PagingConfig(
+                                pageSize = 100, 
+                                initialLoadSize = 100,
+                                enablePlaceholders = true, 
+                                prefetchDistance = 200
+                            ),
                             pagingSourceFactory = {
                                 if (selected == null || selected.isEmpty()) {
                                     when (sortMode) {
@@ -2437,7 +2443,7 @@ class MediaViewModel : ViewModel() {
      */
     fun startObserving(context: Context) {
         if (mediaContentObserver == null) {
-            mediaContentObserver = MediaContentObserver(context) {
+            mediaContentObserver = MediaContentObserver(context) { urisToProcess ->
                 // ROOM-FIRST: ContentObserver triggers MediaStore → Room sync
                 // Room flows auto-emit → UI updates automatically
                 val now = SystemClock.elapsedRealtime()
@@ -2445,7 +2451,10 @@ class MediaViewModel : ViewModel() {
                     if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, sync suppressed")
                     return@MediaContentObserver
                 }
-                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, triggering sync")
+                
+                // Always trigger a full refresh. This is fast and guarantees we pick up items
+                // that have their IS_PENDING flag cleared, bypassing incremental sync issues.
+                if (com.prantiux.pixelgallery.BuildConfig.DEBUG) android.util.Log.d("SYNC_ENGINE", "MediaStore change detected, triggering full sync")
                 refresh(context, showLoader = false)
                 // Schedule deferred ML labeling after refresh completes
                 scheduleDeferredLabelingIfNeeded(context)

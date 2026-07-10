@@ -35,14 +35,13 @@ fun FontIcon(
 ) {
     Text(
         text = unicode,
-        fontFamily = MaterialSymbolsRounded,
+        fontFamily = if (filled) MaterialSymbolsRoundedFilled else MaterialSymbolsRounded,
         fontSize = size,
         color = tint,
         style = LocalTextStyle.current.merge(
             TextStyle(
                 lineHeight = size,
-                letterSpacing = 0.sp,
-                fontFeatureSettings = if (filled) "'FILL' 1" else "'FILL' 0"
+                letterSpacing = 0.sp
             )
         ),
         modifier = modifier.then(

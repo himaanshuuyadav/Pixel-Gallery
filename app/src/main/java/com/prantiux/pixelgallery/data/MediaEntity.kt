@@ -11,6 +11,7 @@ import androidx.room.PrimaryKey
         Index("bucketId"),                            // Single index for album grouping
         Index("isVideo"),                             // Single index for image/video filtering
         Index(value = ["isVideo", "dateAdded"]),      // Composite for common filter+sort
+        Index(value = ["bucketId", "dateAdded"]),     // Composite for album views
         Index("displayName"),                         // Single index for name-based search
         Index("size")                                 // Single index for size-based filtering
     ]

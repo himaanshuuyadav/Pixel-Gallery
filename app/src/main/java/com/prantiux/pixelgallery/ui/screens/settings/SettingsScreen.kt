@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -225,8 +226,11 @@ internal fun GroupedSettingItem(
         }
     )
     
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+
     Surface(
         onClick = onClick,
+        interactionSource = interactionSource,
         enabled = enabled,
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -234,6 +238,8 @@ internal fun GroupedSettingItem(
             .bounceClick()
             .fillMaxWidth()
     ) {
+        val isPressed by interactionSource.collectIsPressedAsState()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -245,7 +251,8 @@ internal fun GroupedSettingItem(
                 contentDescription = null,
                 size = 24.sp,
                 tint = if (enabled) MaterialTheme.colorScheme.primary 
-                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                filled = isPressed
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -305,8 +312,11 @@ internal fun GroupedSettingToggle(
         }
     }
     
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+
     Surface(
         onClick = { handleCheckedChange(!checked) },
+        interactionSource = interactionSource,
         enabled = enabled,
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -314,6 +324,8 @@ internal fun GroupedSettingToggle(
             .bounceClick()
             .fillMaxWidth()
     ) {
+        val isPressed by interactionSource.collectIsPressedAsState()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -325,7 +337,8 @@ internal fun GroupedSettingToggle(
                 contentDescription = null,
                 size = 24.sp,
                 tint = if (enabled) MaterialTheme.colorScheme.primary 
-                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                filled = checked || isPressed
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {

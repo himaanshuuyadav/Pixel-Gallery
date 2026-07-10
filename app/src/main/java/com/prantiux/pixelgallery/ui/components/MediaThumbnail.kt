@@ -280,7 +280,8 @@ fun VideoDurationPill(
                     unicode = FontIcons.PlayArrow,
                     contentDescription = "Video",
                     size = iconSize,
-                    tint = Color.White
+                    tint = Color.White,
+                    filled = true
                 )
                 Text(
                     text = formatDuration(duration),
@@ -296,7 +297,8 @@ fun VideoDurationPill(
                     unicode = FontIcons.PlayArrow,
                     contentDescription = "Video",
                     size = iconSize,
-                    tint = Color.White
+                    tint = Color.White,
+                    filled = true
                 )
             }
             "Duration only" -> {
@@ -328,6 +330,7 @@ fun FavoriteStarBadge(
         contentDescription = "Favorited",
         size = 16.sp,
         tint = Color(0xFFFFD700), // Gold color
+        filled = true,
         modifier = modifier
     )
 }

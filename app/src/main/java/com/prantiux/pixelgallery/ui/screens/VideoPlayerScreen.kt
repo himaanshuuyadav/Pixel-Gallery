@@ -93,6 +93,7 @@ fun VideoPlayerScreen(
             playWhenReady = autoPlayVideos
             repeatMode = if (loopVideos) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             volume = if (muteByDefault) 0f else 1f
+            setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         }
     }
     
@@ -116,7 +117,7 @@ fun VideoPlayerScreen(
             currentPosition = exoPlayer.currentPosition
             duration = exoPlayer.duration.coerceAtLeast(0L)
             isBuffering = exoPlayer.playbackState == Player.STATE_BUFFERING
-            delay(100)
+            delay(16)
         }
     }
     
@@ -208,7 +209,8 @@ fun VideoPlayerScreen(
         AnimatedVisibility(
             visible = showControls,
             enter = fadeIn(animationSpec = tween(300)),
-            exit = fadeOut(animationSpec = tween(300))
+            exit = fadeOut(animationSpec = tween(300)),
+            modifier = Modifier.fillMaxSize()
         ) {
             VideoControlsOverlay(
                 isPlaying = isPlaying,
@@ -269,8 +271,8 @@ private fun VideoControlsOverlay(
             IconButton(
                 onClick = onBackClick,
                 modifier = Modifier
-                    .statusBarsPadding()
                     .padding(8.dp)
+                    .statusBarsPadding()
                     .align(Alignment.TopStart)
             ) {
                 FontIcon(
@@ -309,12 +311,12 @@ private fun VideoControlsOverlay(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(160.dp)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
                             Color.Transparent,
+                            Color.Black.copy(alpha = 0.5f),
                             Color.Black.copy(alpha = 0.8f)
                         )
                     )
@@ -324,14 +326,21 @@ private fun VideoControlsOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
+                    .padding(top = 48.dp) // Extend gradient upwards
                     .padding(horizontal = 16.dp, vertical = 16.dp)
                     .navigationBarsPadding()
             ) {
                 // Seek bar
+                var sliderPosition by remember { androidx.compose.runtime.mutableStateOf<Float?>(null) }
+                
                 Slider(
-                    value = if (duration > 0) currentPosition.toFloat() else 0f,
+                    value = sliderPosition ?: (if (duration > 0) currentPosition.toFloat() else 0f),
                     onValueChange = { newPosition ->
+                        sliderPosition = newPosition
                         onSeek(newPosition.toLong())
+                    },
+                    onValueChangeFinished = {
+                        sliderPosition = null
                     },
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
                     colors = SliderDefaults.colors(

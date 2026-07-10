@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
  */
 class MediaContentObserver(
     private val context: Context,
-    private val onMediaChanged: suspend () -> Unit
+    private val onMediaChanged: suspend (Set<Uri>) -> Unit
 ) {
     companion object {
         private const val TAG = "MediaContentObserver"
@@ -34,6 +34,7 @@ class MediaContentObserver(
     private var contentObserver: ContentObserver? = null
     private var debounceJob: Job? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val pendingUris = mutableSetOf<Uri>()
     
     /**
      * Register observer to watch for MediaStore changes
@@ -50,12 +51,18 @@ class MediaContentObserver(
                 override fun onChange(selfChange: Boolean, uri: Uri?) {
                     super.onChange(selfChange, uri)
                     
+                    if (uri != null) {
+                        pendingUris.add(uri)
+                    }
+                    
                     // Debounce: cancel previous job and schedule new one
                     // This prevents rapid-fire refresh calls when multiple files change
                     debounceJob?.cancel()
                     debounceJob = coroutineScope.launch {
                         delay(DEBOUNCE_MS)
-                        onMediaChanged()
+                        val urisToProcess = pendingUris.toSet()
+                        pendingUris.clear()
+                        onMediaChanged(urisToProcess)
                     }
                 }
             }

@@ -15,6 +15,9 @@
 
 # Keep data classes
 -keep class com.prantiux.pixelgallery.model.** { *; }
+-keep class com.prantiux.pixelgallery.data.** { *; }
+-keep class com.prantiux.pixelgallery.viewmodel.** { *; }
+-keep class com.prantiux.pixelgallery.ml.** { *; }
 
 # Keep Compose
 -keep class androidx.compose.** { *; }

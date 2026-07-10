@@ -42,7 +42,8 @@ class MediaRepository(private val context: Context) {
             MediaStore.Files.FileColumns.MEDIA_TYPE,
             MediaStore.Files.FileColumns.WIDTH,
             MediaStore.Files.FileColumns.HEIGHT,
-            MediaStore.Video.Media.DURATION
+            MediaStore.Video.Media.DURATION,
+            "datetaken"
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -93,6 +94,7 @@ class MediaRepository(private val context: Context) {
             val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.WIDTH)
             val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.HEIGHT)
             val durationColumn = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+            val dateTakenColumn = cursor.getColumnIndex("datetaken")
             val relativePathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
             val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
@@ -107,7 +109,9 @@ class MediaRepository(private val context: Context) {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
-                val dateAdded = cursor.getLong(dateColumn)
+                val rawDateAdded = cursor.getLong(dateColumn)
+                val dateTaken = if (dateTakenColumn >= 0) cursor.getLong(dateTakenColumn) else 0L
+                val dateAdded = if (dateTaken > 0) dateTaken / 1000 else rawDateAdded
                 val size = cursor.getLong(sizeColumn)
                 val mimeType = cursor.getString(mimeColumn)
                 val bucketId = cursor.getString(bucketIdColumn) ?: "unknown"
@@ -173,6 +177,98 @@ class MediaRepository(private val context: Context) {
             }
         }
     }.flowOn(Dispatchers.IO)
+
+    suspend fun getMediaItemByUri(uri: Uri): MediaItem? = withContext(Dispatchers.IO) {
+        val projection = mutableListOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATE_ADDED,
+            MediaStore.Files.FileColumns.SIZE,
+            MediaStore.Files.FileColumns.MIME_TYPE,
+            MediaStore.Files.FileColumns.BUCKET_ID,
+            MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
+            MediaStore.Files.FileColumns.MEDIA_TYPE,
+            MediaStore.Files.FileColumns.WIDTH,
+            MediaStore.Files.FileColumns.HEIGHT,
+            MediaStore.Video.Media.DURATION,
+            "datetaken"
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        } else {
+            projection.add(MediaStore.MediaColumns.DATA)
+        }
+
+        try {
+            context.contentResolver.query(
+                uri,
+                projection.toTypedArray(),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                    val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                    val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+                    val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+                    val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+                    val bucketIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_ID)
+                    val bucketNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME)
+                    val mediaTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                    val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.WIDTH)
+                    val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.HEIGHT)
+                    val durationColumn = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+                    val dateTakenColumn = cursor.getColumnIndex("datetaken")
+                    val relativePathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                    val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+                    } else {
+                        -1
+                    }
+
+                    val id = cursor.getLong(idColumn)
+                    val name = cursor.getString(nameColumn) ?: ""
+                    val rawDateAdded = cursor.getLong(dateColumn)
+                    val dateTaken = if (dateTakenColumn >= 0) cursor.getLong(dateTakenColumn) else 0L
+                    val dateAdded = if (dateTaken > 0) dateTaken / 1000 else rawDateAdded
+                    val size = cursor.getLong(sizeColumn)
+                    val mimeType = cursor.getString(mimeColumn) ?: ""
+                    val bucketId = cursor.getString(bucketIdColumn) ?: "unknown"
+                    val bucketName = cursor.getString(bucketNameColumn) ?: "Unknown"
+                    val mediaType = cursor.getInt(mediaTypeColumn)
+                    val isVideo = mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                    val width = cursor.getInt(widthColumn)
+                    val height = cursor.getInt(heightColumn)
+                    val duration = if (durationColumn >= 0 && isVideo) cursor.getLong(durationColumn) else 0L
+                    val relativePath = if (relativePathColumn >= 0) cursor.getString(relativePathColumn) else null
+                    val legacyPath = if (dataColumn >= 0) cursor.getString(dataColumn) else null
+                    val path = buildMediaPath(relativePath, legacyPath, name)
+
+                    return@use MediaItem(
+                        id = id,
+                        uri = uri,
+                        displayName = name,
+                        dateAdded = dateAdded,
+                        size = size,
+                        mimeType = mimeType,
+                        bucketId = bucketId,
+                        bucketName = bucketName,
+                        isVideo = isVideo,
+                        duration = duration,
+                        width = width,
+                        height = height,
+                        path = path,
+                        latitude = null,
+                        longitude = null
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore errors for invalid URIs
+        }
+        return@withContext null
+    }
 
     /**
      * Extract GPS coordinates from image EXIF data

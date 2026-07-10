@@ -50,8 +50,13 @@ object ImageLabelScheduler {
      * Called when user opens app - starts IMMEDIATELY with no charging requirement
      */
     fun triggerImmediateLabelingIfCharging(context: Context) {
-        // No charging check, no constraints - ML starts immediately
+        val constraints = Constraints.Builder()
+            .setRequiresCharging(true)
+            .setRequiresDeviceIdle(true)
+            .build()
+            
         val oneTimeWork = OneTimeWorkRequestBuilder<ImageLabelWorker>()
+            .setConstraints(constraints)
             .addTag(LABEL_WORK_TAG)
             .build()
         
