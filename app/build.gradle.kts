@@ -74,6 +74,8 @@ android {
 }
 
 dependencies {
+    // Zooming
+    implementation("net.engawapg.lib:zoomable:1.6.2")
     // Compose BOM - REQUIRED MINIMUM VERSION
     val composeBom = platform("androidx.compose:compose-bom:2025.12.00")
     implementation(composeBom)
