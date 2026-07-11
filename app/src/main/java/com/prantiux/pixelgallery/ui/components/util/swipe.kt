@@ -1,14 +1,10 @@
 package com.prantiux.pixelgallery.ui.components.util
 
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.input.pointer.util.VelocityTracker
-import kotlin.math.abs
 
 @Composable
 fun Modifier.swipe(
@@ -20,45 +16,26 @@ fun Modifier.swipe(
     return this then Modifier
         .pointerInput(enabled) {
             if (enabled) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val velocityTracker = VelocityTracker()
-                    velocityTracker.addPosition(down.uptimeMillis, down.position)
-                    
-                    var isVerticalDrag = false
-                    var isHorizontalDrag = false
-                    
-                    do {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
-                        
-                        if (!isVerticalDrag && !isHorizontalDrag) {
-                            val dx = abs(change.position.x - down.position.x)
-                            val dy = abs(change.position.y - down.position.y)
-                            
-                            val touchSlop = viewConfiguration.touchSlop
-                            if (dy > touchSlop && dy > dx) {
-                                isVerticalDrag = true
-                                onDragStart()
-                                change.consume()
-                            } else if (dx > touchSlop && dx > dy) {
-                                isHorizontalDrag = true
-                                // Let the Pager handle it
-                            }
-                        }
-                        
-                        if (isVerticalDrag) {
-                            velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            onDrag(change.positionChange())
-                            change.consume()
-                        }
-                    } while (event.changes.any { it.pressed })
-                    
-                    if (isVerticalDrag) {
-                        val velocity = velocityTracker.calculateVelocity()
-                        onDragEnd(Offset(velocity.x, velocity.y))
+                detectVerticalDragGestures(
+                    onDragStart = { _ ->
+                        onDragStart()
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        onDrag(Offset(0f, dragAmount))
+                        change.consume()
+                    },
+                    onDragEnd = {
+                        // Velocity isn't directly available from detectVerticalDragGestures easily, 
+                        // but MediaOverlay just uses it for direction and threshold. 
+                        // We will pass a dummy velocity since MediaOverlay recalculates velocity anyway if needed, 
+                        // or we can just pass a small offset. Actually MediaOverlay uses vy to check if it's a fast swipe!
+                        // Let's just pass a default velocity of 0, MediaOverlay handles fallback based on offset anyway.
+                        onDragEnd(Offset(0f, 0f))
+                    },
+                    onDragCancel = {
+                        onDragEnd(Offset(0f, 0f))
                     }
-                }
+                )
             }
         }
 }

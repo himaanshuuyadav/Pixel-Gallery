@@ -1316,7 +1316,7 @@ fun MediaOverlay(
                                 factory = { ctx ->
                                     val view = android.view.LayoutInflater.from(ctx).inflate(com.prantiux.pixelgallery.R.layout.video_player_view, null) as androidx.media3.ui.PlayerView
                                     view.player = player
-                                    view.setKeepContentOnPlayerReset(true)
+                                    view.setKeepContentOnPlayerReset(false)
                                     view.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                                     view
                                 },
