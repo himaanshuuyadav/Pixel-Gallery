@@ -484,6 +484,8 @@ fun MediaOverlay(
     var seekAmount by remember { mutableIntStateOf(0) }
     var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     
+    var isFirstFrameRendered by remember { mutableStateOf(false) }
+    
     // ExoPlayer lifecycle management
     DisposableEffect(context) {
         val player = ExoPlayer.Builder(context).build().apply {
@@ -494,6 +496,9 @@ fun MediaOverlay(
             volume = if (muteByDefault) 0f else 1f
             
             addListener(object : androidx.media3.common.Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    isFirstFrameRendered = true
+                }
                 override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
                     videoIntrinsicSize = androidx.compose.ui.geometry.Size(
                         videoSize.width.toFloat(), 
@@ -550,6 +555,7 @@ fun MediaOverlay(
             
             val currentItem = mediaItems.find { it.id == currentlyViewedId }
             if (currentItem?.isVideo == true) {
+                isFirstFrameRendered = false
                 val mediaItem = ExoMediaItem.fromUri(currentItem.uri)
                 player.setMediaItem(mediaItem)
                 player.prepare()
@@ -1172,27 +1178,48 @@ fun MediaOverlay(
                     },
                     onDrag = { dragAmount ->
                         scope.launch {
+                            val dy = dragAmount.y
+                            val dx = dragAmount.x
                             if (detailsPanelProgress.value > 0f) {
-                                val deltaProgress = dragAmount / (screenHeight * 0.5f)
-                                detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                val deltaProgress = dy / (screenHeight * 0.5f)
+                                val newProgress = detailsPanelProgress.value - deltaProgress
+                                if (newProgress < 0f) {
+                                    val overscroll = -newProgress
+                                    val resistance = 1f / (1f + overscroll * 5f)
+                                    detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress * resistance).coerceAtLeast(-0.2f))
+                                } else if (newProgress > 1f) {
+                                    val overscroll = newProgress - 1f
+                                    val resistance = 1f / (1f + overscroll * 5f)
+                                    detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress * resistance).coerceAtMost(1.2f))
+                                } else {
+                                    detailsPanelProgress.snapTo(newProgress)
+                                }
                                 showControls = detailsPanelProgress.value < 0.1f
-                            } else if (dragAmount < 0 && swipeUpToDetails) {
-                                val deltaProgress = dragAmount / (screenHeight * 0.5f)
+                            } else if (dy < 0 && swipeUpToDetails) {
+                                val deltaProgress = dy / (screenHeight * 0.5f)
                                 detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
                                 showControls = detailsPanelProgress.value < 0.1f
                             } else {
-                                if (dragAmount > 0 || verticalOffset.value > 0f) {
-                                    verticalOffset.snapTo(verticalOffset.value + dragAmount)
-                                    predictiveBackProgress = (verticalOffset.value / 200f).coerceIn(0f, 1f)
+                                if (dy > 0 || verticalOffset.value > 0f || dy < 0) {
+                                    val newOffset = verticalOffset.value + dy
+                                    if (newOffset < 0f) {
+                                        val overscroll = -newOffset
+                                        val resistance = 1f / (1f + overscroll / 400f)
+                                        verticalOffset.snapTo(verticalOffset.value + dy * resistance)
+                                    } else {
+                                        verticalOffset.snapTo(newOffset)
+                                        predictiveBackProgress = (verticalOffset.value / 200f).coerceIn(0f, 1f)
+                                    }
                                 }
                             }
                         }
                     },
                     onDragEnd = { velocity ->
                         scope.launch {
+                            val vy = velocity.y
                             if (detailsPanelProgress.value > 0f) {
-                                val shouldOpen = if (velocity < -800f) true 
-                                                 else if (velocity > 800f) false
+                                val shouldOpen = if (vy < -800f) true 
+                                                 else if (vy > 800f) false
                                                  else detailsPanelProgress.value > 0.5f
                                 
                                 detailsPanelProgress.animateTo(
@@ -1200,8 +1227,8 @@ fun MediaOverlay(
                                     animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 380f)
                                 )
                                 showControls = !shouldOpen
-                            } else if (verticalOffset.value > 0f) {
-                                if (velocity > 800f || verticalOffset.value > 200f) {
+                            } else if (verticalOffset.value > 0f || verticalOffset.value < 0f) {
+                                if (vy > 800f || verticalOffset.value > 200f) {
                                     isDismissing = true
                                     onDismiss()
                                 } else {
@@ -1218,67 +1245,84 @@ fun MediaOverlay(
             val pageItem = mediaItems.getOrNull(page) ?: return@HorizontalPager
             
             if (pageItem.isVideo) {
-                if (page == pagerState.currentPage) {
-                    exoPlayer?.let { player ->
-                        val videoZoomState = rememberZoomState()
-                        
-                        LaunchedEffect(videoZoomState.scale) {
-                            if (page == pagerState.currentPage) {
-                                isZoomed = videoZoomState.scale > 1.0f
+                val videoZoomState = rememberZoomState()
+                
+                LaunchedEffect(videoZoomState.scale) {
+                    if (page == pagerState.currentPage) {
+                        isZoomed = videoZoomState.scale > 1.0f
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            transformOrigin = TransformOrigin(0.5f, 0.5f)
+                            val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
+                            
+                            val rawImageWidth = exoPlayer?.videoFormat?.width?.toFloat() ?: screenWidth
+                            val rawImageHeight = exoPlayer?.videoFormat?.height?.toFloat() ?: screenHeight
+                            val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                            val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                            val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
+                            val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
+
+                            if (page == pagerState.currentPage && detailsProgress > 0.01f) {
+                                val imageOffset = screenHeight * 0.25f * detailsProgress
+                                this.translationY = -imageOffset
+                                this.scaleX = detailsScale
+                                this.scaleY = detailsScale
+                            } else {
+                                this.translationY = verticalOffset.value
+                                if (verticalOffset.value > 0f) {
+                                    val closeProgress = (verticalOffset.value / 400f).coerceIn(0f, 1f)
+                                    this.scaleX = 1f - 0.25f * closeProgress
+                                    this.scaleY = 1f - 0.25f * closeProgress
+                                }
+                                if (predictiveBackProgress > 0f) {
+                                    val predScale = 1f - (predictiveBackProgress * 0.1f)
+                                    this.scaleX *= predScale
+                                    this.scaleY *= predScale
+                                    this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
+                                    this.clip = true
+                                }
                             }
                         }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                    val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
-                                    
-                                    val rawImageWidth = player.videoFormat?.width?.toFloat() ?: screenWidth
-                                    val rawImageHeight = player.videoFormat?.height?.toFloat() ?: screenHeight
-                                    val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                    val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                    val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
-                                    val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
-
-                                    if (page == pagerState.currentPage && detailsProgress > 0.01f) {
-                                        val imageOffset = screenHeight * 0.25f * detailsProgress
-                                        this.translationY = -imageOffset
-                                        this.scaleX = detailsScale
-                                        this.scaleY = detailsScale
-                                    } else {
-                                        this.translationY = verticalOffset.value
-                                        if (verticalOffset.value > 0f) {
-                                            val closeProgress = (verticalOffset.value / 400f).coerceIn(0f, 1f)
-                                            this.scaleX = 1f - 0.25f * closeProgress
-                                            this.scaleY = 1f - 0.25f * closeProgress
-                                        }
-                                        if (predictiveBackProgress > 0f) {
-                                            val predScale = 1f - (predictiveBackProgress * 0.1f)
-                                            this.scaleX *= predScale
-                                            this.scaleY *= predScale
-                                            this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
-                                            this.clip = true
-                                        }
-                                    }
+                        .zoomable(videoZoomState, onTap = { 
+                            if (!isDetailsOpen) {
+                                showBars = !showBars
+                                if (showBars) {
+                                    lastInteractionTime = System.currentTimeMillis()
                                 }
-                                .zoomable(videoZoomState, onTap = { 
-                                    if (!isDetailsOpen) {
-                                        showBars = !showBars
-                                        if (showBars) {
-                                            lastInteractionTime = System.currentTimeMillis()
-                                        }
-                                        showControls = showBars
-                                    }
-                                })
-                        ) {
+                                showControls = showBars
+                            }
+                        })
+                ) {
+                    // Always keep the thumbnail in the tree to prevent flashes, just hide it after the first frame renders
+                    val showThumbnail = page != pagerState.currentPage || !isFirstFrameRendered
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(pageItem.uri)
+                            .size(targetDecodeSize)
+                            .memoryCacheKey(pageItem.uri.toString())
+                            .diskCacheKey(pageItem.uri.toString())
+                            .build(),
+                        contentDescription = pageItem.displayName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            alpha = if (showThumbnail) 1f else 0f
+                        }
+                    )
+
+                    if (page == pagerState.currentPage) {
+                        exoPlayer?.let { player ->
                             AndroidView(
                                 factory = { ctx ->
-                                    PlayerView(ctx).apply {
-                                        this.player = player
-                                        useController = false
-                                    }
+                                    val view = android.view.LayoutInflater.from(ctx).inflate(com.prantiux.pixelgallery.R.layout.video_player_view, null) as androidx.media3.ui.PlayerView
+                                    view.player = player
+                                    view.setKeepContentOnPlayerReset(true)
+                                    view.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                    view
                                 },
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -1491,19 +1535,6 @@ fun MediaOverlay(
                             }
                         }
                     }
-                } else {
-                    // Video Thumbnail
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(pageItem.uri)
-                            .size(targetDecodeSize)
-                            .memoryCacheKey(pageItem.uri.toString())
-                            .diskCacheKey(pageItem.uri.toString())
-                            .build(),
-                        contentDescription = pageItem.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
                 }
             } else {
                 // Image Page
@@ -2280,18 +2311,31 @@ fun MediaOverlay(
                         },
                         onDrag = { dragAmount ->
                             scope.launch {
+                                val dy = dragAmount.y
                                 if (detailsPanelProgress.value > 0f) {
-                                    val deltaProgress = dragAmount / (screenHeight * 0.5f)
-                                    detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                    val deltaProgress = dy / (screenHeight * 0.5f)
+                                    val newProgress = detailsPanelProgress.value - deltaProgress
+                                    if (newProgress < 0f) {
+                                        val overscroll = -newProgress
+                                        val resistance = 1f / (1f + overscroll * 5f)
+                                        detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress * resistance).coerceAtLeast(-0.2f))
+                                    } else if (newProgress > 1f) {
+                                        val overscroll = newProgress - 1f
+                                        val resistance = 1f / (1f + overscroll * 5f)
+                                        detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress * resistance).coerceAtMost(1.2f))
+                                    } else {
+                                        detailsPanelProgress.snapTo(newProgress)
+                                    }
                                     showControls = detailsPanelProgress.value < 0.1f
                                 }
                             }
                         },
                         onDragEnd = { velocity ->
                             scope.launch {
+                                val vy = velocity.y
                                 if (detailsPanelProgress.value > 0f) {
-                                    val shouldOpen = if (velocity < -800f) true 
-                                                     else if (velocity > 800f) false
+                                    val shouldOpen = if (vy < -800f) true 
+                                                     else if (vy > 800f) false
                                                      else detailsPanelProgress.value > 0.5f
                                     detailsPanelProgress.animateTo(if (shouldOpen) 1f else 0f, androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 380f))
                                     showControls = !shouldOpen
@@ -2482,12 +2526,12 @@ private fun CustomVideoControls(
     var isFullscreen by remember { mutableStateOf(false) }
     
     // Track duration and ended state
-    var duration by remember { mutableLongStateOf(exoPlayer.duration.coerceAtLeast(0L)) }
-    var videoEnded by remember { mutableStateOf(exoPlayer.playbackState == androidx.media3.common.Player.STATE_ENDED) }
+    var duration by remember(mediaItem?.id) { mutableLongStateOf(exoPlayer.duration.coerceAtLeast(0L)) }
+    var videoEnded by remember(mediaItem?.id) { mutableStateOf(exoPlayer.playbackState == androidx.media3.common.Player.STATE_ENDED) }
     
     // Shared scrub and position state between slider and time text
-    val scrubPosition = remember { mutableStateOf<Long?>(null) }
-    val currentPositionState = remember { mutableLongStateOf(exoPlayer.currentPosition.coerceAtLeast(0L)) }
+    val scrubPosition = remember(mediaItem?.id) { mutableStateOf<Long?>(null) }
+    val currentPositionState = remember(mediaItem?.id) { mutableLongStateOf(exoPlayer.currentPosition.coerceAtLeast(0L)) }
     
     // Continually check for end state and duration changes
     LaunchedEffect(Unit) {
@@ -2993,4 +3037,3 @@ private suspend fun extractAndSaveFrame(context: Context, uri: android.net.Uri, 
         }
     }
 }
-
