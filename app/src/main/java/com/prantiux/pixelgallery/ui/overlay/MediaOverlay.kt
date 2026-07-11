@@ -484,7 +484,7 @@ fun MediaOverlay(
     var seekAmount by remember { mutableIntStateOf(0) }
     var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     
-    var isFirstFrameRendered by remember { mutableStateOf(false) }
+    var firstFrameRenderedId by remember { mutableStateOf<Long?>(null) }
     
     // ExoPlayer lifecycle management
     DisposableEffect(context) {
@@ -497,7 +497,7 @@ fun MediaOverlay(
             
             addListener(object : androidx.media3.common.Player.Listener {
                 override fun onRenderedFirstFrame() {
-                    isFirstFrameRendered = true
+                    firstFrameRenderedId = currentlyViewedId
                 }
                 override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
                     videoIntrinsicSize = androidx.compose.ui.geometry.Size(
@@ -555,7 +555,7 @@ fun MediaOverlay(
             
             val currentItem = mediaItems.find { it.id == currentlyViewedId }
             if (currentItem?.isVideo == true) {
-                isFirstFrameRendered = false
+                firstFrameRenderedId = null
                 val mediaItem = ExoMediaItem.fromUri(currentItem.uri)
                 player.setMediaItem(mediaItem)
                 player.prepare()
@@ -1274,11 +1274,7 @@ fun MediaOverlay(
                                 this.scaleY = detailsScale
                             } else {
                                 this.translationY = verticalOffset.value
-                                if (verticalOffset.value > 0f) {
-                                    val closeProgress = (verticalOffset.value / 400f).coerceIn(0f, 1f)
-                                    this.scaleX = 1f - 0.25f * closeProgress
-                                    this.scaleY = 1f - 0.25f * closeProgress
-                                }
+                                // Pinch to dismiss scaling removed
                                 if (predictiveBackProgress > 0f) {
                                     val predScale = 1f - (predictiveBackProgress * 0.1f)
                                     this.scaleX *= predScale
@@ -1299,7 +1295,7 @@ fun MediaOverlay(
                         })
                 ) {
                     // Always keep the thumbnail in the tree to prevent flashes, just hide it after the first frame renders
-                    val showThumbnail = page != pagerState.currentPage || !isFirstFrameRendered
+                    val showThumbnail = page != pagerState.currentPage || firstFrameRenderedId != pageItem.id
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(pageItem.uri)
@@ -1580,11 +1576,7 @@ fun MediaOverlay(
                                 this.scaleY = detailsScale
                             } else {
                                 this.translationY = verticalOffset.value
-                                if (verticalOffset.value > 0f) {
-                                    val closeProgress = (verticalOffset.value / 400f).coerceIn(0f, 1f)
-                                    this.scaleX = 1f - 0.25f * closeProgress
-                                    this.scaleY = 1f - 0.25f * closeProgress
-                                }
+                                // Pinch to dismiss scaling removed
                                 if (predictiveBackProgress > 0f) {
                                     val predScale = 1f - (predictiveBackProgress * 0.1f)
                                     this.scaleX *= predScale
