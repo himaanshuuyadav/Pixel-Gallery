@@ -2,6 +2,9 @@
 
 package com.prantiux.pixelgallery.ui.overlay
 
+import com.prantiux.pixelgallery.ui.components.util.swipe
+import net.engawapg.lib.zoomable.rememberZoomState
+import net.engawapg.lib.zoomable.zoomable
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -20,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -292,9 +296,9 @@ fun MediaOverlay(
 
     // Gesture state - PERSISTENT ANIMATABLE OFFSETS
     var gestureMode by remember { mutableStateOf(GestureMode.NONE) }
-    val horizontalOffset = remember { Animatable(0f) }
-    val verticalOffset = remember { Animatable(0f) }
-    val detailsPanelProgress = remember { Animatable(0f) }
+    val horizontalOffset = remember { androidx.compose.animation.core.Animatable(0f) }
+    val verticalOffset = remember { androidx.compose.animation.core.Animatable(0f) }
+    val detailsPanelProgress = remember { androidx.compose.animation.core.Animatable(0f) }
     val imageZIndex = remember { Animatable(1f) }  // For smooth z-order transition during bar entrance
     var isNavigating by remember { mutableStateOf(false) }
 
@@ -1107,656 +1111,472 @@ fun MediaOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(scale) {
-                // Centralized gesture coordinator - DO NOT consume until direction locked
-                awaitEachGesture {
-                    
-                    val down = awaitFirstDown(requireUnconsumed = false)
-
-                    // Ignore global overlay gestures when drag starts inside protected UI zones.
-                    val protectBars = latestControlsVisible && !latestIsAnyVideoFullscreen
-                    val protectVideoControls = latestIsCurrentItemVideo && latestControlsVisible && !latestIsAnyVideoFullscreen
-                    val inProtectedZone =
-                        (protectBars &&
-                            (latestTopBarBounds?.contains(down.position) == true ||
-                                latestBottomBarBounds?.contains(down.position) == true)) ||
-                            (protectVideoControls && latestVideoControlsBounds?.contains(down.position) == true)
-
-                    if (inProtectedZone) {
-                        waitForUpOrCancellation()
-                        return@awaitEachGesture
-                    }
-                    
-                    if (latestIsCurrentItemVideo && exoPlayer?.isPlaying == true) {
-                        holdJob = scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            isHoldingFor2x = true
-                            exoPlayer?.setPlaybackSpeed(2f)
-                        }
-                    }
-
-                    var currentGestureMode = GestureMode.NONE
-                    var accumulatedDx = 0f
-                    var accumulatedDy = 0f
-                    var lastMoveTime = System.currentTimeMillis()
-                    var velocityX = 0f
-                    var velocityY = 0f
-                    var upPosition = down.position
-                    var isMultiTouch = false
-
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        
-                        // Check if finger released
-                        val change = event.changes.firstOrNull() ?: break
-                        if (!change.pressed) {
-                            upPosition = change.position
-                            holdJob?.cancel()
-                            if (isHoldingFor2x) {
-                                isHoldingFor2x = false
-                                exoPlayer?.setPlaybackSpeed(1f)
-                            }
-                            break
-                        }
-
-                        // Detect multi-touch for zoom
-                        if (event.changes.size > 1) {
-                            currentGestureMode = GestureMode.ZOOM
-                            isMultiTouch = true
-                            // Let zoom handler consume
-                            break
-                        }
-
-                        val dx = change.positionChangeIgnoreConsumed().x
-                        val dy = change.positionChangeIgnoreConsumed().y
-                        
-                        accumulatedDx += dx
-                        accumulatedDy += dy
-
-                        // When zoomed, do not run swipe direction lock; only allow tap resolution on release.
-                        if (scale != OverlayConstants.MIN_ZOOM_SCALE) {
-                            continue
-                        }
-
-                        // 🔒 Direction lock - NO CONSUMPTION YET
-                        if (currentGestureMode == GestureMode.NONE) {
-                            val threshold = OverlayConstants.TAP_SLOP_PX
-                            if (abs(accumulatedDx) > threshold || abs(accumulatedDy) > threshold) {
-                                currentGestureMode = when {
-                                    abs(accumulatedDx) > abs(accumulatedDy) && detailsPanelProgress.value <= 0f -> GestureMode.HORIZONTAL_SWIPE
-                                    accumulatedDy > 0 && (swipeDownToClose || detailsPanelProgress.value > 0f) -> GestureMode.VERTICAL_DOWN
-                                    accumulatedDy < 0 && swipeUpToDetails && detailsPanelProgress.value <= 0f -> GestureMode.VERTICAL_UP
-                                    else -> GestureMode.NONE
-                                }
-                                gestureMode = currentGestureMode
-                                if (currentGestureMode == GestureMode.HORIZONTAL_SWIPE && horizontalOffset.isRunning) {
-                                    scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-                                        horizontalOffset.stop()
-                                    }
-                                }
-                                holdJob?.cancel()
-                                if (isHoldingFor2x) {
-                                    isHoldingFor2x = false
-                                    exoPlayer?.setPlaybackSpeed(1f)
-                                }
-                            }
-                        }
-
-                        // 3️⃣ Accumulate drag into PERSISTENT state
-                        // ✅ DO NOT CONSUME during MOVE - let deltas continue flowing
-                        when (currentGestureMode) {
-                            GestureMode.HORIZONTAL_SWIPE -> {
-                                if (isNavigating) {
-                                    continue
-                                }
-                                // REMOVED: change.consume() - consumption kills dx/dy deltas
-                                // Apply resistance at edges
-                                var adjustedDx = dx
-                                if (currentIndex == 0 && horizontalOffset.value + dx > 0f) {
-                                    // At first image, resist right swipe
-                                    adjustedDx *= 0.15f
-                                } else if (currentIndex == mediaItems.size - 1 && horizontalOffset.value + dx < 0f) {
-                                    // At last image, resist left swipe
-                                    adjustedDx *= 0.15f
-                                }
-
-                                val currentOffset = horizontalOffset.value
-                                val progress = (abs(currentOffset) / pageWidthPx).coerceIn(0f, 1f)
-                                val friction = 1f - (progress * progress)
-                                adjustedDx *= friction
-                                
-                                // Calculate velocity for fast swipe detection
-                                val currentTime = System.currentTimeMillis()
-                                val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
-                                velocityX = (adjustedDx / deltaTime) * 1000f  // pixels per second
-                                lastMoveTime = currentTime
-                                
-                                horizontalMoveDeltas.trySend(adjustedDx)
-                            }
-                            
-                            GestureMode.VERTICAL_UP -> {
-                                // Only process if swipe up to details is enabled
-                                if (swipeUpToDetails) {
-                                    verticalUpMoveDeltas.trySend(dy)
-                                }
-                            }
-                            
-                            GestureMode.VERTICAL_DOWN -> {
-                                // Only track if enabled (either for closing overlay or closing details panel)
-                                if (swipeDownToClose || detailsPanelProgress.value > 0f) {
-                                    verticalDownMoveDeltas.trySend(dy)
-                                    
-                                    // Calculate vertical velocity for intent detection
-                                    val currentTime = System.currentTimeMillis()
-                                    val deltaTime = (currentTime - lastMoveTime).coerceAtLeast(1)
-                                    velocityY = (dy / deltaTime) * 1000f  // pixels per second
-                                    lastMoveTime = currentTime
-                                }
-                            }
-                            
-                            else -> {
-                                // Don't consume if no mode locked yet
-                            }
-                        }
-                    }
-
-                    val isTapGesture = !isMultiTouch && isTap(down.position, upPosition)
-                    if (isTapGesture) {
-                        val touchPosition = down.position
+            .pointerInput(Unit) {
+                // Still capture tap for UI controls
+                detectTapGestures(
+                    onTap = { tapOffset ->
                         val inBlockedZone =
-                            (latestTopBarBounds?.contains(touchPosition) == true) ||
-                                (latestBottomBarBounds?.contains(touchPosition) == true) ||
-                                (latestVideoControlsBounds?.contains(touchPosition) == true)
+                            (latestTopBarBounds?.contains(tapOffset) == true) ||
+                                (latestBottomBarBounds?.contains(tapOffset) == true) ||
+                                (latestVideoControlsBounds?.contains(tapOffset) == true)
 
                         if (!inBlockedZone) {
-                            val now = System.currentTimeMillis()
-                            val isDoubleTap =
-                                (now - lastTapTimeMs) <= 300L &&
-                                    (touchPosition - lastTapPosition).getDistance() < 48f
-
-                            if (isDoubleTap) {
-                                handleDoubleTap(touchPosition.x)
-                                lastTapTimeMs = 0L
-                            } else {
-                                if (!isDetailsOpen) {
-                                    showBars = !showBars
-                                    if (showBars) {
-                                        lastInteractionTime = System.currentTimeMillis()
-                                    }
-                                    showControls = showBars
+                            if (!isDetailsOpen) {
+                                showBars = !showBars
+                                if (showBars) {
+                                    lastInteractionTime = System.currentTimeMillis()
                                 }
-                                lastTapTimeMs = now
-                                lastTapPosition = touchPosition
+                                showControls = showBars
                             }
-                        }
-
-                        gestureMode = GestureMode.NONE
-                        return@awaitEachGesture
-                    }
-
-                    // 5️⃣ Release logic - decide complete or snap back
-                    when (currentGestureMode) {
-                        GestureMode.HORIZONTAL_SWIPE -> {
-                            // 4️⃣ Threshold uses distance OR velocity
-                            val velocityThreshold = 1500f  // pixels per second
-
-                            scope.launch {
-                                if (isNavigating) {
-                                    return@launch
-                                }
-
-                                // Fast swipe or sufficient distance
-                                val shouldNavigate = abs(horizontalOffset.value) > navigationThreshold || abs(velocityX) > velocityThreshold
-                                if (shouldNavigate) {
-                                    val currentOffset = horizontalOffset.value
-                                    // Determine next index
-                                    val newIndex = if (currentOffset < 0 && currentIndex < mediaItems.size - 1) {
-                                        currentIndex + 1
-                                    } else if (currentOffset > 0 && currentIndex > 0) {
-                                        currentIndex - 1
-                                    } else {
-                                        currentIndex  // Stay at current if at boundary
-                                    }
-
-                                    if (newIndex != currentIndex) {
-                                        if (newIndex > currentIndex) {
-                                            navigateNextPage(velocityX)
-                                        } else {
-                                            navigatePreviousPage(velocityX)
-                                        }
-                                    } else {
-                                        // Cancel swipe at boundary - use spring
-                                        horizontalOffset.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = 0.95f,
-                                                stiffness = 900f
-                                            )
-                                        )
-                                    }
-                                } else {
-                                    // Cancel swipe (insufficient distance/velocity) - use spring
-                                    horizontalOffset.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = spring(
-                                            dampingRatio = 0.95f,
-                                            stiffness = 900f
-                                        )
-                                    )
-                                }
-                            }
-                        }
-
-                        GestureMode.VERTICAL_UP -> {
-                            // Only process if swipe up to details is enabled
-                            if (swipeUpToDetails) {
-                                
-                                scope.launch {
-                                    val existingTarget = if (detailsPanelProgress.value >= 0.3f) 1f else 0f
-                                    val target = if (velocityY < -800f) 1f else if (velocityY > 800f) 0f else existingTarget
-
-                                    verticalOffset.snapTo(0f)
-                                    detailsPanelProgress.animateTo(
-                                        targetValue = target,
-                                        animationSpec = spring(
-                                            dampingRatio = if (target >= 0.5f) 0.8f else 1.0f,
-                                            stiffness = if (target >= 0.5f) 380f else 300f
-                                        )
-                                    )
-                                    if (target <= 0.5f) {
-                                        showControls = true
-                                    }
-                                }
-                            } else {
-                                // If disabled, just snap back
-                                scope.launch {
-                                    verticalOffset.snapTo(0f)
-                                }
-                            }
-                        }
-                        
-                        GestureMode.VERTICAL_DOWN -> {
-                            // If details panel is active, close it first
-                            if (detailsPanelProgress.value > 0f) {
-                                
-                                scope.launch {
-                                    // Close if dragged down significantly OR fast downward swipe
-                                    val shouldCloseDetails = detailsPanelProgress.value < 0.7f || velocityY > 1200f
-                                    detailsPanelProgress.animateTo(
-                                        targetValue = if (shouldCloseDetails) 0f else 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = if (shouldCloseDetails) 1.0f else 0.85f,
-                                            stiffness = if (shouldCloseDetails) 300f else 400f
-                                        )
-                                    )
-                                    if (shouldCloseDetails) {
-                                        showControls = true
-                                    }
-                                    verticalOffset.snapTo(0f)
-                                }
-                            } else if (swipeDownToClose) {
-                                // Details panel is closed, proceed with image close only if enabled
-                                val threshold = OverlayConstants.VERTICAL_CLOSE_THRESHOLD_PX
-                                
-                                
-                                scope.launch {
-                                    if (abs(verticalOffset.value) > threshold) {
-                                        showControls = false
-                                        onDismiss()
-                                    } else {
-                                        // Snap back
-                                        verticalOffset.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            )
-                                        )
-                                    }
-                                }
-                            } else {
-                                // If swipe down to close is disabled, just snap back
-                                scope.launch {
-                                    verticalOffset.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                        
-                        else -> {
                         }
                     }
-
-                    if (isMultiTouch) {
-                        gestureMode = GestureMode.NONE
-                    }
-
-                    // Reset gesture mode
-                    gestureMode = GestureMode.NONE
-                }
+                )
             }
     ) {
+        val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+            initialPage = activeIndex,
+            pageCount = { mediaItems.size }
+        )
+
+        // Keep currentIndex synchronized with pagerState
+        LaunchedEffect(pagerState.currentPage) {
+            currentIndex = pagerState.currentPage
+            currentlyViewedId = mediaItems.getOrNull(pagerState.currentPage)?.id
+            
+            // Sync with MediaViewModel
+            
+        }
+
         // Background scrim
+        val scrimAlpha = if (isDismissing) 0f else backgroundAlpha
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(scrimColor.copy(alpha = backgroundAlpha))
+                .background(scrimColor.copy(alpha = scrimAlpha))
         )
 
-        // Media image
-        currentItem?.let { item ->
-            // Render previous, current, and next images based on activeIndex
-            val prevItem = mediaItems.getOrNull(activeIndex - 1)?.takeIf { !it.isVideo }
-            val nextItem = mediaItems.getOrNull(activeIndex + 1)?.takeIf { !it.isVideo }
+        var isZoomed by remember { mutableStateOf(false) }
 
-            // Render previous, current, and next images for smooth horizontal swipe
-            Box(modifier = Modifier.fillMaxSize().zIndex(imageZIndex.value)) {
-                
-                val MediaImagePage: @Composable (MediaItem, Float) -> Unit = { mediaItem, offsetXOffset ->
-                    var imageIntrinsicSize by remember {
-                        mutableStateOf(androidx.compose.ui.geometry.Size.Zero)
-                    }
-                    SubcomposeAsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(mediaItem.uri)
-                            .size(targetDecodeSize)
-                            .memoryCacheKey(mediaItem.uri.toString())
-                            .diskCacheKey(mediaItem.uri.toString())
-                            .crossfade(false)
-                            .build(),
-                        contentDescription = mediaItem.displayName,
-                        contentScale = ContentScale.Fit,
-                        onSuccess = { state ->
-                            imageIntrinsicSize = state.painter.intrinsicSize
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
-                                val rawImageWidth = if (imageIntrinsicSize.width > 0f) imageIntrinsicSize.width else screenWidth
-                                val rawImageHeight = if (imageIntrinsicSize.height > 0f) imageIntrinsicSize.height else screenHeight
-                                val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
-                                val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
-
-                                if (detailsProgress > 0.01f) {
-                                    val imageOffset = screenHeight * 0.25f * detailsProgress
-                                    this.translationY = -imageOffset
-                                    this.scaleX = detailsScale
-                                    this.scaleY = detailsScale
-                                    this.translationX = offsetXOffset
-                                } else {
-                                    this.translationX = horizontalOffset.value + offsetXOffset
-                                    if (gestureMode == GestureMode.HORIZONTAL_SWIPE) {
-                                        val swipeProgress = (abs(horizontalOffset.value) / screenWidth).coerceIn(0f, 1f)
-                                        this.scaleX = 1f - swipeProgress * 0.05f
-                                        this.scaleY = 1f - swipeProgress * 0.05f
-                                    }
-                                    this.translationY = currentVerticalOffset
-                                    if (gestureMode == GestureMode.VERTICAL_DOWN) {
-                                        this.scaleX = 1f - 0.25f * closeProgress
-                                        this.scaleY = 1f - 0.25f * closeProgress
-                                    }
-                                    if (predictiveBackProgress > 0f) {
-                                        val predScale = 1f - (predictiveBackProgress * 0.1f)
-                                        this.scaleX *= predScale
-                                        this.scaleY *= predScale
-                                        this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
-                                        this.clip = true
-                                    }
-                                    if (scale > OverlayConstants.MIN_ZOOM_SCALE && offsetXOffset == 0f) {
-                                        this.scaleX *= scale
-                                        this.scaleY *= scale
-                                        this.translationX += offsetX
-                                        this.translationY += offsetY
-                                    }
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(imageZIndex.value)
+                .swipe(
+                    enabled = !isZoomed,
+                    onDragStart = {
+                        scope.launch {
+                            detailsPanelProgress.stop()
+                            verticalOffset.stop()
+                        }
+                    },
+                    onDrag = { dragAmount ->
+                        scope.launch {
+                            if (detailsPanelProgress.value > 0f) {
+                                val deltaProgress = dragAmount / (screenHeight * 0.5f)
+                                detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                showControls = detailsPanelProgress.value < 0.1f
+                            } else if (dragAmount < 0 && swipeUpToDetails) {
+                                val deltaProgress = dragAmount / (screenHeight * 0.5f)
+                                detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                showControls = detailsPanelProgress.value < 0.1f
+                            } else {
+                                if (dragAmount > 0 || verticalOffset.value > 0f) {
+                                    verticalOffset.snapTo(verticalOffset.value + dragAmount)
+                                    predictiveBackProgress = (verticalOffset.value / 200f).coerceIn(0f, 1f)
                                 }
                             }
-                            .pointerInput(offsetXOffset == 0f) {
-                                if (!mediaItem.isVideo && offsetXOffset == 0f) {
-                                    detectTransformGestures { _, pan, zoom, _ ->
-                                        val newScale = calculateScale(scale, zoom)
-                                        val rawImageWidth = if (imageIntrinsicSize.width > 0f) imageIntrinsicSize.width else screenWidth
-                                        val rawImageHeight = if (imageIntrinsicSize.height > 0f) imageIntrinsicSize.height else screenHeight
-                                        val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
-                                        val fittedImageWidth = rawImageWidth * fitScale
-                                        val fittedImageHeight = rawImageHeight * fitScale
-                                        if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
-                                            gestureMode = GestureMode.ZOOM
-                                            val (cx, cy) = clampOffset(
-                                                offsetX = offsetX + pan.x * newScale,
-                                                offsetY = offsetY + pan.y * newScale,
-                                                scale = newScale,
-                                                containerWidth = screenWidth,
-                                                containerHeight = screenHeight,
-                                                imageWidth = fittedImageWidth,
-                                                imageHeight = fittedImageHeight
-                                            )
-                                            scale = newScale
-                                            offsetX = cx
-                                            offsetY = cy
-                                        } else {
-                                            scale = OverlayConstants.MIN_ZOOM_SCALE
-                                            offsetX = 0f
-                                            offsetY = 0f
-                                            gestureMode = GestureMode.NONE
+                        }
+                    },
+                    onDragEnd = { velocity ->
+                        scope.launch {
+                            if (detailsPanelProgress.value > 0f) {
+                                val shouldOpen = if (velocity < -800f) true 
+                                                 else if (velocity > 800f) false
+                                                 else detailsPanelProgress.value > 0.5f
+                                
+                                detailsPanelProgress.animateTo(
+                                    targetValue = if (shouldOpen) 1f else 0f,
+                                    animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 380f)
+                                )
+                                showControls = !shouldOpen
+                            } else if (verticalOffset.value > 0f) {
+                                if (velocity > 800f || verticalOffset.value > 200f) {
+                                    isDismissing = true
+                                    onDismiss()
+                                } else {
+                                    verticalOffset.animateTo(0f, androidx.compose.animation.core.spring())
+                                    predictiveBackProgress = 0f
+                                }
+                            }
+                        }
+                    }
+                ),
+            pageSpacing = 16.dp,
+            beyondViewportPageCount = 1
+        ) { page ->
+            val pageItem = mediaItems.getOrNull(page) ?: return@HorizontalPager
+            
+            if (pageItem.isVideo) {
+                if (page == pagerState.currentPage) {
+                    exoPlayer?.let { player ->
+                        val videoZoomState = rememberZoomState()
+                        
+                        LaunchedEffect(videoZoomState.scale) {
+                            if (page == pagerState.currentPage) {
+                                isZoomed = videoZoomState.scale > 1.0f
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                    val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
+                                    
+                                    val rawImageWidth = player.videoFormat?.width?.toFloat() ?: screenWidth
+                                    val rawImageHeight = player.videoFormat?.height?.toFloat() ?: screenHeight
+                                    val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                                    val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                                    val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
+                                    val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
+
+                                    if (page == pagerState.currentPage && detailsProgress > 0.01f) {
+                                        val imageOffset = screenHeight * 0.25f * detailsProgress
+                                        this.translationY = -imageOffset
+                                        this.scaleX = detailsScale
+                                        this.scaleY = detailsScale
+                                    } else {
+                                        this.translationY = verticalOffset.value
+                                        if (verticalOffset.value > 0f) {
+                                            val closeProgress = (verticalOffset.value / 400f).coerceIn(0f, 1f)
+                                            this.scaleX = 1f - 0.25f * closeProgress
+                                            this.scaleY = 1f - 0.25f * closeProgress
+                                        }
+                                        if (predictiveBackProgress > 0f) {
+                                            val predScale = 1f - (predictiveBackProgress * 0.1f)
+                                            this.scaleX *= predScale
+                                            this.scaleY *= predScale
+                                            this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
+                                            this.clip = true
                                         }
                                     }
                                 }
-                            },
-                        loading = {
-                            Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                                .zoomable(videoZoomState, onTap = { 
+                                    if (!isDetailsOpen) {
+                                        showBars = !showBars
+                                        if (showBars) {
+                                            lastInteractionTime = System.currentTimeMillis()
+                                        }
+                                        showControls = showBars
+                                    }
+                                })
+                        ) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        this.player = player
+                                        useController = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            
+                            // Left Seek Zone
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(0.3f)
+                                    .align(Alignment.CenterStart)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onDoubleTap = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                seekJob?.cancel()
+                                                if (seekIndicatorState != SeekIndicatorState.LEFT) seekAmount = 0
+                                                seekIndicatorState = SeekIndicatorState.LEFT
+                                                seekAmount -= 10
+                                                val target = (player.currentPosition - 10000L).coerceAtLeast(0L)
+                                                player.seekTo(target)
+                                                seekJob = scope.launch {
+                                                    kotlinx.coroutines.delay(600)
+                                                    seekIndicatorState = null
+                                                    seekAmount = 0
+                                                }
+                                            },
+                                            onTap = {
+                                                if (!isDetailsOpen) {
+                                                    showBars = !showBars
+                                                    if (showBars) {
+                                                        lastInteractionTime = System.currentTimeMillis()
+                                                    }
+                                                    showControls = showBars
+                                                }
+                                            }
+                                        )
+                                    }
+                            )
+                            
+                            // Right Seek Zone
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(0.3f)
+                                    .align(Alignment.CenterEnd)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onDoubleTap = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                seekJob?.cancel()
+                                                if (seekIndicatorState != SeekIndicatorState.RIGHT) seekAmount = 0
+                                                seekIndicatorState = SeekIndicatorState.RIGHT
+                                                seekAmount += 10
+                                                val target = (player.currentPosition + 10000L).coerceAtMost(player.duration)
+                                                player.seekTo(target)
+                                                seekJob = scope.launch {
+                                                    kotlinx.coroutines.delay(600)
+                                                    seekIndicatorState = null
+                                                    seekAmount = 0
+                                                }
+                                            },
+                                            onTap = {
+                                                if (!isDetailsOpen) {
+                                                    showBars = !showBars
+                                                    if (showBars) {
+                                                        lastInteractionTime = System.currentTimeMillis()
+                                                    }
+                                                    showControls = showBars
+                                                }
+                                            }
+                                        )
+                                    }
+                            )
+                            
+                            // Center area for 2x speed (long press)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(0.4f)
+                                    .align(Alignment.Center)
+                                    .pointerInput(Unit) {
+                                        awaitEachGesture {
+                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                            if (player.isPlaying) {
+                                                var localHoldingFor2x = false
+                                                val holdJobLocal = scope.launch {
+                                                    kotlinx.coroutines.delay(500)
+                                                    localHoldingFor2x = true
+                                                    isHoldingFor2x = true
+                                                    player.setPlaybackSpeed(2f)
+                                                }
+                                                var up = false
+                                                while (!up) {
+                                                    val event = awaitPointerEvent()
+                                                    if (event.changes.any { it.positionChange().getDistance() > 10f }) {
+                                                        holdJobLocal.cancel()
+                                                        if (localHoldingFor2x) {
+                                                            player.setPlaybackSpeed(1f)
+                                                            isHoldingFor2x = false
+                                                        }
+                                                    }
+                                                    if (event.changes.none { it.pressed }) {
+                                                        up = true
+                                                    }
+                                                }
+                                                holdJobLocal.cancel()
+                                                if (localHoldingFor2x) {
+                                                    player.setPlaybackSpeed(1f)
+                                                    isHoldingFor2x = false
+                                                }
+                                            }
+                                        }
+                                    }
+                            )
+
+                            // Seek Ripples
+                            AnimatedVisibility(
+                                visible = seekIndicatorState == SeekIndicatorState.LEFT,
+                                enter = slideInHorizontally(animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)) { -it } + fadeIn(),
+                                exit = slideOutHorizontally() { -it } + fadeOut(),
+                                modifier = Modifier.align(Alignment.CenterStart).padding(start = 32.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(140.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                            shape = leftMorphShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.FastRewind,
+                                            contentDescription = "Rewind",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = "${abs(seekAmount)}s",
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = seekIndicatorState == SeekIndicatorState.RIGHT,
+                                enter = slideInHorizontally(animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)) { it } + fadeIn(),
+                                exit = slideOutHorizontally() { it } + fadeOut(),
+                                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 32.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(140.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                            shape = rightMorphShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.FastForward,
+                                            contentDescription = "Forward",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = "${abs(seekAmount)}s",
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 2x Speed Pill
+                            AnimatedVisibility(
+                                visible = isHoldingFor2x,
+                                enter = slideInVertically(animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)) { -it } + fadeIn(),
+                                exit = slideOutVertically() { -it } + fadeOut(),
+                                modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
+                            ) {
+                                Surface(
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    shape = androidx.compose.foundation.shape.CircleShape
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "2x Speed",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(
+                                            imageVector = Icons.Rounded.FastForward,
+                                            contentDescription = "Fast Forward",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
+                    }
+                } else {
+                    // Video Thumbnail
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(pageItem.uri)
+                            .size(targetDecodeSize)
+                            .memoryCacheKey(pageItem.uri.toString())
+                            .diskCacheKey(pageItem.uri.toString())
+                            .build(),
+                        contentDescription = pageItem.displayName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
-
-                // Previous image
-                prevItem?.let { prev ->
-                    key(prev.id) {
-                        val gap = 4f * density.density
-                        MediaImagePage(prev, -screenWidth - gap)
+            } else {
+                // Image Page
+                val zoomState = rememberZoomState()
+                var imageIntrinsicSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+                
+                // Disable pager scrolling when zoomed in
+                LaunchedEffect(zoomState.scale) {
+                    if (page == pagerState.currentPage) {
+                        isZoomed = zoomState.scale > 1.0f
                     }
                 }
                 
-                // Current image
-                if (!item.isVideo) {
-                    key(item.id) {
-                        MediaImagePage(item, 0f)
-                    }
-                }
-                
-                // Next image
-                nextItem?.let { next ->
-                    key(next.id) {
-                        val gap = 4f * density.density
-                        MediaImagePage(next, screenWidth + gap)
-                    }
-                }
-            }
-        }
-        
-        // Video player overlay (when video is playing)
-        exoPlayer?.let { player ->
-            if (currentItem?.isVideo == true) {
-                Box(
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(pageItem.uri)
+                        .size(targetDecodeSize)
+                        .memoryCacheKey(pageItem.uri.toString())
+                        .diskCacheKey(pageItem.uri.toString())
+                        .build(),
+                    contentDescription = pageItem.displayName,
+                    contentScale = ContentScale.Fit,
+                    onSuccess = { state ->
+                        imageIntrinsicSize = state.painter.intrinsicSize
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
                             transformOrigin = TransformOrigin(0.5f, 0.5f)
                             val detailsProgress = detailsPanelProgress.value.coerceIn(0f, 1f)
-                            val imageOffset = screenHeight * 0.25f * detailsProgress
-                            this.translationY = (verticalOffset.value * (1f - detailsProgress)) - imageOffset
-                            this.translationX = horizontalOffset.value * (1f - detailsProgress)
-                            transformOrigin = TransformOrigin(0.5f, 0.5f)
-                            if (gestureMode == GestureMode.VERTICAL_DOWN && detailsProgress == 0f) {
-                                val scaleAmount = 0.15f * closeProgress
-                                this.scaleX = 1f - scaleAmount
-                                this.scaleY = 1f - scaleAmount
-                            }
-                            if (predictiveBackProgress > 0f) {
-                                val predScale = 1f - (predictiveBackProgress * 0.1f)
-                                this.scaleX *= predScale
-                                this.scaleY *= predScale
-                                this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
-                                this.clip = true
-                            }
-                        }
-                ) {
-                // Video player surface only (no default controls)
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            this.player = player
-                            useController = false // Disable default controls
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                        .graphicsLayer {
-                            if (scale > OverlayConstants.MIN_ZOOM_SCALE) {
-                                this.scaleX *= scale
-                                this.scaleY *= scale
-                                this.translationX += offsetX
-                                this.translationY += offsetY
-                            }
-                        }
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val newScale = calculateScale(scale, zoom)
-                                val rawWidth = if (videoIntrinsicSize.width > 0f) videoIntrinsicSize.width else screenWidth
-                                val rawHeight = if (videoIntrinsicSize.height > 0f) videoIntrinsicSize.height else screenHeight
-                                val fitScale = kotlin.math.min(screenWidth / rawWidth, screenHeight / rawHeight)
-                                val fittedWidth = rawWidth * fitScale
-                                val fittedHeight = rawHeight * fitScale
-                                if (newScale > OverlayConstants.MIN_ZOOM_SCALE) {
-                                    gestureMode = GestureMode.ZOOM
-                                    val (cx, cy) = clampOffset(
-                                        offsetX = offsetX + pan.x * newScale,
-                                        offsetY = offsetY + pan.y * newScale,
-                                        scale = newScale,
-                                        containerWidth = screenWidth,
-                                        containerHeight = screenHeight,
-                                        imageWidth = fittedWidth,
-                                        imageHeight = fittedHeight
-                                    )
-                                    scale = newScale
-                                    offsetX = cx
-                                    offsetY = cy
-                                } else {
-                                    scale = OverlayConstants.MIN_ZOOM_SCALE
-                                    offsetX = 0f
-                                    offsetY = 0f
-                                    gestureMode = GestureMode.NONE
+                            
+                            val rawImageWidth = if (imageIntrinsicSize.width > 0f) imageIntrinsicSize.width else screenWidth
+                            val rawImageHeight = if (imageIntrinsicSize.height > 0f) imageIntrinsicSize.height else screenHeight
+                            val fitScale = kotlin.math.min(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                            val fillScale = kotlin.math.max(screenWidth / rawImageWidth, screenHeight / rawImageHeight)
+                            val detailsZoomTarget = (fillScale / fitScale).coerceAtLeast(1f)
+                            val detailsScale = 1f + (detailsZoomTarget - 1f) * detailsProgress
+
+                            if (page == pagerState.currentPage && detailsProgress > 0.01f) {
+                                val imageOffset = screenHeight * 0.25f * detailsProgress
+                                this.translationY = -imageOffset
+                                this.scaleX = detailsScale
+                                this.scaleY = detailsScale
+                            } else {
+                                this.translationY = verticalOffset.value
+                                if (verticalOffset.value > 0f) {
+                                    val closeProgress = (verticalOffset.value / 400f).coerceIn(0f, 1f)
+                                    this.scaleX = 1f - 0.25f * closeProgress
+                                    this.scaleY = 1f - 0.25f * closeProgress
+                                }
+                                if (predictiveBackProgress > 0f) {
+                                    val predScale = 1f - (predictiveBackProgress * 0.1f)
+                                    this.scaleX *= predScale
+                                    this.scaleY *= predScale
+                                    this.shape = androidx.compose.foundation.shape.RoundedCornerShape((predictiveBackProgress * 32f).dp)
+                                    this.clip = true
                                 }
                             }
                         }
+                        .zoomable(zoomState, onTap = { 
+                            if (!isDetailsOpen) {
+                                showBars = !showBars
+                                if (showBars) {
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                                showControls = showBars
+                            }
+                        })
                 )
-                
-                // Seek Ripples
-                AnimatedVisibility(
-                    visible = seekIndicatorState == SeekIndicatorState.LEFT,
-                    enter = slideInHorizontally(animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)) { -it } + fadeIn(),
-                    exit = slideOutHorizontally() { -it } + fadeOut(),
-                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 32.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(140.dp)
-                            .background(
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                                shape = leftMorphShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Rounded.FastRewind,
-                                contentDescription = "Rewind",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "${abs(seekAmount)}s",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = seekIndicatorState == SeekIndicatorState.RIGHT,
-                    enter = slideInHorizontally(animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)) { it } + fadeIn(),
-                    exit = slideOutHorizontally() { it } + fadeOut(),
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 32.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(140.dp)
-                            .background(
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                                shape = rightMorphShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Rounded.FastForward,
-                                contentDescription = "Forward",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "${abs(seekAmount)}s",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
-                    }
-                }
-
-                // 2x Speed Pill
-                AnimatedVisibility(
-                    visible = isHoldingFor2x,
-                    enter = slideInVertically(animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)) { -it } + fadeIn(),
-                    exit = slideOutVertically() { -it } + fadeOut(),
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
-                ) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.6f),
-                        shape = androidx.compose.foundation.shape.CircleShape
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "2x Speed",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.Rounded.FastForward,
-                                contentDescription = "Fast Forward",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
             }
         }
         val detailsTopBarLayerVisible = isDetailsOpen && !isAnyVideoFullscreen
+
         if (detailsTopBarLayerVisible) {
             val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             Box(
@@ -2444,13 +2264,41 @@ fun MediaOverlay(
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f * progress))
                     .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                event.changes.forEach { it.consume() }
+                        detectTapGestures(
+                            onTap = {
+                                scope.launch {
+                                    detailsPanelProgress.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 300f))
+                                    showControls = true
+                                }
+                            }
+                        )
+                    }
+                    .swipe(
+                        enabled = true,
+                        onDragStart = {
+                            scope.launch { detailsPanelProgress.stop(); verticalOffset.stop() }
+                        },
+                        onDrag = { dragAmount ->
+                            scope.launch {
+                                if (detailsPanelProgress.value > 0f) {
+                                    val deltaProgress = dragAmount / (screenHeight * 0.5f)
+                                    detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                    showControls = detailsPanelProgress.value < 0.1f
+                                }
+                            }
+                        },
+                        onDragEnd = { velocity ->
+                            scope.launch {
+                                if (detailsPanelProgress.value > 0f) {
+                                    val shouldOpen = if (velocity < -800f) true 
+                                                     else if (velocity > 800f) false
+                                                     else detailsPanelProgress.value > 0.5f
+                                    detailsPanelProgress.animateTo(if (shouldOpen) 1f else 0f, androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 380f))
+                                    showControls = !shouldOpen
+                                }
                             }
                         }
-                    }
+                    )
             )
 
             Surface(
@@ -2463,13 +2311,61 @@ fun MediaOverlay(
                         translationY = (1f - progress) * panelHeight
                         alpha = leadingAlpha
                     }
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                event.changes.forEach { it.consume() }
+                    .nestedScroll(remember {
+                        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                                if (available.y > 0 && detailsPanelProgress.value > 0f && detailsPanelProgress.value < 1f) {
+                                    scope.launch {
+                                        val deltaProgress = available.y / (screenHeight * 0.5f)
+                                        detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                        showControls = detailsPanelProgress.value < 0.1f
+                                    }
+                                    return androidx.compose.ui.geometry.Offset(0f, available.y)
+                                }
+                                return androidx.compose.ui.geometry.Offset.Zero
+                            }
+                            
+                            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                                if (available.y > 0 && detailsPanelProgress.value > 0f) {
+                                    scope.launch {
+                                        val deltaProgress = available.y / (screenHeight * 0.5f)
+                                        detailsPanelProgress.snapTo((detailsPanelProgress.value - deltaProgress).coerceIn(0f, 1f))
+                                        showControls = detailsPanelProgress.value < 0.1f
+                                    }
+                                    return androidx.compose.ui.geometry.Offset(0f, available.y)
+                                }
+                                return androidx.compose.ui.geometry.Offset.Zero
+                            }
+
+                            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                                if (detailsPanelProgress.value < 1f) {
+                                    if (detailsPanelProgress.value > 0f) {
+                                        val shouldOpen = if (available.y < -800f) true 
+                                                         else if (available.y > 800f) false
+                                                         else detailsPanelProgress.value > 0.5f
+                                        detailsPanelProgress.animateTo(if (shouldOpen) 1f else 0f, androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 380f))
+                                        showControls = !shouldOpen
+                                    }
+                                    return available
+                                }
+                                return androidx.compose.ui.unit.Velocity.Zero
+                            }
+                            
+                            override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                                if (available.y > 0f && detailsPanelProgress.value > 0f) {
+                                    val shouldOpen = if (available.y < -800f) true 
+                                                     else if (available.y > 800f) false
+                                                     else detailsPanelProgress.value > 0.5f
+                                    detailsPanelProgress.animateTo(if (shouldOpen) 1f else 0f, androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 380f))
+                                    showControls = !shouldOpen
+                                    return available
+                                }
+                                return androidx.compose.ui.unit.Velocity.Zero
                             }
                         }
+                    })
+                    .pointerInput(Unit) {
+                        detectTapGestures { } // Consume taps so they don't fall through
                     },
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(
@@ -2565,7 +2461,6 @@ fun MediaOverlay(
             }
         )
     }
-}
 }
 
 /**
@@ -3098,3 +2993,4 @@ private suspend fun extractAndSaveFrame(context: Context, uri: android.net.Uri, 
         }
     }
 }
+
