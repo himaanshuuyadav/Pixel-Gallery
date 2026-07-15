@@ -178,41 +178,7 @@ fun RecycleBinContent(
                 }
             }
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Material 3 Expressive collapsing header
-            MediumTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Recycle Bin",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (trashedItems.isNotEmpty()) {
-                            Text(
-                                text = "${trashedItems.size} ${if (trashedItems.size == 1) "item" else "items"}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        FontIcon(
-                            unicode = FontIcons.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
+        // Content Box
             
             Box(
                 modifier = Modifier
@@ -229,42 +195,24 @@ fun RecycleBinContent(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 } else if (trashedItems.isEmpty()) {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        FontIcon(
-                            unicode = FontIcons.Delete,
-                            contentDescription = null,
-                            size = 64.sp,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "Recycle Bin is Empty",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Deleted items will appear here",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    com.prantiux.pixelgallery.ui.components.PremiumEmptyState(
+                        icon = FontIcons.Delete,
+                        title = "Recycle Bin is Empty",
+                        subtitle = "Deleted items will appear here\nThey'll be removed after 30 days",
+                        modifier = Modifier.align(Alignment.Center)
+                    )
                 } else {
                     LazyVerticalGrid(
     flingBehavior = rememberZenithFlingBehavior(),
                         columns = GridCells.Fixed(3),
                         state = gridState,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .nestedScroll(scrollBehavior.nestedScrollConnection),
+                            .fillMaxSize(),
                         contentPadding = PaddingValues(
                             bottom = navBarHeight + 2.dp,
                             start = 2.dp,
                             end = 2.dp,
-                            top = 16.dp
+                            top = 72.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 16.dp
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -283,7 +231,7 @@ fun RecycleBinContent(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
+                                        .padding(start = 8.dp, top = if (index == 0) 0.dp else 32.dp, bottom = 8.dp, end = 8.dp)
                                         .then(
                                             if (index == 0) {
                                                 Modifier.onGloballyPositioned { coords ->
@@ -390,7 +338,6 @@ fun RecycleBinContent(
                     }
                 }
             }
-        }
         
         // Unified Scrollbar Component with day-left jumping
         com.prantiux.pixelgallery.ui.components.UnifiedScrollbar(
@@ -413,7 +360,6 @@ fun RecycleBinContent(
         )
         
         // Selection Top Bar - overlay above navigation bar
-        val navBarHeight = calculateFloatingNavBarHeight()
         val deleteSuccessMessage by viewModel.deleteSuccessMessage.collectAsState()
         val restoreSuccessMessage by viewModel.restoreSuccessMessage.collectAsState()
         com.prantiux.pixelgallery.ui.components.SelectionTopBar(
@@ -466,6 +412,12 @@ fun RecycleBinContent(
                 onDismiss = { viewModel.hideMediaOverlay() }
             )
         }
+        com.prantiux.pixelgallery.ui.components.ExpressiveSubHeader(
+            title = "Recycle Bin",
+            subtitle = if (trashedItems.isNotEmpty()) "${trashedItems.size} ${if (trashedItems.size == 1) "item" else "items"}" else null,
+            onNavigateBack = onNavigateBack,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }
 

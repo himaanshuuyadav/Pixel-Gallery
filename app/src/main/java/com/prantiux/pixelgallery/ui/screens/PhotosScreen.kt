@@ -453,8 +453,12 @@ fun PhotosContent(
                                                 }
 
                                                 val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { 
-                                                    raw.y >= it.offset.y && raw.y <= it.offset.y + it.size.height &&
-                                                    raw.x >= it.offset.x && raw.x <= it.offset.x + it.size.width
+                                                    // 10% inset dead-zone: finger must be clearly inside the item
+                                                    // to prevent boundary-grazing from selecting adjacent items
+                                                    val insetX = it.size.width * 0.10f
+                                                    val insetY = it.size.height * 0.10f
+                                                    raw.y >= it.offset.y + insetY && raw.y <= it.offset.y + it.size.height - insetY &&
+                                                    raw.x >= it.offset.x + insetX && raw.x <= it.offset.x + it.size.width - insetX
                                                 }
                                                 if (item != null) {
                                                     val newIdx = item.index

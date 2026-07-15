@@ -70,7 +70,7 @@ fun PlaybackSettingScreen(
     ) {
         // Behavior category
         item {
-            CategoryHeader("Behavior")
+            CategoryHeader("Behavior", topPadding = 0.dp)
         }
         
         // Auto-play videos

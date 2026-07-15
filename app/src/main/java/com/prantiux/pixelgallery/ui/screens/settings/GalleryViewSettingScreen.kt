@@ -107,7 +107,7 @@ fun GalleryViewSettingScreen(
             // System Albums Section
             if (systemAlbums.isNotEmpty()) {
                 item {
-                    CategoryHeader("System Albums")
+                    CategoryHeader("System Albums", topPadding = 0.dp)
                 }
                 
                 items(systemAlbums.size) { index ->

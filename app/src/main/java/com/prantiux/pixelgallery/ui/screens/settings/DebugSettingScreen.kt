@@ -117,7 +117,7 @@ fun DebugSettingScreen(
     ) {
         // ML LABELING DEBUG PANEL
         item {
-            CategoryHeader("ML Image Labeling")
+            CategoryHeader("ML Image Labeling", topPadding = 0.dp)
         }
         
         item {

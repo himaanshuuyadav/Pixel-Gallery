@@ -111,7 +111,7 @@ fun LayoutSettingScreen(
     ) {
         // Category header
         item {
-            CategoryHeader("Grid")
+            CategoryHeader("Grid", topPadding = 0.dp)
         }
         
         // Grid Type setting with dropdown

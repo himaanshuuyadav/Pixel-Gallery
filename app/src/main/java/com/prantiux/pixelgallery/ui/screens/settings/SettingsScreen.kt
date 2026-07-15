@@ -53,9 +53,9 @@ fun SettingsScreen(
         subtitle = "Customize your gallery experience",
         onNavigateBack = onBackClick
     ) {
-        // Appearance Section
+        // Appearance & Behavior Section
         item {
-            CategoryHeader("Appearance")
+            CategoryHeader("Appearance & Behavior", topPadding = 0.dp)
         }
         item {
             SettingsGroup {
@@ -84,26 +84,14 @@ fun SettingsScreen(
                     title = "Previews",
                     subtitle = "Thumbnail and media settings",
                     iconUnicode = FontIcons.Image,
-                    position = SettingPosition.BOTTOM,
+                    position = SettingPosition.MIDDLE,
                     onClick = onNavigateToPreviews
                 )
-            }
-        }
-        
-        // Interaction Section
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        item {
-            CategoryHeader("Interaction")
-        }
-        item {
-            SettingsGroup {
                 GroupedSettingItem(
                     title = "Gestures",
                     subtitle = "Swipe and tap controls",
                     iconUnicode = FontIcons.SwipeDown,
-                    position = SettingPosition.TOP,
+                    position = SettingPosition.MIDDLE,
                     onClick = onNavigateToGestures
                 )
                 GroupedSettingItem(
@@ -123,12 +111,12 @@ fun SettingsScreen(
             }
         }
         
-        // Storage and Privacy Section
+        // Data & Privacy Section
         item {
             Spacer(modifier = Modifier.height(8.dp))
         }
         item {
-            CategoryHeader("Storage and Privacy")
+            CategoryHeader("Data & Privacy")
         }
         item {
             SettingsGroup {
@@ -156,30 +144,11 @@ fun SettingsScreen(
             }
         }
         
-        // Support Section
+        // About Section
         item {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        item {
-            CategoryHeader("Support")
-        }
-        item {
-            SettingsGroup {
-                GroupedSettingItem(
-                    title = "About and help",
-                    subtitle = "App info and support",
-                    iconUnicode = FontIcons.Info,
-                    position = SettingPosition.TOP,
-                    onClick = { /* TODO */ }
-                )
-                GroupedSettingItem(
-                    title = "Debug",
-                    subtitle = "Developer tools",
-                    iconUnicode = FontIcons.Settings,
-                    position = SettingPosition.BOTTOM,
-                    onClick = onNavigateToDebug
-                )
-            }
+            Spacer(modifier = Modifier.height(16.dp))
+            AboutSettings(onNavigateToDebug = onNavigateToDebug)
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -189,12 +158,12 @@ enum class SettingPosition {
 }
 
 @Composable
-internal fun CategoryHeader(title: String) {
+internal fun CategoryHeader(title: String, topPadding: androidx.compose.ui.unit.Dp = 28.dp) {
     Text(
         text = title,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp)
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = topPadding, bottom = 12.dp)
     )
 }
 

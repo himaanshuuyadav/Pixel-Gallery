@@ -1,34 +1,30 @@
 package com.prantiux.pixelgallery.ui.components
 
 import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.*
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.prantiux.pixelgallery.ui.icons.FontIcon
-import com.prantiux.pixelgallery.ui.icons.FontIcons
 
 /**
- * Reusable scaffold for sub-pages with GRID layout and Material 3 Expressive Medium Flexible Header.
+ * Reusable scaffold for sub-pages with GRID layout and an Expressive Zenith-Style Header.
  * 
  * Same as SubPageScaffold but uses LazyVerticalGrid instead of LazyColumn.
  * Perfect for image galleries, album views, and grid-based content.
  * 
  * @param title The main title text
- * @param subtitle Optional subtitle text (fades during collapse)
+ * @param subtitle Optional subtitle text (ignored in ExpressiveSubHeader)
  * @param onNavigateBack Back navigation callback
  * @param actions Optional action icons in the top bar
  * @param columns Number of grid columns (default 3)
- * @param useCustomCollapseColors When true, uses custom colors on collapse
+ * @param useCustomCollapseColors Ignored in this implementation
  * @param contentPadding Padding for the grid content
  * @param horizontalArrangement Horizontal arrangement (default 2.dp spacing)
  * @param verticalArrangement Vertical arrangement (default 2.dp spacing)
@@ -48,72 +44,36 @@ fun SubPageScaffoldGrid(
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(2.dp),
     content: LazyGridScope.() -> Unit
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
-        state = rememberTopAppBarState(),
-        snapAnimationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessHigh
-        )
-    )
-    
     val gridState = rememberLazyGridState()
     
-    Scaffold(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = MaterialTheme.colorScheme.surface,
-        topBar = {
-            MediumTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
-                            ),
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        if (subtitle != null) {
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        FontIcon(
-                            unicode = FontIcons.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                actions = actions,
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
-    ) { paddingValues ->
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
         LazyVerticalGrid(
-    flingBehavior = rememberZenithFlingBehavior(),
+            flingBehavior = rememberZenithFlingBehavior(),
             columns = GridCells.Fixed(columns),
             state = gridState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-            contentPadding = contentPadding,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = contentPadding.calculateStartPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+                end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+                top = 72.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + contentPadding.calculateTopPadding(),
+                bottom = contentPadding.calculateBottomPadding() + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            ),
             horizontalArrangement = horizontalArrangement,
             verticalArrangement = verticalArrangement
         ) {
             content()
         }
+
+        ExpressiveSubHeader(
+            title = title,
+            subtitle = subtitle,
+            onNavigateBack = onNavigateBack,
+            actions = actions,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }

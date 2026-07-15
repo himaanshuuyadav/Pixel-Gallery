@@ -97,7 +97,7 @@ fun PreviewsSettingScreen(
     ) {
         // Thumbnail tweaks category header
         item {
-            CategoryHeader("Thumbnail tweaks")
+            CategoryHeader("Thumbnail tweaks", topPadding = 0.dp)
         }
         
         // Quality setting

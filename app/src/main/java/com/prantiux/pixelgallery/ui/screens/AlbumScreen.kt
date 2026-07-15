@@ -154,61 +154,24 @@ fun AlbumDetailScreen(
     val dateGroupsForScrollbar by dateGroupsFlow.collectAsState(initial = emptyList())
     
     val isSmartAlbum = SmartAlbumGenerator.isSmartAlbum(albumId)
-    val album = remember(albumId, viewModel.allAlbumsFlow.value) {
-        viewModel.allAlbumsFlow.value.find { it.id == albumId }
+    val allAlbums by viewModel.allAlbumsFlow.collectAsState()
+    val album = remember(albumId, allAlbums) {
+        allAlbums.find { it.id == albumId }
     }
     val albumName = remember(albumId, album) {
         if (isSmartAlbum) {
             SmartAlbumGenerator.fromId(albumId)?.displayName ?: "Smart Album"
         } else {
-            album?.name ?: "Album"
+            album?.name ?: ""
         }
     }
     val albumItemCount = album?.itemCount ?: 0
     
     val navBarHeight = calculateFloatingNavBarHeight()
     
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
-        state = rememberTopAppBarState()
-    )
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        MediumTopAppBar(
-            title = {
-                Column {
-                        Text(
-                            text = albumName,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
-                            ),
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    if (albumItemCount > 0) {
-                        Text(
-                            text = "$albumItemCount ${if (albumItemCount == 1) "item" else "items"}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onNavigateBack) {
-                    FontIcon(
-                        unicode = FontIcons.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            },
-            scrollBehavior = scrollBehavior,
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = MaterialTheme.colorScheme.surface
-            )
-        )
-        
+    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Content Box
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -236,7 +199,7 @@ fun AlbumDetailScreen(
                             contentPadding = PaddingValues(
                                 start = 2.dp,
                                 end = 2.dp,
-                                top = 16.dp,
+                                top = 72.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 16.dp,
                                 bottom = navBarHeight + 2.dp
                             ),
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -282,7 +245,7 @@ fun AlbumDetailScreen(
                     columns = GridCells.Fixed(columnCount),
                     state = gridState,
                     modifier = Modifier
-                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                        .fillMaxSize()
                             .let {
                                 val currentIsSelectionMode by rememberUpdatedState(isSelectionMode)
                                 val currentSelectedItems by rememberUpdatedState(selectedItems)
@@ -340,8 +303,10 @@ fun AlbumDetailScreen(
                                                 }
 
                                                 val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { 
-                                                    raw.y >= it.offset.y && raw.y <= it.offset.y + it.size.height &&
-                                                    raw.x >= it.offset.x && raw.x <= it.offset.x + it.size.width
+                                                    val insetX = it.size.width * 0.10f
+                                                    val insetY = it.size.height * 0.10f
+                                                    raw.y >= it.offset.y + insetY && raw.y <= it.offset.y + it.size.height - insetY &&
+                                                    raw.x >= it.offset.x + insetX && raw.x <= it.offset.x + it.size.width - insetX
                                                 }
                                                 if (item != null) {
                                                     val newIdx = item.index
@@ -386,7 +351,7 @@ fun AlbumDetailScreen(
                     contentPadding = PaddingValues(
                         start = 2.dp,
                         end = 2.dp,
-                        top = 16.dp,
+                        top = 72.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 16.dp,
                         bottom = navBarHeight + 2.dp
                     ),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -418,7 +383,7 @@ fun AlbumDetailScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(start = 8.dp, top = 32.dp, bottom = 8.dp, end = 8.dp)
+                                            .padding(start = 8.dp, top = if (index == 0) 0.dp else 32.dp, bottom = 8.dp, end = 8.dp)
                                             .then(
                                                 if (index == 0) {
                                                     Modifier.onGloballyPositioned { coords ->
@@ -497,10 +462,18 @@ fun AlbumDetailScreen(
                                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                                                 viewModel.toggleSelection(mediaItem.id)
                                             } else {
-                                                viewModel.showMediaOverlayWithItem(
+                                                // Compute the media-only index (skip header items)
+                                                // so the overlay pager opens the correct item immediately
+                                                var mediaIndex = 0
+                                                for (i in 0 until index) {
+                                                    val gridItem = pagedAlbumMedia.peek(i)
+                                                    if (gridItem is MediaGridItem.Media) mediaIndex++
+                                                }
+                                                viewModel.showMediaOverlay(
                                                     mediaType = "album",
                                                     albumId = albumId,
-                                                    item = mediaItem
+                                                    selectedIndex = mediaIndex,
+                                                    selectedItemId = mediaItem.id
                                                 )
                                             }
                                         },
@@ -748,7 +721,16 @@ fun AlbumDetailScreen(
                 }
             }
         }
-    }
+    } // close inner Box (all content including overlays)
+    
+    // ExpressiveSubHeader is a sibling of the inner Box inside the outer Box
+    // This guarantees it always renders on top of everything
+    com.prantiux.pixelgallery.ui.components.ExpressiveSubHeader(
+        title = albumName,
+        onNavigateBack = onNavigateBack,
+        modifier = Modifier.align(Alignment.TopCenter)
+    )
+    } // close outer Box
     
     // Copy to Album Dialog
     val showCopyDialog by viewModel.showCopyToAlbumDialog.collectAsState()
@@ -769,5 +751,5 @@ fun AlbumDetailScreen(
             onDismiss = { viewModel.hideMoveToAlbumDialog() }
         )
     }
-    }
+}
 }

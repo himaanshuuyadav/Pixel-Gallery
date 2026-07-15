@@ -447,72 +447,79 @@ class MediaViewModel : ViewModel() {
     /**
      * PAGED MEDIA FLOW: Primary UI Flow for Paging 3 (Infinite Scroll)
      */
+    private data class PagedMediaState(
+        val ready: Boolean,
+        val selected: Set<String>?,
+        val sortMode: SortMode,
+        val gridType: GridType,
+        val favSet: Set<Long>
+    )
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val pagedMediaFlow: kotlinx.coroutines.flow.Flow<PagingData<MediaGridItem>> = _databaseReady
         .flatMapLatest { ready ->
             if (!ready) {
                 flowOf(PagingData.empty())
             } else {
-                _selectedAlbums
-                    .combine(_sortMode) { selectedAlbums, sortMode ->
-                        Pair(selectedAlbums, sortMode)
-                    }
-                    .flatMapLatest { (selected, sortMode) ->
-                        Pager(
-                            config = PagingConfig(
-                                pageSize = 100, 
-                                initialLoadSize = 100,
-                                enablePlaceholders = true, 
-                                prefetchDistance = 200
-                            ),
-                            pagingSourceFactory = {
-                                if (selected == null || selected.isEmpty()) {
-                                    when (sortMode) {
-                                        SortMode.DATE_DESC -> database.mediaDao().getPagedMediaByDateDesc()
-                                        SortMode.DATE_ASC -> database.mediaDao().getPagedMediaByDateAsc()
-                                        SortMode.NAME_ASC -> database.mediaDao().getPagedMediaByNameAsc()
-                                        SortMode.NAME_DESC -> database.mediaDao().getPagedMediaByNameDesc()
-                                        SortMode.SIZE_DESC -> database.mediaDao().getPagedMediaBySizeDesc()
-                                        SortMode.SIZE_ASC -> database.mediaDao().getPagedMediaBySizeAsc()
-                                    }
-                                } else {
-                                    val selectedList = selected.toList()
-                                    when (sortMode) {
-                                        SortMode.DATE_DESC -> database.mediaDao().getPagedMediaByBucketIdsDateDesc(selectedList)
-                                        SortMode.DATE_ASC -> database.mediaDao().getPagedMediaByBucketIdsDateAsc(selectedList)
-                                        SortMode.NAME_ASC -> database.mediaDao().getPagedMediaByBucketIdsNameAsc(selectedList)
-                                        SortMode.NAME_DESC -> database.mediaDao().getPagedMediaByBucketIdsNameDesc(selectedList)
-                                        SortMode.SIZE_DESC -> database.mediaDao().getPagedMediaByBucketIdsSizeDesc(selectedList)
-                                        SortMode.SIZE_ASC -> database.mediaDao().getPagedMediaByBucketIdsSizeAsc(selectedList)
-                                    }
+                kotlinx.coroutines.flow.combine(
+                    _selectedAlbums,
+                    _sortMode,
+                    _gridType,
+                    database.favoriteDao().getAllFavoriteIdsFlow()
+                ) { selected, sortMode, gridType, favIds ->
+                    PagedMediaState(true, selected, sortMode, gridType, favIds.toSet())
+                }.flatMapLatest { state ->
+                    Pager(
+                        config = PagingConfig(
+                            pageSize = 100, 
+                            initialLoadSize = 100,
+                            enablePlaceholders = true, 
+                            prefetchDistance = 200
+                        ),
+                        pagingSourceFactory = {
+                            if (state.selected == null || state.selected.isEmpty()) {
+                                when (state.sortMode) {
+                                    SortMode.DATE_DESC -> database.mediaDao().getPagedMediaByDateDesc()
+                                    SortMode.DATE_ASC -> database.mediaDao().getPagedMediaByDateAsc()
+                                    SortMode.NAME_ASC -> database.mediaDao().getPagedMediaByNameAsc()
+                                    SortMode.NAME_DESC -> database.mediaDao().getPagedMediaByNameDesc()
+                                    SortMode.SIZE_DESC -> database.mediaDao().getPagedMediaBySizeDesc()
+                                    SortMode.SIZE_ASC -> database.mediaDao().getPagedMediaBySizeAsc()
+                                }
+                            } else {
+                                val selectedList = state.selected.toList()
+                                when (state.sortMode) {
+                                    SortMode.DATE_DESC -> database.mediaDao().getPagedMediaByBucketIdsDateDesc(selectedList)
+                                    SortMode.DATE_ASC -> database.mediaDao().getPagedMediaByBucketIdsDateAsc(selectedList)
+                                    SortMode.NAME_ASC -> database.mediaDao().getPagedMediaByBucketIdsNameAsc(selectedList)
+                                    SortMode.NAME_DESC -> database.mediaDao().getPagedMediaByBucketIdsNameDesc(selectedList)
+                                    SortMode.SIZE_DESC -> database.mediaDao().getPagedMediaByBucketIdsSizeDesc(selectedList)
+                                    SortMode.SIZE_ASC -> database.mediaDao().getPagedMediaByBucketIdsSizeAsc(selectedList)
                                 }
                             }
-                        ).flow
-                    }
-                    .cachedIn(viewModelScope)
-                    .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { pagingData, favIds ->
-                        val favSet = favIds.toSet()
-                        pagingData.map { entity ->
-                            MediaGridItem.Media(entity.toMediaItem(isFavorite = entity.id in favSet))
                         }
-                    }
-                    .combine(_gridType) { pagingData, type ->
-                        pagingData.insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
+                    ).flow
+                    .map { pagingData ->
+                        pagingData.map { entity ->
+                            MediaGridItem.Media(entity.toMediaItem(isFavorite = entity.id in state.favSet))
+                        }
+                        .insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
                             if (after == null) return@insertSeparators null
                             
-                            val beforeGroup = before?.let { if (type.isDay) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
-                            val afterGroup = if (type.isDay) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
+                            val beforeGroup = before?.let { if (state.gridType.isDay) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
+                            val afterGroup = if (state.gridType.isDay) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
                             
                             if (beforeGroup != afterGroup) {
-                                val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type.isDay)
+                                val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, state.gridType.isDay)
                                 MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
                             } else {
                                 null
                             }
                         }
                     }
+                }
             }
-        }
+        }.cachedIn(viewModelScope)
 
     /**
      * ALL ALBUMS FLOW: Complete album list from Room (UNFILTERED)
@@ -1051,39 +1058,40 @@ class MediaViewModel : ViewModel() {
             }
         }
         
-        return _databaseReady
-            .flatMapLatest { ready ->
-                if (!ready) {
-                    flowOf(PagingData.empty())
-                } else {
-                    Pager(
-                        config = PagingConfig(pageSize = 100, enablePlaceholders = true, prefetchDistance = 200),
-                        pagingSourceFactory = { database.mediaDao().getPagedMediaByBucketIdsDateDesc(listOf(bucketId)) }
-                    ).flow
-                }
-            }
-            .cachedIn(viewModelScope)
-            .combine(database.favoriteDao().getAllFavoriteIdsFlow()) { pagingData, favIds ->
-                val favSet = favIds.toSet()
-                pagingData.map { entity ->
-                    MediaGridItem.Media(entity.toMediaItem(isFavorite = entity.id in favSet))
-                }
-            }
-            .combine(_gridType) { pagingData, type ->
-                pagingData.insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
-                    if (after == null) return@insertSeparators null
-                    
-                    val beforeGroup = before?.let { if (type.isDay) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
-                    val afterGroup = if (type.isDay) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
-                    
-                    if (beforeGroup != afterGroup) {
-                        val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type.isDay)
-                        MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
-                    } else {
-                        null
+        return kotlinx.coroutines.flow.combine(
+            _databaseReady,
+            _gridType,
+            database.favoriteDao().getAllFavoriteIdsFlow()
+        ) { ready, type, favIds ->
+            Triple(ready, type, favIds.toSet())
+        }.flatMapLatest { (ready, type, favSet) ->
+            if (!ready) {
+                flowOf(PagingData.empty())
+            } else {
+                Pager(
+                    config = PagingConfig(pageSize = 100, enablePlaceholders = true, prefetchDistance = 200),
+                    pagingSourceFactory = { database.mediaDao().getPagedMediaByBucketIdsDateDesc(listOf(bucketId)) }
+                ).flow
+                .map { pagingData ->
+                    pagingData.map { entity ->
+                        MediaGridItem.Media(entity.toMediaItem(isFavorite = entity.id in favSet))
+                    }
+                    .insertSeparators { before: MediaGridItem.Media?, after: MediaGridItem.Media? ->
+                        if (after == null) return@insertSeparators null
+                        
+                        val beforeGroup = before?.let { if (type.isDay) it.mediaItem.dateGroupDay else it.mediaItem.dateGroupMonth }
+                        val afterGroup = if (type.isDay) after.mediaItem.dateGroupDay else after.mediaItem.dateGroupMonth
+                        
+                        if (beforeGroup != afterGroup) {
+                            val displayDate = formatDisplayDate(after.mediaItem.dateAdded * 1000L, type.isDay)
+                            MediaGridItem.Header(displayDate = displayDate, dateGroupKey = afterGroup)
+                        } else {
+                            null
+                        }
                     }
                 }
             }
+        }.cachedIn(viewModelScope)
     }
     
     /**
@@ -1551,7 +1559,17 @@ class MediaViewModel : ViewModel() {
         item: MediaItem,
         searchQuery: String? = null
     ) {
-        val index = mediaFlow.value.indexOf(item).takeIf { it >= 0 } ?: 0
+        // For album/smartalbum types, the overlay resolves the correct item by selectedItemId
+        // within the album-specific list. Using a global mediaFlow index causes wrong items to open.
+        // For photos/search/favorites, use the correct list index.
+        val index = when (mediaType) {
+            "album", "smartalbum" -> {
+                // Use 0 as placeholder; overlay will resolve correct position by selectedItemId
+                0
+            }
+            "favorites" -> favoritesFlow.value.indexOf(item).takeIf { it >= 0 } ?: 0
+            else -> mediaFlow.value.indexOf(item).takeIf { it >= 0 } ?: 0
+        }
         showMediaOverlay(mediaType, albumId, index, searchQuery, item.id)
     }
 

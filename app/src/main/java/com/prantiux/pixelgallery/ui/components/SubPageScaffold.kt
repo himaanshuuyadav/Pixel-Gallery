@@ -1,29 +1,23 @@
 package com.prantiux.pixelgallery.ui.components
 
 import com.prantiux.pixelgallery.ui.utils.rememberZenithFlingBehavior
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.*
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.prantiux.pixelgallery.ui.icons.FontIcon
-import com.prantiux.pixelgallery.ui.icons.FontIcons
 
 /**
- * Reusable scaffold for sub-pages with Material 3 Expressive Medium Flexible Header.
+ * Reusable scaffold for sub-pages with an Expressive Zenith-Style Header.
  * 
  * Features:
- * - MediumTopAppBar that collapses smoothly on scroll
- * - Shows title and optional subtitle when expanded
- * - Collapses into compact top app bar with exitUntilCollapsed behavior
- * - Consistent with Material 3 Expressive design (Android 16 Settings style)
- * - Optimized for performance (no recompositions on scroll)
+ * - Fixed sticky ExpressiveSubHeader with gradient glass background.
+ * - Content scrolls beautifully underneath the header's gradient.
+ * - Title and subtitle left-aligned with back arrow.
  * 
  * Usage Example:
  * ```
@@ -56,10 +50,10 @@ import com.prantiux.pixelgallery.ui.icons.FontIcons
  * - Those should use MainTabHeader or their current implementation
  * 
  * @param title The main title text
- * @param subtitle Optional subtitle text (fades during collapse)
+ * @param subtitle Optional subtitle text
  * @param onNavigateBack Back navigation callback
  * @param actions Optional action icons in the top bar
- * @param useCustomCollapseColors When true, uses custom colors on collapse (for special pages)
+ * @param useCustomCollapseColors Ignored in this implementation
  * @param content The scrollable content using LazyColumn scope
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,74 +66,31 @@ fun SubPageScaffold(
     useCustomCollapseColors: Boolean = false,
     content: LazyListScope.() -> Unit
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
-        state = rememberTopAppBarState(),
-        snapAnimationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessHigh
-        )
-    )
-    
-    // Calculate collapse progress (0 = expanded, 1 = collapsed)
-    val collapseFraction = if (scrollBehavior.state.collapsedFraction.isNaN()) {
-        0f
-    } else {
-        scrollBehavior.state.collapsedFraction
-    }
-    
-    Scaffold(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = MaterialTheme.colorScheme.surface,
-        topBar = {
-            MediumTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontFamily = com.prantiux.pixelgallery.ui.theme.zenithHeadingFont
-                            ),
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        if (subtitle != null) {
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        FontIcon(
-                            unicode = FontIcons.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                actions = actions,
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
-    ) { paddingValues ->
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
         LazyColumn(
-    flingBehavior = rememberZenithFlingBehavior(),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            flingBehavior = rememberZenithFlingBehavior(),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp, 
+                end = 16.dp, 
+                top = 72.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 16.dp, 
+                bottom = 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            ),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             content()
         }
+
+        ExpressiveSubHeader(
+            title = title,
+            subtitle = subtitle,
+            onNavigateBack = onNavigateBack,
+            actions = actions,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }

@@ -73,7 +73,7 @@ fun ThemeSettingScreen(
         onNavigateBack = onBackClick
     ) {
         item {
-            CategoryHeader("Appearance")
+            CategoryHeader("Appearance", topPadding = 0.dp)
         }
         
         item {

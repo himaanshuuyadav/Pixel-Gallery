@@ -80,7 +80,7 @@ fun GesturesSettingScreen(
     ) {
         // Navigation category header
         item {
-            CategoryHeader("Navigation")
+            CategoryHeader("Navigation", topPadding = 0.dp)
         }
         
         // Swipe down to close
