@@ -117,10 +117,6 @@ abstract class CropState internal constructor(
 
                 val initialDrawAreaRect = updateImageDrawRectFromTransformation()
                 
-                android.util.Log.d("CROP_DEBUG", "init() -> initialNormalizedRect=$initialNormalizedRect")
-                android.util.Log.d("CROP_DEBUG", "init() -> imageSize=$imageSize")
-                android.util.Log.d("CROP_DEBUG", "init() -> initialDrawAreaRect=$initialDrawAreaRect")
-                
                 // Avoid division by zero
                 if (imageSize.width > 0 && imageSize.height > 0 && initialDrawAreaRect.width > 0 && initialDrawAreaRect.height > 0) {
                     val overlayWidth = (cropRectWidth / imageSize.width) * initialDrawAreaRect.width
@@ -132,11 +128,8 @@ abstract class CropState internal constructor(
                     val overlayLeft = initialDrawAreaRect.left + diffLeft
                     val overlayTop = initialDrawAreaRect.top + diffTop
                     
-                    val rect = Rect(overlayLeft, overlayTop, overlayLeft + overlayWidth, overlayTop + overlayHeight)
-                    android.util.Log.d("CROP_DEBUG", "init() -> computed overlay rect=$rect")
-                    rect
+                    Rect(overlayLeft, overlayTop, overlayLeft + overlayWidth, overlayTop + overlayHeight)
                 } else {
-                    android.util.Log.d("CROP_DEBUG", "init() -> falling back to default due to 0 dimensions")
                     getOverlayFromAspectRatio(
                         containerSize.width.toFloat(),
                         containerSize.height.toFloat(),
@@ -147,7 +140,6 @@ abstract class CropState internal constructor(
                     )
                 }
             } else {
-                android.util.Log.d("CROP_DEBUG", "init() -> initialNormalizedRect is null, using default")
                 getOverlayFromAspectRatio(
                     containerSize.width.toFloat(),
                     containerSize.height.toFloat(),
@@ -161,11 +153,9 @@ abstract class CropState internal constructor(
             animatableRectOverlay.snapTo(initialTargetRect)
             
             if (hasInitialCrop) {
-                android.util.Log.d("CROP_DEBUG", "init() -> hasInitialCrop=true, updating draw area")
                 // If we have an initial crop, just update the draw area without animating/resetting
                 drawAreaRect = updateImageDrawRectFromTransformation()
             } else {
-                android.util.Log.d("CROP_DEBUG", "init() -> hasInitialCrop=false, animating to bounds")
                 // When initial aspect ratio doesn't match drawable area
                 // overlay gets updated so updates draw area as well
                 animateTransformationToOverlayBounds(overlayRect, animate = true)

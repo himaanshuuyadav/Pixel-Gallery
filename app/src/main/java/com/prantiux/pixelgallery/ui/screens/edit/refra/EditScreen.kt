@@ -257,6 +257,16 @@ fun EditScreen2(
     var isCropScrubbingMode by remember { mutableStateOf(false) }
     var extractedCrop by remember { mutableStateOf<Crop?>(null) }
     var initialZoom by remember { mutableFloatStateOf(1f) }
+
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val handleClose: () -> Unit = {
+        if (canUndo) {
+            showDiscardDialog = true
+        } else {
+            if (showingEditorScreen || isOnTopLevelTab) onClose()
+            else navController.popBackStack()
+        }
+    }
     var initialPanX by remember { mutableFloatStateOf(0f) }
     var initialPanY by remember { mutableFloatStateOf(0f) }
 
@@ -314,6 +324,10 @@ fun EditScreen2(
         }
     }
 
+    BackHandler(enabled = !isMarkupDrawing && canUndo && !isCropScrubbingMode) {
+        handleClose()
+    }
+
     // Safety net: if an apply was requested but we're no longer in drawing mode
     // (the painter is already gone and can't handle it), clear the flag so the
     // loading/blur overlay can never hang indefinitely (#955).
@@ -363,10 +377,7 @@ fun EditScreen2(
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         IconButton(
-                            onClick = {
-                                if (showingEditorScreen || isOnTopLevelTab) onClose()
-                                else navController.popBackStack()
-                            },
+                            onClick = handleClose,
                             modifier = Modifier.size(40.dp)
                         ) {
                             FontIcon(
@@ -379,40 +390,45 @@ fun EditScreen2(
                         }
 
                         AnimatedVisibility(
-                            visible = canUndo,
-                            enter = enterAnimation,
-                            exit = exitAnimation
+                            visible = canUndo || canRedo,
+                            enter = fadeIn(),
+                            exit = fadeOut()
                         ) {
-                            IconButton(
-                                onClick = removeLast,
-                                modifier = Modifier.size(40.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                FontIcon(
-                                    unicode = FontIcons.Undo,
-                                    size = 24.sp,
-                                    contentDescription = "Undo",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-
-                        AnimatedVisibility(
-                            visible = canRedo,
-                            enter = enterAnimation,
-                            exit = exitAnimation
-                        ) {
-                            IconButton(
-                                onClick = onRedo,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                FontIcon(
-                                    unicode = FontIcons.Redo,
-                                    size = 24.sp,
-                                    contentDescription = "Redo",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                                IconButton(
+                                    onClick = removeLast,
+                                    enabled = canUndo,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                ) {
+                                    FontIcon(
+                                        unicode = FontIcons.Undo,
+                                        size = 24.sp,
+                                        contentDescription = "Undo",
+                                        tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = onRedo,
+                                    enabled = canRedo,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                ) {
+                                    FontIcon(
+                                        unicode = FontIcons.Redo,
+                                        size = 24.sp,
+                                        contentDescription = "Redo",
+                                        tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1170,6 +1186,30 @@ fun EditScreen2(
                 dismissButton = {
                     TextButton(onClick = { showRevertDialog = false }) {
                         Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showDiscardDialog) {
+            AlertDialog(
+                onDismissRequest = { showDiscardDialog = false },
+                title = { Text("Discard edits?") },
+                text = { Text("If you go back now, you will lose all the changes you've made.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showDiscardDialog = false
+                            if (showingEditorScreen || isOnTopLevelTab) onClose()
+                            else navController.popBackStack()
+                        }
+                    ) {
+                        Text("Discard")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDiscardDialog = false }) {
+                        Text("Keep editing")
                     }
                 }
             )
