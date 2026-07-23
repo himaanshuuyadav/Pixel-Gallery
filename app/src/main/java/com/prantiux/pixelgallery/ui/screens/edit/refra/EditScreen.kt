@@ -150,7 +150,7 @@ fun EditScreen2(
     onToggleFilter: (ImageFilter) -> Unit,
     commitFilter: () -> Unit = {},
     removeLast: () -> Unit,
-    onCropRect: (RectF) -> Unit,
+    onCropRect: (RectF, Float) -> Unit,
     addPath: (Path, PathProperties) -> Unit,
     clearPathsUndone: () -> Unit,
     setCurrentPosition: (Offset) -> Unit,
@@ -749,7 +749,7 @@ fun EditScreen2(
                                 isCropScrubbingMode = true
                             },
                             onCropRect = {
-                                onCropRect(it)
+                                onCropRect(it, imageRotation)
                                 val shouldSave = cropState.requestSave
                                 cropState = cropState.copy(isCropping = false, requestSave = false, hasCropChanged = false)
                                 isCropScrubbingMode = false

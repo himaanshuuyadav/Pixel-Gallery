@@ -181,8 +181,8 @@ class EditActivity : ComponentActivity() {
                         onToggleFilter = viewModel::toggleFilter,
                         commitFilter = viewModel::commitFilter,
                         removeLast = viewModel::removeLast,
-                        onCropRect = { normalizedRect ->
-                            viewModel.applyAdjustment(Crop(normalizedRect))
+                        onCropRect = { normalizedRect, rotation ->
+                            viewModel.applyAdjustment(Crop(normalizedRect, rotation))
                         },
                         addPath = viewModel::addPath,
                         clearPathsUndone = viewModel::clearPathsUndone,
