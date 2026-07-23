@@ -115,7 +115,7 @@ open class TransformState(
         val newRotation = if (rotatable) {
             this.rotation + rotationChange
         } else {
-            0f
+            this.rotation
         }
         snapRotationTo(newRotation)
 

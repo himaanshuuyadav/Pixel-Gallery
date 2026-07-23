@@ -279,15 +279,78 @@ abstract class CropState internal constructor(
      * Check if area that image is drawn covers [overlayRect]
      */
     internal fun isOverlayInImageDrawBounds(): Boolean {
-        return drawAreaRect.left <= overlayRect.left &&
-                drawAreaRect.top <= overlayRect.top &&
-                drawAreaRect.right >= overlayRect.right &&
-                drawAreaRect.bottom >= overlayRect.bottom
-    }
+        if (this.rotation == 0f) {
+            return drawAreaRect.left <= overlayRect.left &&
+                    drawAreaRect.top <= overlayRect.top &&
+                    drawAreaRect.right >= overlayRect.right &&
+                    drawAreaRect.bottom >= overlayRect.bottom
+        }
 
-    /**
-     * Check if [rect] is inside container bounds
-     */
+        val theta = this.rotation
+        val rad = Math.toRadians(Math.abs(theta).toDouble())
+        val cos = Math.cos(rad).toFloat()
+        val sin = Math.sin(rad).toFloat()
+
+        val wOrig = drawAreaSize.width.toFloat()
+        val hOrig = drawAreaSize.height.toFloat()
+
+        val s = if (wOrig > 0 && hOrig > 0) {
+            maxOf(
+                (wOrig * cos + hOrig * sin) / wOrig,
+                (wOrig * sin + hOrig * cos) / hOrig
+            )
+        } else {
+            1f
+        }
+
+        val currentZoom = animatableZoom.targetValue.coerceAtLeast(1f)
+        val c0x = containerSize.width / 2f
+        val c0y = containerSize.height / 2f + initialOffsetY * currentZoom
+
+        val u1x = overlayRect.left;   val u1y = overlayRect.top
+        val u2x = overlayRect.right;  val u2y = overlayRect.top
+        val u3x = overlayRect.right;  val u3y = overlayRect.bottom
+        val u4x = overlayRect.left;   val u4y = overlayRect.bottom
+
+        val d1x = u1x - c0x; val d1y = u1y - c0y
+        val d2x = u2x - c0x; val d2y = u2y - c0y
+        val d3x = u3x - c0x; val d3y = u3y - c0y
+        val d4x = u4x - c0x; val d4y = u4y - c0y
+
+        val radNeg = Math.toRadians(-theta.toDouble())
+        val cosNeg = Math.cos(radNeg).toFloat()
+        val sinNeg = Math.sin(radNeg).toFloat()
+
+        fun rotX(x: Float, y: Float) = x * cosNeg - y * sinNeg
+        fun rotY(x: Float, y: Float) = x * sinNeg + y * cosNeg
+
+        val l1x = rotX(d1x, d1y); val l1y = rotY(d1x, d1y)
+        val l2x = rotX(d2x, d2y); val l2y = rotY(d2x, d2y)
+        val l3x = rotX(d3x, d3y); val l3y = rotY(d3x, d3y)
+        val l4x = rotX(d4x, d4y); val l4y = rotY(d4x, d4y)
+
+        val xMax = maxOf(l1x, l2x, l3x, l4x)
+        val xMin = minOf(l1x, l2x, l3x, l4x)
+        val yMax = maxOf(l1y, l2y, l3y, l4y)
+        val yMin = minOf(l1y, l2y, l3y, l4y)
+
+        val wi = s * wOrig * currentZoom
+        val hi = s * hOrig * currentZoom
+
+        val px = animatablePanX.targetValue
+        val py = animatablePanY.targetValue
+
+        val pLocalX = rotX(px, py)
+        val pLocalY = rotY(px, py)
+
+        val minPx = xMax - wi / 2f
+        val maxPx = xMin + wi / 2f
+        val minPy = yMax - hi / 2f
+        val maxPy = yMin + hi / 2f
+
+        val eps = 0.5f
+        return pLocalX >= minPx - eps && pLocalX <= maxPx + eps && pLocalY >= minPy - eps && pLocalY <= maxPy + eps
+    }
     internal fun isRectInContainerBounds(rect: Rect): Boolean {
         return rect.left >= 0 &&
                 rect.right <= containerSize.width &&
@@ -348,27 +411,126 @@ abstract class CropState internal constructor(
         animate: Boolean,
         animationSpec: AnimationSpec<Float> = tween(400)
     ) {
+        val currentZoom = zoom.coerceAtLeast(1f)
+        
+        if (this.rotation == 0f) {
+            val newDrawAreaRect = calculateValidImageDrawRect(overlayRect, drawAreaRect)
+            val newZoom = calculateNewZoom(oldRect = drawAreaRect, newRect = newDrawAreaRect, zoom = currentZoom)
+            val newPanX = newDrawAreaRect.center.x - containerSize.width / 2f
+            val newPanY = newDrawAreaRect.center.y - containerSize.height / 2f - initialOffsetY * newZoom
+            
+            drawAreaRect = newDrawAreaRect
+            if (animate) {
+                resetWithAnimation(pan = Offset(newPanX, newPanY), zoom = newZoom, animationSpec = animationSpec)
+            } else {
+                snapPanXto(newPanX)
+                snapPanYto(newPanY)
+                snapZoomTo(newZoom)
+            }
+            resetTracking()
+            return
+        }
 
-        val zoom = zoom.coerceAtLeast(1f)
+        val theta = this.rotation
+        val rad = Math.toRadians(Math.abs(theta).toDouble())
+        val cos = Math.cos(rad).toFloat()
+        val sin = Math.sin(rad).toFloat()
+        
+        val wOrig = drawAreaSize.width.toFloat()
+        val hOrig = drawAreaSize.height.toFloat()
+        
+        val s = if (wOrig > 0 && hOrig > 0) {
+            maxOf(
+                (wOrig * cos + hOrig * sin) / wOrig,
+                (wOrig * sin + hOrig * cos) / hOrig
+            )
+        } else {
+            1f
+        }
+        
+        val c0x = containerSize.width / 2f
+        val c0y = containerSize.height / 2f + initialOffsetY * currentZoom
+        
+        val u1x = overlayRect.left;   val u1y = overlayRect.top
+        val u2x = overlayRect.right;  val u2y = overlayRect.top
+        val u3x = overlayRect.right;  val u3y = overlayRect.bottom
+        val u4x = overlayRect.left;   val u4y = overlayRect.bottom
 
-        // Calculate new pan based on overlay
-        val newDrawAreaRect = calculateValidImageDrawRect(overlayRect, drawAreaRect)
+        val d1x = u1x - c0x; val d1y = u1y - c0y
+        val d2x = u2x - c0x; val d2y = u2y - c0y
+        val d3x = u3x - c0x; val d3y = u3y - c0y
+        val d4x = u4x - c0x; val d4y = u4y - c0y
 
-        val newZoom =
-            calculateNewZoom(oldRect = drawAreaRect, newRect = newDrawAreaRect, zoom = zoom)
+        val radNeg = Math.toRadians(-theta.toDouble())
+        val cosNeg = Math.cos(radNeg).toFloat()
+        val sinNeg = Math.sin(radNeg).toFloat()
 
-        val leftChange = newDrawAreaRect.left - drawAreaRect.left
-        val topChange = newDrawAreaRect.top - drawAreaRect.top
+        fun rotX(x: Float, y: Float) = x * cosNeg - y * sinNeg
+        fun rotY(x: Float, y: Float) = x * sinNeg + y * cosNeg
 
-        val widthChange = newDrawAreaRect.width - drawAreaRect.width
-        val heightChange = newDrawAreaRect.height - drawAreaRect.height
+        val l1x = rotX(d1x, d1y); val l1y = rotY(d1x, d1y)
+        val l2x = rotX(d2x, d2y); val l2y = rotY(d2x, d2y)
+        val l3x = rotX(d3x, d3y); val l3y = rotY(d3x, d3y)
+        val l4x = rotX(d4x, d4y); val l4y = rotY(d4x, d4y)
 
-        val newPanX = newDrawAreaRect.center.x - containerSize.width / 2f
-        val newPanY = newDrawAreaRect.center.y - containerSize.height / 2f - initialOffsetY * newZoom
-
-        // Update draw area based on new pan and zoom values
-        drawAreaRect = newDrawAreaRect
-
+        val xMax = maxOf(l1x, l2x, l3x, l4x)
+        val xMin = minOf(l1x, l2x, l3x, l4x)
+        val yMax = maxOf(l1y, l2y, l3y, l4y)
+        val yMin = minOf(l1y, l2y, l3y, l4y)
+        
+        val zoomReqX = if (s * wOrig > 0) (xMax - xMin) / (s * wOrig) else currentZoom
+        val zoomReqY = if (s * hOrig > 0) (yMax - yMin) / (s * hOrig) else currentZoom
+        val newZoom = maxOf(currentZoom, zoomReqX, zoomReqY)
+        
+        // Recalculate with newZoom
+        val c0y_new = containerSize.height / 2f + initialOffsetY * newZoom
+        
+        val d1x_new = u1x - c0x; val d1y_new = u1y - c0y_new
+        val d2x_new = u2x - c0x; val d2y_new = u2y - c0y_new
+        val d3x_new = u3x - c0x; val d3y_new = u3y - c0y_new
+        val d4x_new = u4x - c0x; val d4y_new = u4y - c0y_new
+        
+        val l1x_new = rotX(d1x_new, d1y_new); val l1y_new = rotY(d1x_new, d1y_new)
+        val l2x_new = rotX(d2x_new, d2y_new); val l2y_new = rotY(d2x_new, d2y_new)
+        val l3x_new = rotX(d3x_new, d3y_new); val l3y_new = rotY(d3x_new, d3y_new)
+        val l4x_new = rotX(d4x_new, d4y_new); val l4y_new = rotY(d4x_new, d4y_new)
+        
+        val xMax_new = maxOf(l1x_new, l2x_new, l3x_new, l4x_new)
+        val xMin_new = minOf(l1x_new, l2x_new, l3x_new, l4x_new)
+        val yMax_new = maxOf(l1y_new, l2y_new, l3y_new, l4y_new)
+        val yMin_new = minOf(l1y_new, l2y_new, l3y_new, l4y_new)
+        
+        val wi = s * wOrig * newZoom
+        val hi = s * hOrig * newZoom
+        
+        val minPx = xMax_new - wi / 2f
+        val maxPx = xMin_new + wi / 2f
+        val minPy = yMax_new - hi / 2f
+        val maxPy = yMin_new + hi / 2f
+        
+        val px = animatablePanX.targetValue
+        // Find current image center, offset relative to new c0!
+        // P_relative = C_curr - C_0_new
+        val py_relative = animatablePanY.targetValue + initialOffsetY * (currentZoom - newZoom)
+        
+        val pLocalX = rotX(px, py_relative)
+        val pLocalY = rotY(px, py_relative)
+        
+        val safeMinPx = minOf(minPx, maxPx)
+        val safeMaxPx = maxOf(minPx, maxPx)
+        val clampedPLocalX = pLocalX.coerceIn(safeMinPx, safeMaxPx)
+        
+        val safeMinPy = minOf(minPy, maxPy)
+        val safeMaxPy = maxOf(minPy, maxPy)
+        val clampedPLocalY = pLocalY.coerceIn(safeMinPy, safeMaxPy)
+        
+        val radPos = Math.toRadians(theta.toDouble())
+        val cosPos = Math.cos(radPos).toFloat()
+        val sinPos = Math.sin(radPos).toFloat()
+        
+        val newPanX = clampedPLocalX * cosPos - clampedPLocalY * sinPos
+        val newPanY = clampedPLocalX * sinPos + clampedPLocalY * cosPos
+        
         if (animate) {
             resetWithAnimation(
                 pan = Offset(newPanX, newPanY),
@@ -380,7 +542,8 @@ abstract class CropState internal constructor(
             snapPanYto(newPanY)
             snapZoomTo(newZoom)
         }
-
+        
+        drawAreaRect = updateImageDrawRectFromTransformation()
         resetTracking()
     }
 
@@ -390,7 +553,7 @@ abstract class CropState internal constructor(
      */
     private fun calculateNewZoom(oldRect: Rect, newRect: Rect, zoom: Float): Float {
 
-        if (oldRect.size == Size.Zero || newRect.size == Size.Zero) return zoom
+        if (oldRect.size == androidx.compose.ui.geometry.Size.Zero || newRect.size == androidx.compose.ui.geometry.Size.Zero) return zoom
 
         val widthChange = (newRect.width / oldRect.width)
             .coerceAtLeast(1f)
