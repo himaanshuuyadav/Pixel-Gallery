@@ -56,8 +56,6 @@ internal fun GraphicsLayerScope.update(transformState: TransformState) {
 
     // Set zoom
     val zoom = transformState.zoom
-    this.scaleX = zoom
-    this.scaleY = zoom
 
     // Set pan
     val pan = transformState.pan
@@ -67,5 +65,37 @@ internal fun GraphicsLayerScope.update(transformState: TransformState) {
     this.translationY = translationY
 
     // Set rotation
-    this.rotationZ = transformState.rotation
+    val theta = transformState.rotation
+    this.rotationZ = theta
+
+    // Auto-zoom to keep viewport completely filled during rotation
+    val rad = Math.toRadians(Math.abs(theta).toDouble())
+    val cos = Math.cos(rad).toFloat()
+    val sin = Math.sin(rad).toFloat()
+
+    val w = transformState.imageSize.width.toFloat()
+    val h = transformState.imageSize.height.toFloat()
+
+    val s = if (w > 0 && h > 0) {
+        maxOf(
+            (w * cos + h * sin) / w,
+            (w * sin + h * cos) / h
+        )
+    } else {
+        1f
+    }
+
+    this.scaleX = zoom * s
+    this.scaleY = zoom * s
+
+    // Adjust rotation pivot to be the center of the image footprint, 
+    // taking into account the initial vertical offset
+    val offsetY = transformState.initialOffsetY.toFloat()
+    val containerHeight = transformState.containerSize.height.toFloat()
+    val pivotY = if (containerHeight > 0) {
+        0.5f + (offsetY / containerHeight)
+    } else {
+        0.5f
+    }
+    this.transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, pivotY)
 }

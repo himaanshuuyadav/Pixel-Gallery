@@ -202,7 +202,8 @@ fun ImageCropper(
                     val bottom = (rect.top + cropRect.bottom) / imgH
                     callback(android.graphics.RectF(left, top, right, bottom))
                 }
-            }
+            },
+            rotation = cropState.rotation
         )
 
         val imageModifier = Modifier
@@ -374,7 +375,8 @@ private fun Crop(
     cropOutline: CropOutline,
     onCropStart: () -> Unit,
     onCropSuccess: (ImageBitmap) -> Unit,
-    onCropRect: ((Rect) -> Unit)? = null
+    onCropRect: ((Rect) -> Unit)? = null,
+    rotation: Float = 0f
 ) {
 
     val density = LocalDensity.current
@@ -392,7 +394,8 @@ private fun Crop(
                         cropRect,
                         cropOutline,
                         layoutDirection,
-                        density
+                        density,
+                        rotation
                     )
                 )
             }

@@ -199,9 +199,7 @@ open class TransformState(
     }
 
     internal suspend fun snapRotationTo(rotation: Float) {
-        if (rotatable) {
-            animatableRotation.snapTo(rotation)
-        }
+        animatableRotation.snapTo(rotation)
     }
 
     /*

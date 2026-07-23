@@ -40,15 +40,47 @@ class CropAgent {
         cropOutline: CropOutline,
         layoutDirection: LayoutDirection,
         density: Density,
+        rotation: Float = 0f
     ): ImageBitmap {
         return runCatching {
-            val croppedBitmap: Bitmap = Bitmap.createBitmap(
-                imageBitmap.asAndroidBitmap(),
-                cropRect.left.toInt(),
-                cropRect.top.toInt(),
+            val w = imageBitmap.width.toFloat()
+            val h = imageBitmap.height.toFloat()
+
+            // Calculate auto-zoom scale factor
+            val rad = Math.toRadians(Math.abs(rotation).toDouble())
+            val cos = Math.cos(rad).toFloat()
+            val sin = Math.sin(rad).toFloat()
+            val s = if (w > 0 && h > 0) {
+                maxOf(
+                    (w * cos + h * sin) / w,
+                    (w * sin + h * cos) / h
+                )
+            } else {
+                1f
+            }
+
+            val croppedBitmap = Bitmap.createBitmap(
                 cropRect.width.toInt(),
                 cropRect.height.toInt(),
+                Bitmap.Config.ARGB_8888
             )
+
+            val canvas = android.graphics.Canvas(croppedBitmap)
+            val matrix = android.graphics.Matrix()
+
+            val pivotX = w / 2f
+            val pivotY = h / 2f
+
+            matrix.postScale(s, s, pivotX, pivotY)
+            matrix.postRotate(rotation, pivotX, pivotY)
+            matrix.postTranslate(-cropRect.left, -cropRect.top)
+
+            val paint = android.graphics.Paint().apply {
+                isFilterBitmap = true
+                isAntiAlias = true
+            }
+
+            canvas.drawBitmap(imageBitmap.asAndroidBitmap(), matrix, paint)
 
             val imageToCrop = croppedBitmap
                 .copy(Bitmap.Config.ARGB_8888, true)!!
