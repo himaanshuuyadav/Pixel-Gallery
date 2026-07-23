@@ -12,6 +12,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.runtime.CompositionLocalProvider
@@ -74,10 +77,10 @@ fun EditorNavigator(
             modifier = modifier,
             navController = navController,
             startDestination = EditorDestination.Lighting,
-            enterTransition = { fadeIn() },
-            exitTransition = { fadeOut() },
-            popEnterTransition = { fadeIn() },
-            popExitTransition = { fadeOut() }
+            enterTransition = { fadeIn(tween(250)) + scaleIn(initialScale = 0.95f, animationSpec = tween(250)) },
+            exitTransition = { fadeOut(tween(250)) + scaleOut(targetScale = 0.95f, animationSpec = tween(250)) },
+            popEnterTransition = { fadeIn(tween(250)) + scaleIn(initialScale = 0.95f, animationSpec = tween(250)) },
+            popExitTransition = { fadeOut(tween(250)) + scaleOut(targetScale = 0.95f, animationSpec = tween(250)) }
         ) {
             composable<EditorDestination.Editor> {
                 CompositionLocalProvider(

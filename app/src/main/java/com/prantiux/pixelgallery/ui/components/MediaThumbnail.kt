@@ -223,10 +223,12 @@ fun MediaThumbnail(
             item.uri
         }
 
-        val imageRequest = remember(thumbnailData, targetSize, context) {
+        val imageRequest = remember(thumbnailData, targetSize, context, item.size) {
             coil.request.ImageRequest.Builder(context)
                 .data(thumbnailData)
                 .size(targetSize)
+                .memoryCacheKey("${item.uri}_${item.size}")
+                .diskCacheKey("${item.uri}_${item.size}")
                 .crossfade(false)
                 .build()
         }

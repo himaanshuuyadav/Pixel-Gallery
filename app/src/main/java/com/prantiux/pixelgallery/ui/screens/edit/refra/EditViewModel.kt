@@ -354,7 +354,7 @@ class EditViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             _uri.value = uri
             activeMedia.value = uri
-            _canOverride.value = false
+            _canOverride.value = true
             _hasOriginalBackup.value = false
 
             setOriginalBitmap(context)
@@ -820,27 +820,41 @@ class EditViewModel : ViewModel() {
             var originalDateTaken = System.currentTimeMillis()
             var originalRelativePath = Environment.DIRECTORY_PICTURES + "/PixelGallery"
 
-            context.contentResolver.query(
-                uri,
-                arrayOf(
-                    android.provider.MediaStore.Images.Media.DATE_ADDED,
-                    android.provider.MediaStore.Images.Media.DATE_TAKEN,
-                    android.provider.MediaStore.Images.Media.RELATIVE_PATH
-                ),
-                null, null, null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val dateAddedCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DATE_ADDED)
-                    val dateTakenCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DATE_TAKEN)
-                    val relativePathCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.RELATIVE_PATH)
-                    
-                    if (dateAddedCol != -1) originalDateAdded = cursor.getLong(dateAddedCol)
-                    if (dateTakenCol != -1) originalDateTaken = cursor.getLong(dateTakenCol)
-                    if (relativePathCol != -1) {
-                        val path = cursor.getString(relativePathCol)
-                        if (!path.isNullOrEmpty()) originalRelativePath = path
+            val projection = mutableListOf(
+                android.provider.MediaStore.Images.Media.DATE_ADDED,
+                android.provider.MediaStore.Images.Media.DATE_TAKEN
+            ).apply {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    add(android.provider.MediaStore.Images.Media.RELATIVE_PATH)
+                }
+            }.toTypedArray()
+
+            try {
+                context.contentResolver.query(
+                    uri,
+                    projection,
+                    null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val dateAddedCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DATE_ADDED)
+                        val dateTakenCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DATE_TAKEN)
+                        
+                        if (dateAddedCol != -1) originalDateAdded = cursor.getLong(dateAddedCol)
+                        if (dateTakenCol != -1) originalDateTaken = cursor.getLong(dateTakenCol)
+                        
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            val relativePathCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.RELATIVE_PATH)
+                            if (relativePathCol != -1) {
+                                val path = cursor.getString(relativePathCol)
+                                if (!path.isNullOrEmpty()) {
+                                    originalRelativePath = if (path.endsWith("/")) path else "$path/"
+                                }
+                            }
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
 
             lastRealBitmap()?.let { bitmap ->
@@ -853,7 +867,11 @@ class EditViewModel : ViewModel() {
                         put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, originalDateAdded)
                         put(android.provider.MediaStore.Images.Media.DATE_TAKEN, originalDateTaken)
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, originalRelativePath)
+                            var safeRelativePath = "Pictures/PixelGallery/"
+                            if (originalRelativePath.startsWith("DCIM/") || originalRelativePath.startsWith("Pictures/")) {
+                                safeRelativePath = originalRelativePath
+                            }
+                            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, safeRelativePath)
                             put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
                         }
                     }
@@ -864,13 +882,23 @@ class EditViewModel : ViewModel() {
                         }
                         
                         // Write EXIF Date
+                        val exactFrameTimeMs = if (originalDateTaken > 0) originalDateTaken else originalDateAdded * 1000
                         try {
                             resolver.openFileDescriptor(newUri, "rw")?.use { pfd ->
                                 val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
-                                val date = java.util.Date(if (originalDateTaken > 0) originalDateTaken else originalDateAdded * 1000)
+                                val date = java.util.Date(exactFrameTimeMs)
                                 val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
                                 val dateString = sdf.format(date)
                                 exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL, dateString)
+                                exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME, dateString)
+                                exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_DIGITIZED, dateString)
+                                
+                                val offsetSdf = java.text.SimpleDateFormat("XXX", java.util.Locale.US)
+                                val offsetString = offsetSdf.format(date)
+                                exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME, offsetString)
+                                exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME_ORIGINAL, offsetString)
+                                exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_OFFSET_TIME_DIGITIZED, offsetString)
+                                
                                 exif.saveAttributes()
                             }
                         } catch (e: Exception) {
@@ -880,19 +908,38 @@ class EditViewModel : ViewModel() {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                             val updateValues = android.content.ContentValues().apply {
                                 put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                                put(android.provider.MediaStore.Images.Media.DATE_TAKEN, exactFrameTimeMs)
+                                put(android.provider.MediaStore.Images.Media.DATE_ADDED, originalDateAdded)
+                                put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, originalDateAdded)
                             }
                             resolver.update(newUri, updateValues, null, null)
                         }
 
-                        onSuccess().also { _isSaving.value = false }
+                        viewModelScope.launch(Dispatchers.Main) {
+                            com.prantiux.pixelgallery.model.MediaEventBus.lastSavedUri.value = newUri
+                            // Small delay to allow MediaContentObserver and Room DB to sync
+                            // so the gallery overlay updates instantly when we return
+                            kotlinx.coroutines.delay(600)
+                            _isSaving.value = false
+                            onSuccess()
+                        }
                     } else {
-                        onFail().also { _isSaving.value = false }
+                        viewModelScope.launch(Dispatchers.Main) {
+                            _isSaving.value = false
+                            onFail()
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    onFail().also { _isSaving.value = false }
+                    viewModelScope.launch(Dispatchers.Main) {
+                        _isSaving.value = false
+                        onFail()
+                    }
                 }
-            } ?: onFail().also { _isSaving.value = false }
+            } ?: viewModelScope.launch(Dispatchers.Main) {
+                _isSaving.value = false
+                onFail()
+            }
         }
     }
 
@@ -900,13 +947,19 @@ class EditViewModel : ViewModel() {
         context: Context,
         saveFormat: SaveFormat? = null,
         onSuccess: () -> Unit = {},
-        onFail: () -> Unit = {}
+        onFail: () -> Unit = {},
+        onRequestPermission: ((androidx.activity.result.IntentSenderRequest) -> Unit)? = null
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             _isSaving.value = true
             val format = saveFormat ?: bestSaveFormat(context)
             flattenComposedMatrix()
-            val uri = activeMedia.value ?: return@launch onFail().also { _isSaving.value = false }
+            val uri = activeMedia.value ?: return@launch run {
+                viewModelScope.launch(Dispatchers.Main) {
+                    _isSaving.value = false
+                    onFail()
+                }
+            }
             
             lastRealBitmap()?.let { bitmap ->
                 try {
@@ -922,14 +975,56 @@ class EditViewModel : ViewModel() {
                     }
                     resolver.update(uri, updateValues, null, null)
                     
-                    onSuccess().also { _isSaving.value = false }
+                    // Invalidate Coil Cache so the UI updates
+                    try {
+                        val imageLoader = coil.Coil.imageLoader(context)
+                        imageLoader.memoryCache?.remove(coil.memory.MemoryCache.Key(uri.toString()))
+                        imageLoader.diskCache?.remove(uri.toString())
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    
+                    viewModelScope.launch(Dispatchers.Main) {
+                        // Small delay to allow MediaContentObserver and Room DB to sync
+                        // so the gallery overlay updates instantly when we return
+                        kotlinx.coroutines.delay(600)
+                        _isSaving.value = false
+                        onSuccess()
+                    }
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && e is SecurityException && onRequestPermission != null) {
+                        try {
+                            val intentSender = android.provider.MediaStore.createWriteRequest(context.contentResolver, listOf(uri)).intentSender
+                            viewModelScope.launch(Dispatchers.Main) {
+                                onRequestPermission(androidx.activity.result.IntentSenderRequest.Builder(intentSender).build())
+                                // Keep isSaving true so UI shows loading state while permission dialog is open
+                            }
+                            return@launch
+                        } catch (innerE: Exception) {
+                            innerE.printStackTrace()
+                        }
+                    } else if (android.os.Build.VERSION.SDK_INT == android.os.Build.VERSION_CODES.Q && e is android.app.RecoverableSecurityException && onRequestPermission != null) {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            onRequestPermission(androidx.activity.result.IntentSenderRequest.Builder(e.userAction.actionIntent.intentSender).build())
+                            // Keep isSaving true
+                        }
+                        return@launch
+                    }
+                    
                     // If Scoped Storage blocks the direct overwrite, fallback to saving a copy
                     saveCopy(context, saveFormat, onSuccess, onFail)
                 }
-            } ?: onFail().also { _isSaving.value = false }
+            } ?: viewModelScope.launch(Dispatchers.Main) {
+                _isSaving.value = false
+                onFail()
+            }
         }
+    }
+
+    fun cancelSaving() {
+        _isSaving.value = false
     }
 
     fun revertToOriginal(

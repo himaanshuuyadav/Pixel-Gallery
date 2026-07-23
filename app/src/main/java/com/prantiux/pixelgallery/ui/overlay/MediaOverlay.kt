@@ -246,9 +246,19 @@ fun MediaOverlay(
         }
     }
     
-    // When mediaItems updates (e.g. after frame export), adjust currentIndex to keep looking at the same item
-    LaunchedEffect(mediaItems) {
-        if (hasResolvedInitialIndex && currentlyViewedId != null) {
+    val lastSavedUri by com.prantiux.pixelgallery.model.MediaEventBus.lastSavedUri.collectAsState()
+
+    // When mediaItems updates (e.g. after frame export or edit), adjust currentIndex to keep looking at the same item,
+    // OR jump to the newly saved item if it exists.
+    LaunchedEffect(mediaItems, lastSavedUri) {
+        if (lastSavedUri != null && mediaItems.isNotEmpty()) {
+            val newIdx = mediaItems.indexOfFirst { it.uri == lastSavedUri }
+            if (newIdx >= 0) {
+                currentIndex = newIdx
+                currentlyViewedId = mediaItems[newIdx].id
+                com.prantiux.pixelgallery.model.MediaEventBus.lastSavedUri.value = null
+            }
+        } else if (hasResolvedInitialIndex && currentlyViewedId != null) {
             val newIdx = mediaItems.indexOfFirst { it.id == currentlyViewedId }
             if (newIdx >= 0 && newIdx != currentIndex) {
                 currentIndex = newIdx
@@ -1535,8 +1545,8 @@ unicode = FontIcons.FastForward,
                         model = ImageRequest.Builder(context)
                             .data(pageItem.uri)
                             .size(targetDecodeSize)
-                            .memoryCacheKey(pageItem.uri.toString())
-                            .diskCacheKey(pageItem.uri.toString())
+                            .memoryCacheKey("${pageItem.uri}_${pageItem.size}")
+                            .diskCacheKey("${pageItem.uri}_${pageItem.size}")
                             .build(),
                         contentDescription = pageItem.displayName,
                         contentScale = ContentScale.Fit,
@@ -1559,8 +1569,8 @@ unicode = FontIcons.FastForward,
                     model = ImageRequest.Builder(context)
                         .data(pageItem.uri)
                         .size(targetDecodeSize)
-                        .memoryCacheKey(pageItem.uri.toString())
-                        .diskCacheKey(pageItem.uri.toString())
+                        .memoryCacheKey("${pageItem.uri}_${pageItem.size}")
+                        .diskCacheKey("${pageItem.uri}_${pageItem.size}")
                         .build(),
                     contentDescription = pageItem.displayName,
                     contentScale = ContentScale.Fit,

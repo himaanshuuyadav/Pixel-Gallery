@@ -97,6 +97,9 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
@@ -263,16 +266,9 @@ fun EditScreen2(
     var isCropScrubbingMode by remember { mutableStateOf(false) }
     var extractedCrop by remember { mutableStateOf<Crop?>(null) }
     var initialZoom by remember { mutableFloatStateOf(1f) }
+    var requestedSaveType by remember { mutableIntStateOf(0) }
 
     var showDiscardDialog by remember { mutableStateOf(false) }
-    val handleClose: () -> Unit = {
-        if (canUndo) {
-            showDiscardDialog = true
-        } else {
-            if (showingEditorScreen || isOnTopLevelTab) onClose()
-            else navController.popBackStack()
-        }
-    }
     var initialPanX by remember { mutableFloatStateOf(0f) }
     var initialPanY by remember { mutableFloatStateOf(0f) }
 
@@ -317,6 +313,16 @@ fun EditScreen2(
 
     val onRequestTextInput: () -> Unit = { showTextOverlay = true }
 
+    val hasUnsavedChanges = canUndo || isChanged || extractedCrop != null || imageRotation != 0f || paths.isNotEmpty() || textAnnotations.isNotEmpty() || activeFilterName != null
+    val handleClose: () -> Unit = {
+        if (hasUnsavedChanges) {
+            showDiscardDialog = true
+        } else {
+            if (showingEditorScreen || isOnTopLevelTab) onClose()
+            else navController.popBackStack()
+        }
+    }
+
     // Apply (or cancel) markup on a back press while still in drawing mode, so the
     // MarkupPainter is still composed to consume the request. A raw back gesture
     // otherwise disposes the painter first, leaving requestMarkupApply with nothing
@@ -330,7 +336,7 @@ fun EditScreen2(
         }
     }
 
-    BackHandler(enabled = !isMarkupDrawing && canUndo && !isCropScrubbingMode) {
+    BackHandler(enabled = !isMarkupDrawing && hasUnsavedChanges && !isCropScrubbingMode) {
         handleClose()
     }
 
@@ -485,32 +491,25 @@ fun EditScreen2(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        val isDrag = isHandleTouched
-                        val isCropAndNotDragging = !isHandleTouched && cropState.hasCropChanged
-                        val canShowSave = isCropAndNotDragging || canSave
-                        
                         var showMenu by remember { mutableStateOf(false) }
                         
-                        if (isChanged && canOverride) {
+                        if (canOverride) {
                             @OptIn(ExperimentalMaterial3ExpressiveApi::class)
                             SplitButtonLayout(
                                 leadingButton = {
                                     Button(
                                         onClick = {
-                                            if (cropState.hasCropChanged) {
-                                                cropState = cropState.copy(isCropping = true, requestSave = true)
-                                            } else {
-                                                onSaveCopy()
-                                            }
+                                            onSaveCopy()
                                         },
-                                        enabled = canShowSave && !isProcessing,
-                                        shape = RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50, topEndPercent = 0, bottomEndPercent = 0)
+                                        enabled = canSave && !isProcessing,
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = androidx.compose.foundation.shape.CornerSize(50), bottomStart = androidx.compose.foundation.shape.CornerSize(50), topEnd = androidx.compose.foundation.shape.CornerSize(2.dp), bottomEnd = androidx.compose.foundation.shape.CornerSize(2.dp)),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
                                     ) {
                                         if (isProcessing) {
                                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                         } else {
                                             Text(
-                                                text = if (cropState.hasCropChanged) "Save" else "Save as copy",
+                                                text = "Save as copy",
                                                 style = MaterialTheme.typography.labelLarge
                                             )
                                         }
@@ -518,16 +517,41 @@ fun EditScreen2(
                                 },
                                 trailingButton = {
                                     Box {
+                                        val rotationAngle by androidx.compose.animation.core.animateFloatAsState(
+                                            targetValue = if (showMenu) 180f else 0f,
+                                            animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
+                                        )
+                                        val startCorner by androidx.compose.animation.core.animateDpAsState(
+                                            targetValue = if (showMenu) 24.dp else 2.dp,
+                                            animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
+                                        )
+                                        val buttonInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                        val isPressed by buttonInteraction.collectIsPressedAsState()
+                                        val buttonScale by androidx.compose.animation.core.animateFloatAsState(
+                                            targetValue = if (isPressed) 0.8f else 1f,
+                                            animationSpec = androidx.compose.animation.core.spring(
+                                                dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                                                stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                                            )
+                                        )
                                         Button(
                                             onClick = { showMenu = true },
+                                            interactionSource = buttonInteraction,
                                             enabled = canSave && !isProcessing,
-                                            shape = RoundedCornerShape(topStartPercent = 0, bottomStartPercent = 0, topEndPercent = 50, bottomEndPercent = 50),
-                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                                            shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = androidx.compose.foundation.shape.CornerSize(startCorner), bottomStart = androidx.compose.foundation.shape.CornerSize(startCorner), topEnd = androidx.compose.foundation.shape.CornerSize(50), bottomEnd = androidx.compose.foundation.shape.CornerSize(50)),
+                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                            modifier = Modifier
+                                                .width(36.dp)
+                                                .graphicsLayer {
+                                                    scaleX = buttonScale
+                                                    scaleY = buttonScale
+                                                }
                                         ) {
                                             FontIcon(
                                                 unicode = FontIcons.KeyboardArrowDown,
                                                 size = 20.sp,
-                                                contentDescription = "Save options dropdown"
+                                                contentDescription = "Save options dropdown",
+                                                modifier = Modifier.graphicsLayer { rotationZ = rotationAngle }
                                             )
                                         }
                                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -550,19 +574,15 @@ fun EditScreen2(
                         } else {
                             Button(
                                 onClick = {
-                                    if (cropState.hasCropChanged) {
-                                        cropState = cropState.copy(isCropping = true, requestSave = true)
-                                    } else {
-                                        onSaveCopy()
-                                    }
+                                    onSaveCopy()
                                 },
-                                enabled = canShowSave && !isProcessing
+                                enabled = canSave && !isProcessing
                             ) {
                                 if (isProcessing) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                 } else {
                                     Text(
-                                        text = if (cropState.hasCropChanged) "Save" else "Save as copy",
+                                        text = "Save as copy",
                                         style = MaterialTheme.typography.labelLarge
                                     )
                                 }
@@ -862,12 +882,14 @@ fun EditScreen2(
                                 )
                                 imageRotation = 0f
                                 val shouldSave = cropState.requestSave
+                                val saveType = requestedSaveType
+                                requestedSaveType = 0
                                 cropState = cropState.copy(isCropping = false, requestSave = false, hasCropChanged = false)
                                 isCropScrubbingMode = false
                                 cropResetTrigger++
                                 extractedCrop = null
                                 if (shouldSave) {
-                                    onSaveCopy()
+                                    if (saveType == 2) onOverride() else onSaveCopy()
                                 }
                             },
                             addPath = addPath,
@@ -956,8 +978,7 @@ fun EditScreen2(
                     EditorNavigator(
                         modifier = Modifier
                             .animateContentSize()
-                            .fillMaxWidth()
-                            .alpha(immersiveAlpha),
+                            .fillMaxWidth(),
                         navController = navController,
                         appliedAdjustments = appliedAdjustments,
                         targetImage = targetImage,

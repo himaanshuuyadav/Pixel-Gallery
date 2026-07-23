@@ -28,7 +28,7 @@ class MediaContentObserver(
 ) {
     companion object {
         private const val TAG = "MediaContentObserver"
-        private const val DEBOUNCE_MS = 500L
+        private const val DEBOUNCE_MS = 100L
     }
     
     private var contentObserver: ContentObserver? = null

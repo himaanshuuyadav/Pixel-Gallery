@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.compose.ui.unit.dp
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -38,9 +39,32 @@ class EditActivity : ComponentActivity() {
         overridePendingTransition(com.prantiux.pixelgallery.R.anim.gallery_enter, com.prantiux.pixelgallery.R.anim.editor_exit)
     }
 
+    private lateinit var intentSenderLauncher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>
+
     @OptIn(ExperimentalHazeMaterialsApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        intentSenderLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val viewModel: EditViewModel = androidx.lifecycle.ViewModelProvider(this)[EditViewModel::class.java]
+                viewModel.saveOverride(
+                    context = this,
+                    onSuccess = {
+                        Toast.makeText(this, "Image replaced successfully", Toast.LENGTH_SHORT).show()
+                        finish()
+                    },
+                    onFail = {
+                        Toast.makeText(this, "Failed to replace image", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            } else {
+                Toast.makeText(this, "Permission to modify image denied", Toast.LENGTH_SHORT).show()
+                val viewModel: EditViewModel = androidx.lifecycle.ViewModelProvider(this)[EditViewModel::class.java]
+                viewModel.cancelSaving()
+            }
+        }
+        
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             com.prantiux.pixelgallery.ui.theme.PixelGalleryTheme(darkTheme = true) {
@@ -110,10 +134,27 @@ class EditActivity : ComponentActivity() {
                         viewModel.saveOverride(
                             context = this@EditActivity,
                             onSuccess = {
+                                Toast.makeText(this@EditActivity, "Image replaced successfully", Toast.LENGTH_SHORT).show()
                                 finish()
                             },
                             onFail = {
-                                println("Failed to save override")
+                                Toast.makeText(this@EditActivity, "Failed to replace image", Toast.LENGTH_SHORT).show()
+                            },
+                            onRequestPermission = { request ->
+                                intentSenderLauncher.launch(request)
+                            }
+                        )
+                    }
+
+                    val doSaveCopy: () -> Unit = {
+                        viewModel.saveCopy(
+                            context = this@EditActivity,
+                            onSuccess = {
+                                Toast.makeText(this@EditActivity, "Image saved as copy", Toast.LENGTH_SHORT).show()
+                                finish()
+                            },
+                            onFail = {
+                                Toast.makeText(this@EditActivity, "Failed to save copy", Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
@@ -165,15 +206,11 @@ class EditActivity : ComponentActivity() {
                             }
                         },
                         onSaveCopy = {
-                            viewModel.saveCopy(
-                                context = this@EditActivity,
-                                onSuccess = {
-                                    finish()
-                                },
-                                onFail = {
-
+                            scope.launch {
+                                uri?.let { uri ->
+                                    doSaveCopy()
                                 }
-                            )
+                            }
                         },
                         onAdjustItemLongClick = viewModel::removeKind,
                         onAdjustmentChange = viewModel::applyAdjustment,

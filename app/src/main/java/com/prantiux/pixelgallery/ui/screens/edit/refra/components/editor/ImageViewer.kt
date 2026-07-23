@@ -199,23 +199,33 @@ fun ImageViewer(
             ) {
                 if (!showMarkup) {
                     Box(modifier = Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
-                        GlideZoomAsyncImage(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(
-                                    if (blurRadius > 0f) Modifier.blur(
-                                        radiusX = (blurRadius * 2f).dp,
-                                        radiusY = (blurRadius * 2f).dp
-                                    ) else Modifier
-                                ),
-                            model = resizedBitmap!!,
-                            contentDescription = null,
-                            scrollBar = null,
-                            contentScale = ContentScale.Fit,
-                            alignment = Alignment.Center,
-                            colorFilter = effectiveMatrix?.let { ColorFilter.colorMatrix(it) },
-                            onLongPress = { onLongClick?.invoke() }
-                        )
+                        androidx.compose.animation.AnimatedContent(
+                            targetState = resizedBitmap,
+                            transitionSpec = {
+                                androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(0)) togetherWith androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(150))
+                            },
+                            label = "ImageCrossfade"
+                        ) { bitmap ->
+                            if (bitmap != null) {
+                                GlideZoomAsyncImage(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .then(
+                                            if (blurRadius > 0f) Modifier.blur(
+                                                radiusX = (blurRadius * 2f).dp,
+                                                radiusY = (blurRadius * 2f).dp
+                                            ) else Modifier
+                                        ),
+                                    model = bitmap,
+                                    contentDescription = null,
+                                    scrollBar = null,
+                                    contentScale = ContentScale.Fit,
+                                    alignment = Alignment.Center,
+                                    colorFilter = effectiveMatrix?.let { ColorFilter.colorMatrix(it) },
+                                    onLongPress = { onLongClick?.invoke() }
+                                )
+                            }
+                        }
                     // Vignette overlay — separate composable so it doesn't interfere with colorFilter
                     if (vignetteIntensity > 0f) {
                         val bmp = currentImage
