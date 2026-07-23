@@ -61,7 +61,8 @@ abstract class CropState internal constructor(
     initialZoom: Float = 1f,
     initialPanX: Float = 0f,
     initialPanY: Float = 0f,
-    initialRotation: Float = 0f
+    initialRotation: Float = 0f,
+    internal val initialNormalizedRect: android.graphics.RectF? = null
 ) : TransformState(
     imageSize = imageSize,
     containerSize = containerSize,
@@ -79,14 +80,7 @@ abstract class CropState internal constructor(
 ) {
 
     private val animatableRectOverlay = Animatable(
-        getOverlayFromAspectRatio(
-            containerSize.width.toFloat(),
-            containerSize.height.toFloat(),
-            drawAreaSize.width.toFloat(),
-            aspectRatio,
-            overlayRatio,
-            initialOffsetY.toFloat()
-        ),
+        Rect.Zero,
         Rect.VectorConverter
     )
 
@@ -114,7 +108,38 @@ abstract class CropState internal constructor(
 
     internal suspend fun init() {
         if (!initialized) {
-            animatableRectOverlay.snapTo(
+            val initialTargetRect = if (initialNormalizedRect != null) {
+                // User passed a normalized crop rect. We reconstruct the overlayRect from it.
+                val cropRectWidth = initialNormalizedRect.width() * imageSize.width
+                val cropRectHeight = initialNormalizedRect.height() * imageSize.height
+                val cropRectLeft = initialNormalizedRect.left * imageSize.width
+                val cropRectTop = initialNormalizedRect.top * imageSize.height
+
+                val initialDrawAreaRect = updateImageDrawRectFromTransformation()
+                
+                // Avoid division by zero
+                if (imageSize.width > 0 && imageSize.height > 0 && initialDrawAreaRect.width > 0 && initialDrawAreaRect.height > 0) {
+                    val overlayWidth = (cropRectWidth / imageSize.width) * initialDrawAreaRect.width
+                    val overlayHeight = (cropRectHeight / imageSize.height) * initialDrawAreaRect.height
+                    
+                    val diffLeft = cropRectLeft / (imageSize.width.toFloat() / initialDrawAreaRect.width)
+                    val diffTop = cropRectTop / (imageSize.height.toFloat() / initialDrawAreaRect.height)
+                    
+                    val overlayLeft = initialDrawAreaRect.left + diffLeft
+                    val overlayTop = initialDrawAreaRect.top + diffTop
+                    
+                    Rect(overlayLeft, overlayTop, overlayLeft + overlayWidth, overlayTop + overlayHeight)
+                } else {
+                    getOverlayFromAspectRatio(
+                        containerSize.width.toFloat(),
+                        containerSize.height.toFloat(),
+                        drawAreaSize.width.toFloat(),
+                        aspectRatio,
+                        overlayRatio,
+                        initialOffsetY.toFloat()
+                    )
+                }
+            } else {
                 getOverlayFromAspectRatio(
                     containerSize.width.toFloat(),
                     containerSize.height.toFloat(),
@@ -123,7 +148,9 @@ abstract class CropState internal constructor(
                     overlayRatio,
                     initialOffsetY.toFloat()
                 )
-            )
+            }
+            
+            animatableRectOverlay.snapTo(initialTargetRect)
             
             if (hasInitialCrop) {
                 // If we have an initial crop, just update the draw area without animating/resetting

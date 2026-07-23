@@ -754,6 +754,7 @@ fun EditScreen2(
                             initialZoom = initialZoom,
                             initialPanX = initialPanX,
                             initialPanY = initialPanY,
+                            initialCropRect = extractedCrop?.normalizedRect,
                             showGridOverlay = showGridOverlay,
                             showMarkup = isMarkupDrawing,
                             paths = paths,

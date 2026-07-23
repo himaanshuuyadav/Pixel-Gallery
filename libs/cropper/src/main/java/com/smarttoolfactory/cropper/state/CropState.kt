@@ -30,6 +30,7 @@ fun rememberCropState(
     initialPanX: Float = 0f,
     initialPanY: Float = 0f,
     initialRotation: Float = 0f,
+    initialNormalizedRect: android.graphics.RectF? = null,
     vararg keys: Any?
 ): CropState {
 
@@ -66,7 +67,8 @@ fun rememberCropState(
                     initialZoom = initialZoom,
                     initialPanX = initialPanX,
                     initialPanY = initialPanY,
-                    initialRotation = initialRotation
+                    initialRotation = initialRotation,
+                    initialNormalizedRect = initialNormalizedRect
                 )
             }
 
@@ -91,7 +93,8 @@ fun rememberCropState(
                     initialZoom = initialZoom,
                     initialPanX = initialPanX,
                     initialPanY = initialPanY,
-                    initialRotation = initialRotation
+                    initialRotation = initialRotation,
+                    initialNormalizedRect = initialNormalizedRect
                 )
             }
         }

@@ -55,7 +55,8 @@ class DynamicCropState internal constructor(
     initialZoom: Float = 1f,
     initialPanX: Float = 0f,
     initialPanY: Float = 0f,
-    initialRotation: Float = 0f
+    initialRotation: Float = 0f,
+    initialNormalizedRect: android.graphics.RectF? = null
 ) : CropState(
     imageSize = imageSize,
     containerSize = containerSize,
@@ -73,7 +74,8 @@ class DynamicCropState internal constructor(
     initialZoom = initialZoom,
     initialPanX = initialPanX,
     initialPanY = initialPanY,
-    initialRotation = initialRotation
+    initialRotation = initialRotation,
+    initialNormalizedRect = initialNormalizedRect
 ) {
 
     /**

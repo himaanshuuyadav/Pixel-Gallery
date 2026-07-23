@@ -72,6 +72,7 @@ fun ImageCropper(
     initialZoom: Float = 1f,
     initialPanX: Float = 0f,
     initialPanY: Float = 0f,
+    initialCropRect: android.graphics.RectF? = null,
     backgroundModifier: Modifier = Modifier,
     onHandleTouchChange: (Boolean) -> Unit = {},
     onGestureEnd: () -> Unit = {},
@@ -162,6 +163,7 @@ fun ImageCropper(
             initialPanX = initialPanX,
             initialPanY = initialPanY,
             initialRotation = imageRotation,
+            initialNormalizedRect = initialCropRect,
             keys = resetKeys
         )
 
