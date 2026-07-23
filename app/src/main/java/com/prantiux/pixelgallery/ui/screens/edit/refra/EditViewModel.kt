@@ -814,25 +814,82 @@ class EditViewModel : ViewModel() {
             val format = saveFormat ?: bestSaveFormat(context)
             flattenComposedMatrix()
             val uri = activeMedia.value ?: return@launch onFail().also { _isSaving.value = false }
+            
+            // Retrieve original timestamps and path
+            var originalDateAdded = System.currentTimeMillis() / 1000
+            var originalDateTaken = System.currentTimeMillis()
+            var originalRelativePath = Environment.DIRECTORY_PICTURES + "/PixelGallery"
+
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    android.provider.MediaStore.Images.Media.DATE_ADDED,
+                    android.provider.MediaStore.Images.Media.DATE_TAKEN,
+                    android.provider.MediaStore.Images.Media.RELATIVE_PATH
+                ),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val dateAddedCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DATE_ADDED)
+                    val dateTakenCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DATE_TAKEN)
+                    val relativePathCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.RELATIVE_PATH)
+                    
+                    if (dateAddedCol != -1) originalDateAdded = cursor.getLong(dateAddedCol)
+                    if (dateTakenCol != -1) originalDateTaken = cursor.getLong(dateTakenCol)
+                    if (relativePathCol != -1) {
+                        val path = cursor.getString(relativePathCol)
+                        if (!path.isNullOrEmpty()) originalRelativePath = path
+                    }
+                }
+            }
+
             lastRealBitmap()?.let { bitmap ->
                 try {
-                    // Simple save to gallery placeholder
                     val resolver = context.contentResolver
                     val contentValues = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "Edited_${System.currentTimeMillis()}.${format.format.name.lowercase()}")
-                        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, format.mimeType)
-                        put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Edited")
+                        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "Edited_${System.currentTimeMillis()}.${format.format.name.lowercase()}")
+                        put(android.provider.MediaStore.Images.Media.MIME_TYPE, format.mimeType)
+                        put(android.provider.MediaStore.Images.Media.DATE_ADDED, originalDateAdded)
+                        put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, originalDateAdded)
+                        put(android.provider.MediaStore.Images.Media.DATE_TAKEN, originalDateTaken)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, originalRelativePath)
+                            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                        }
                     }
                     val newUri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                     if (newUri != null) {
                         resolver.openOutputStream(newUri)?.use { out ->
                             bitmap.compress(format.format, 100, out)
                         }
+                        
+                        // Write EXIF Date
+                        try {
+                            resolver.openFileDescriptor(newUri, "rw")?.use { pfd ->
+                                val exif = androidx.exifinterface.media.ExifInterface(pfd.fileDescriptor)
+                                val date = java.util.Date(if (originalDateTaken > 0) originalDateTaken else originalDateAdded * 1000)
+                                val sdf = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                                val dateString = sdf.format(date)
+                                exif.setAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL, dateString)
+                                exif.saveAttributes()
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                        
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            val updateValues = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                            }
+                            resolver.update(newUri, updateValues, null, null)
+                        }
+
                         onSuccess().also { _isSaving.value = false }
                     } else {
                         onFail().also { _isSaving.value = false }
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    e.printStackTrace()
                     onFail().also { _isSaving.value = false }
                 }
             } ?: onFail().also { _isSaving.value = false }
@@ -845,7 +902,34 @@ class EditViewModel : ViewModel() {
         onSuccess: () -> Unit = {},
         onFail: () -> Unit = {}
     ) {
-        saveCopy(context, saveFormat, onSuccess, onFail)
+        viewModelScope.launch(Dispatchers.IO) {
+            _isSaving.value = true
+            val format = saveFormat ?: bestSaveFormat(context)
+            flattenComposedMatrix()
+            val uri = activeMedia.value ?: return@launch onFail().also { _isSaving.value = false }
+            
+            lastRealBitmap()?.let { bitmap ->
+                try {
+                    val resolver = context.contentResolver
+                    // Attempt to overwrite the original URI directly with "wt" (write-truncate)
+                    resolver.openOutputStream(uri, "wt")?.use { out ->
+                        bitmap.compress(format.format, 100, out)
+                    }
+                    
+                    // Update MediaStore modified date
+                    val updateValues = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Images.Media.DATE_MODIFIED, System.currentTimeMillis() / 1000)
+                    }
+                    resolver.update(uri, updateValues, null, null)
+                    
+                    onSuccess().also { _isSaving.value = false }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    // If Scoped Storage blocks the direct overwrite, fallback to saving a copy
+                    saveCopy(context, saveFormat, onSuccess, onFail)
+                }
+            } ?: onFail().also { _isSaving.value = false }
+        }
     }
 
     fun revertToOriginal(

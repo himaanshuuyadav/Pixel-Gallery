@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SplitButtonLayout
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -488,72 +490,81 @@ fun EditScreen2(
                         val canShowSave = isCropAndNotDragging || canSave
                         
                         var showMenu by remember { mutableStateOf(false) }
-                        Row(
-                            modifier = Modifier
-                                .height(40.dp)
-                                .clip(CircleShape)
-                                .background(if (canShowSave) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clickable(enabled = canShowSave && !isProcessing, onClick = {
-                                        if (cropState.hasCropChanged) {
-                                            cropState = cropState.copy(isCropping = true, requestSave = true)
+                        
+                        if (isChanged && canOverride) {
+                            @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+                            SplitButtonLayout(
+                                leadingButton = {
+                                    Button(
+                                        onClick = {
+                                            if (cropState.hasCropChanged) {
+                                                cropState = cropState.copy(isCropping = true, requestSave = true)
+                                            } else {
+                                                onSaveCopy()
+                                            }
+                                        },
+                                        enabled = canShowSave && !isProcessing,
+                                        shape = RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50, topEndPercent = 0, bottomEndPercent = 0)
+                                    ) {
+                                        if (isProcessing) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                         } else {
-                                            onSaveCopy()
+                                            Text(
+                                                text = if (cropState.hasCropChanged) "Save" else "Save as copy",
+                                                style = MaterialTheme.typography.labelLarge
+                                            )
                                         }
-                                    })
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                                    }
+                                },
+                                trailingButton = {
+                                    Box {
+                                        Button(
+                                            onClick = { showMenu = true },
+                                            enabled = canSave && !isProcessing,
+                                            shape = RoundedCornerShape(topStartPercent = 0, bottomStartPercent = 0, topEndPercent = 50, bottomEndPercent = 50),
+                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                                        ) {
+                                            FontIcon(
+                                                unicode = FontIcons.KeyboardArrowDown,
+                                                size = 20.sp,
+                                                contentDescription = "Save options dropdown"
+                                            )
+                                        }
+                                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                            DropdownMenuItem(
+                                                text = { 
+                                                    Column {
+                                                        Text("Save")
+                                                        Text("Replace current image", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                },
+                                                onClick = {
+                                                    showMenu = false
+                                                    onOverride()
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        } else {
+                            Button(
+                                onClick = {
+                                    if (cropState.hasCropChanged) {
+                                        cropState = cropState.copy(isCropping = true, requestSave = true)
+                                    } else {
+                                        onSaveCopy()
+                                    }
+                                },
+                                enabled = canShowSave && !isProcessing
                             ) {
                                 if (isProcessing) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                 } else {
                                     Text(
                                         text = if (cropState.hasCropChanged) "Save" else "Save as copy",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (canShowSave) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        style = MaterialTheme.typography.labelLarge
                                     )
-                                }
-                            }
-                            
-                            if (isChanged && canOverride) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .padding(vertical = 8.dp)
-                                        .background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
-                                )
-                                Box {
-                                    Box(
-                                        modifier = Modifier
-                                            .clickable(enabled = canSave && !isProcessing) { showMenu = true }
-                                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        FontIcon(
-                                            unicode = FontIcons.KeyboardArrowDown,
-                                            size = 20.sp,
-                                            contentDescription = "Save options dropdown",
-                                            tint = if (canSave) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.38f)
-                                        )
-                                    }
-                                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                        DropdownMenuItem(
-                                            text = { 
-                                                Column {
-                                                    Text("Save")
-                                                    Text("Overwrite original", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            },
-                                            onClick = {
-                                                showMenu = false
-                                                onOverride()
-                                            }
-                                        )
-                                    }
                                 }
                             }
                         }
