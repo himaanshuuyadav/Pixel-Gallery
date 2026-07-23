@@ -49,10 +49,6 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import android.view.HapticFeedbackConstants
 import android.os.SystemClock
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.DragIndicator
-import androidx.compose.material.icons.rounded.Restore
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.math.abs
@@ -1739,8 +1735,8 @@ fun ReorderBottomSheet(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
+                            FontIcon(
+unicode = FontIcons.Check,
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1776,8 +1772,8 @@ fun ReorderBottomSheet(
                             bottomStart = restoreInnerCorner
                         )
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Restore,
+                        FontIcon(
+unicode = FontIcons.Restore,
                             contentDescription = "Restore",
                             modifier = Modifier
                                 .size(26.dp)
@@ -1925,8 +1921,8 @@ private fun DraggableAlbumItem(
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Rounded.DragIndicator,
+            FontIcon(
+unicode = FontIcons.DragIndicator,
                 contentDescription = "Drag to reorder",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = handleModifier

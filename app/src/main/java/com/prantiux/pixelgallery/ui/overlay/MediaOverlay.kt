@@ -28,9 +28,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.FastForward
-import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
 import androidx.graphics.shapes.Morph
@@ -193,6 +190,7 @@ private fun isTap(down: Offset, up: Offset): Boolean {
     return (up - down).getDistance() < OverlayConstants.TAP_SLOP_PX
 }
 
+@androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
 fun MediaOverlay(
     viewModel: MediaViewModel,
@@ -278,6 +276,7 @@ fun MediaOverlay(
     // Video player state
     var exoPlayer: ExoPlayer? by remember { mutableStateOf(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    var showVideoExternalEditors by remember { mutableStateOf(false) }
     
     val haptic = LocalHapticFeedback.current
 
@@ -797,15 +796,20 @@ fun MediaOverlay(
     }
     
     val editItem: () -> Unit = {
-        mediaItems.getOrNull(currentIndex)?.let { item ->
-            val editIntent = Intent(Intent.ACTION_EDIT).apply {
-                setDataAndType(item.uri, item.mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            try {
-                context.startActivity(Intent.createChooser(editIntent, "Edit with"))
-            } catch (e: Exception) {
-                Toast.makeText(context, "No editor app found", Toast.LENGTH_SHORT).show()
+        val currentItem = mediaItems.getOrNull(currentIndex)
+        if (currentItem != null) {
+            if (!currentItem.isVideo) {
+                val intent = Intent(context, com.prantiux.pixelgallery.ui.screens.edit.refra.EditActivity::class.java).apply {
+                    data = currentItem.uri
+                }
+                val options = androidx.core.app.ActivityOptionsCompat.makeCustomAnimation(
+                    context,
+                    com.prantiux.pixelgallery.R.anim.editor_enter,
+                    com.prantiux.pixelgallery.R.anim.gallery_exit
+                )
+                androidx.core.content.ContextCompat.startActivity(context, intent, options.toBundle())
+            } else {
+                showVideoExternalEditors = true
             }
         }
     }
@@ -1445,8 +1449,8 @@ fun MediaOverlay(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.FastRewind,
+                                        FontIcon(
+unicode = FontIcons.FastRewind,
                                             contentDescription = "Rewind",
                                             tint = MaterialTheme.colorScheme.onSurface,
                                             modifier = Modifier.size(36.dp)
@@ -1477,8 +1481,8 @@ fun MediaOverlay(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.FastForward,
+                                        FontIcon(
+unicode = FontIcons.FastForward,
                                             contentDescription = "Forward",
                                             tint = MaterialTheme.colorScheme.onSurface,
                                             modifier = Modifier.size(36.dp)
@@ -1514,8 +1518,8 @@ fun MediaOverlay(
                                             style = MaterialTheme.typography.labelLarge
                                         )
                                         Spacer(Modifier.width(8.dp))
-                                        Icon(
-                                            imageVector = Icons.Rounded.FastForward,
+                                        FontIcon(
+unicode = FontIcons.FastForward,
                                             contentDescription = "Fast Forward",
                                             tint = Color.White,
                                             modifier = Modifier.size(16.dp)
@@ -2455,6 +2459,24 @@ fun MediaOverlay(
 
     }
     
+    // Video External Editor Overlay
+    if (showVideoExternalEditors) {
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { showVideoExternalEditors = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            val currentItem = mediaItems.getOrNull(currentIndex)
+            if (currentItem != null && currentItem.isVideo) {
+                com.prantiux.pixelgallery.ui.screens.edit.refra.components.editor.ExternalEditor(
+                    currentUri = currentItem.uri,
+                    isVideo = true,
+                    isSupportingPanel = false
+                )
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+
     // Delete confirmation dialog (only for older Android versions, not for trash)
     if (showDeleteDialog && Build.VERSION.SDK_INT < Build.VERSION_CODES.R && !isTrashMode) {
         AlertDialog(

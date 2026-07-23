@@ -341,7 +341,8 @@ class MediaViewModel : ViewModel() {
         val albumId: String = "all",
         val selectedIndex: Int = 0,
         val searchQuery: String? = null,
-        val selectedItemId: Long? = null
+        val selectedItemId: Long? = null,
+        val isEditing: Boolean = false
     )
 
     private val _overlayState = MutableStateFlow(MediaOverlayState())
@@ -1574,7 +1575,22 @@ class MediaViewModel : ViewModel() {
     }
 
     fun hideMediaOverlay() {
-        _overlayState.value = _overlayState.value.copy(isVisible = false)
+        _overlayState.value = _overlayState.value.copy(
+            isVisible = false,
+            isEditing = false
+        )
+    }
+
+    fun showEditor() {
+        _overlayState.value = _overlayState.value.copy(
+            isEditing = true
+        )
+    }
+
+    fun hideEditor() {
+        _overlayState.value = _overlayState.value.copy(
+            isEditing = false
+        )
     }
 
     fun updateOverlayIndex(index: Int) {

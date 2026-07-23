@@ -36,8 +36,6 @@ import androidx.compose.material3.carousel.CarouselDefaults
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.toShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.foundation.gestures.animateScrollBy
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
@@ -644,8 +642,8 @@ fun SearchScreen(
                                                 .padding(vertical = 12.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.KeyboardArrowDown,
+                                            FontIcon(
+unicode = FontIcons.KeyboardArrowDown,
                                                 contentDescription = if (isSmartAlbumsExpanded) "Show less" else "Show more",
                                                 modifier = Modifier
                                                     .size(36.dp) // Make icon larger and bolder

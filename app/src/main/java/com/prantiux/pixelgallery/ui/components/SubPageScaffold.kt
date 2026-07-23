@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
  *     onNavigateBack = { /* navigate back */ },
  *     actions = {
  *         IconButton(onClick = { /* action */ }) {
- *             Icon(Icons.Default.MoreVert, "More")
+ *             Icon(FontIcons.MoreVert, "More")
  *         }
  *     }
  * ) {
