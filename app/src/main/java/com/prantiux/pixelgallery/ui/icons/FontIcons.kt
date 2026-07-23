@@ -49,10 +49,14 @@ object FontIcons {
     const val Delete = "\ue872"
     const val DeleteSweep = "\ue16c"
     const val Star = "\ue838"
+    const val StarBorder = "\ue83a"
+    const val FavoriteBorder = "\ue87d"
     const val Lock = "\ue897"
     
     // View & Layout
     const val GridView = "\ue9b0"
+    const val AspectRatio = "\ue85b"
+    const val GridOn = "\ue3ec"
     const val ViewList = "\ue8ef"
     const val ZoomIn = "\ue8ff"
     const val SwipeDown = "\ueb53"
@@ -73,6 +77,39 @@ object FontIcons {
     const val LightMode = "\ue518"
     const val DarkMode = "\ue51c"
     
+    
+    // Filters & Adjustments
+    const val Waves = "\ue176"
+    const val BrightnessHigh = "\ue1ac"
+    const val BrightnessLow = "\ue1ad"
+        const val Brightness5 = "\ue3aa"
+    const val Details = "\ue3c8"
+    const val FilterBAndW = "\ue3db"
+    const val FilterDrama = "\ue3dd"
+    const val Gradient = "\ue3e9"
+    const val Rotate90DegreesCcw = "\ue418"
+    const val Texture = "\ue421"
+    const val Tonality = "\ue427"
+    const val Vignette = "\ue435"
+    const val Layers = "\ue53b"
+    const val WaterDrop = "\ue798"
+    const val RadioButtonUnchecked = "\ue836"
+    const val InvertColors = "\ue891"
+    const val Contrast = "\ueb37"
+    const val Circle = "\uef4a"
+    const val Thermostat = "\uf076"
+    const val CropDin = "\ue3c6"
+
+        const val AutoFixHigh = "\ue663"
+    const val DragIndicator = "\ue945"
+    const val Draw = "\ue746"
+    const val FastForward = "\ue01f"
+    const val FastRewind = "\ue020"
+    const val MoreHoriz = "\ue5d3"
+    const val Restore = "\ue8b3"
+    const val WbSunny = "\ue430"
+    const val Visibility = "\ue8f4"
+
     // Settings & Info
     const val Settings = "\ue8b8"
     const val Info = "\ue88e"
@@ -98,9 +135,20 @@ object FontIcons {
     const val Share = "\ue80d"
     const val StarOutline = "\ue83a"
     const val Add = "\ue145"
+    const val Brush = "\ue3ae"
+    const val PanTool = "\ue925"
+    const val TextFields = "\ue262"
+    const val RotateRight = "\ue41a"
     const val Home = "\ue410"  // photo icon
     const val Person = "\uefb2"  // photo_library icon
     const val Edit = "\ue3c9"  // edit icon
+    const val Crop = "\ue3be"
+    const val Flip = "\ue3e8"
+    const val Adjust = "\ue39e"
+    const val Filter = "\ueef0" // filter_alt
+    const val Undo = "\ue166"
+    const val Redo = "\ue15a"
+    const val Cancel = "\ue5c9"
     const val Copy = "\ue173"  // content_copy icon
     const val Move = "\uf1ff"  // drive_file_move icon
     const val Folder = "\ue2c7"  // folder icon

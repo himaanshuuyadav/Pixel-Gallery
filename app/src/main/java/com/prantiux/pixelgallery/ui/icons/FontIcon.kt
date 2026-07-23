@@ -9,6 +9,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 
@@ -33,25 +40,40 @@ fun FontIcon(
     tint: Color = LocalContentColor.current,
     filled: Boolean = false
 ) {
-    Text(
-        text = unicode,
-        fontFamily = if (filled) MaterialSymbolsRoundedFilled else MaterialSymbolsRounded,
-        fontSize = size,
-        color = tint,
-        style = LocalTextStyle.current.merge(
-            TextStyle(
-                lineHeight = size,
-                letterSpacing = 0.sp
-            )
-        ),
-        modifier = modifier.then(
-            if (contentDescription != null) {
-                Modifier.semantics {
-                    this.contentDescription = contentDescription
+    // To match standard Icon behavior, we center the text inside a Box
+    // of a fixed size, and strip out intrinsic font padding.
+    Box(
+        modifier = modifier
+            .then(
+                if (contentDescription != null) {
+                    Modifier.semantics {
+                        this.contentDescription = contentDescription
+                    }
+                } else {
+                    Modifier
                 }
-            } else {
-                Modifier
-            }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = unicode,
+            fontFamily = if (filled) MaterialSymbolsRoundedFilled else MaterialSymbolsRounded,
+            fontSize = size,
+            color = tint,
+            style = LocalTextStyle.current.merge(
+                TextStyle(
+                    lineHeight = size,
+                    letterSpacing = 0.sp,
+                    platformStyle = PlatformTextStyle(
+                        includeFontPadding = false
+                    ),
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim = LineHeightStyle.Trim.Both
+                    )
+                )
+            )
         )
-    )
+    }
 }
+
