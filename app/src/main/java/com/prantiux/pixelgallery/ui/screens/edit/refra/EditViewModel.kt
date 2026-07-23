@@ -17,6 +17,7 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.prantiux.pixelgallery.model.MediaItem
 import com.prantiux.pixelgallery.domain.model.editor.Adjustment
+import com.prantiux.pixelgallery.ui.screens.edit.refra.adjustments.Crop
 import com.prantiux.pixelgallery.domain.model.editor.DrawMode
 import com.prantiux.pixelgallery.domain.model.editor.DrawType
 import com.prantiux.pixelgallery.domain.model.editor.ImageFilter
@@ -563,6 +564,29 @@ class EditViewModel : ViewModel() {
             updateUndoRedoState()
             _isProcessing.value = false
         }
+    }
+
+    /**
+     * Extracts and removes the latest Crop adjustment if it is the very last adjustment in the stack.
+     * This allows the UI to re-enter the Crop Scrubber in the pre-cropped state and restore the crop UI parameters.
+     */
+    fun extractAndRemoveLastCrop(): Crop? {
+        val lastEntry = bitmaps.lastOrNull()
+        val lastAdjustment = lastEntry?.second
+        if (lastAdjustment is Crop) {
+            // Remove it from the stack
+            bitmaps.removeAt(bitmaps.lastIndex)
+            _appliedAdjustments.value = _appliedAdjustments.value.dropLast(1)
+            
+            // Restore current bitmap to the previous state
+            val baseBitmap = bitmaps.lastOrNull()?.first ?: _originalBitmap.value
+            _currentBitmap.value = baseBitmap
+            _targetBitmap.value = baseBitmap
+            
+            updateUndoRedoState()
+            return lastAdjustment
+        }
+        return null
     }
 
     fun applyRotate90() {
