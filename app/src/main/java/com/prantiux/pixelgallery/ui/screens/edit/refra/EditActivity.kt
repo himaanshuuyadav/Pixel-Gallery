@@ -181,9 +181,10 @@ class EditActivity : ComponentActivity() {
                         onToggleFilter = viewModel::toggleFilter,
                         commitFilter = viewModel::commitFilter,
                         removeLast = viewModel::removeLast,
-                        onCropRect = { normalizedRect, rotation ->
-                            viewModel.applyAdjustment(Crop(normalizedRect, rotation))
+                        onCropRect = { normalizedRect, rotation, zoom, panX, panY, aspectRatioValue ->
+                            viewModel.applyAdjustment(Crop(normalizedRect, rotation, zoom, panX, panY, aspectRatioValue))
                         },
+                        extractLastCrop = viewModel::extractAndRemoveLastCrop,
                         addPath = viewModel::addPath,
                         clearPathsUndone = viewModel::clearPathsUndone,
                         setCurrentPosition = viewModel::setCurrentPosition,

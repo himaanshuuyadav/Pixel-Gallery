@@ -100,6 +100,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.activity.compose.BackHandler
 import androidx.navigation.compose.rememberNavController
 import com.prantiux.pixelgallery.domain.model.editor.Adjustment
+import com.prantiux.pixelgallery.ui.screens.edit.refra.adjustments.Crop
 import com.prantiux.pixelgallery.domain.model.editor.CropState
 import com.prantiux.pixelgallery.domain.model.editor.DrawMode
 import com.prantiux.pixelgallery.domain.model.editor.DrawType
@@ -150,7 +151,8 @@ fun EditScreen2(
     onToggleFilter: (ImageFilter) -> Unit,
     commitFilter: () -> Unit = {},
     removeLast: () -> Unit,
-    onCropRect: (RectF, Float) -> Unit,
+    onCropRect: (RectF, Float, Float, Float, Float, Float) -> Unit,
+    extractLastCrop: () -> Crop?,
     addPath: (Path, PathProperties) -> Unit,
     clearPathsUndone: () -> Unit,
     setCurrentPosition: (Offset) -> Unit,
@@ -253,6 +255,10 @@ fun EditScreen2(
     var isHandleTouched by remember { mutableStateOf(false) }
     var hasEverTouchedHandle by remember { mutableStateOf(false) }
     var isCropScrubbingMode by remember { mutableStateOf(false) }
+    var extractedCrop by remember { mutableStateOf<Crop?>(null) }
+    var initialZoom by remember { mutableFloatStateOf(1f) }
+    var initialPanX by remember { mutableFloatStateOf(0f) }
+    var initialPanY by remember { mutableFloatStateOf(0f) }
 
     var imageRotation by remember { mutableFloatStateOf(0f) }
     
@@ -629,6 +635,27 @@ fun EditScreen2(
                                 }
                             }
                         }
+
+                        // Restore previous crop if available when first entering crop mode
+                        LaunchedEffect(isCropScrubbingMode) {
+                            if (isCropScrubbingMode) {
+                                val lastCrop = extractLastCrop()
+                                if (lastCrop != null) {
+                                    extractedCrop = lastCrop
+                                    imageRotation = lastCrop.rotation
+                                    if (lastCrop.aspectRatioValue != -1f) {
+                                        selectedAspectRatio = AspectRatio(lastCrop.aspectRatioValue)
+                                    } else {
+                                        selectedAspectRatio = AspectRatio.Original
+                                    }
+                                    initialZoom = lastCrop.zoom
+                                    initialPanX = lastCrop.panX
+                                    initialPanY = lastCrop.panY
+                                    cropResetTrigger++
+                                }
+                            }
+                        }
+
                         IconButton(
                             onClick = onFlipH,
                             colors = IconButtonDefaults.iconButtonColors(
@@ -724,6 +751,9 @@ fun EditScreen2(
                             cropState = cropState,
                             cropAspectRatio = selectedAspectRatio,
                             cropResetTrigger = cropResetTrigger,
+                            initialZoom = initialZoom,
+                            initialPanX = initialPanX,
+                            initialPanY = initialPanY,
                             showGridOverlay = showGridOverlay,
                             showMarkup = isMarkupDrawing,
                             paths = paths,
@@ -748,12 +778,20 @@ fun EditScreen2(
                                 cropState = cropState.copy(hasCropChanged = true)
                                 isCropScrubbingMode = true
                             },
-                            onCropRect = {
-                                onCropRect(it, imageRotation)
+                            onCropRect = { rect, zoom, panX, panY ->
+                                onCropRect(
+                                    rect, 
+                                    imageRotation, 
+                                    zoom, 
+                                    panX, 
+                                    panY, 
+                                    selectedAspectRatio.value
+                                )
                                 val shouldSave = cropState.requestSave
                                 cropState = cropState.copy(isCropping = false, requestSave = false, hasCropChanged = false)
                                 isCropScrubbingMode = false
                                 cropResetTrigger++
+                                extractedCrop = null
                                 if (shouldSave) {
                                     onSaveCopy()
                                 }
@@ -1010,6 +1048,18 @@ fun EditScreen2(
                                 currentValue = imageRotation,
                                 onValueChanged = { imageRotation = it },
                                 onCancel = { 
+                                    val crop = extractedCrop
+                                    if (crop != null) {
+                                        onCropRect(
+                                            crop.normalizedRect, 
+                                            crop.rotation, 
+                                            crop.zoom, 
+                                            crop.panX, 
+                                            crop.panY, 
+                                            crop.aspectRatioValue
+                                        )
+                                        extractedCrop = null
+                                    }
                                     imageRotation = initialRotation
                                     selectedAspectRatio = AspectRatio.Original
                                     cropResetTrigger++
