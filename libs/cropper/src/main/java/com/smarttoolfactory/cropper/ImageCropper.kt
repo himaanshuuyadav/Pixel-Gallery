@@ -67,8 +67,11 @@ fun ImageCropper(
     cropEnabled: Boolean = true,
     onCropStart: () -> Unit,
     onCropSuccess: (ImageBitmap) -> Unit,
-    onCropRect: ((android.graphics.RectF) -> Unit)? = null,
+    onCropRect: ((android.graphics.RectF, Float, Float, Float) -> Unit)? = null,
     cropResetTrigger: Int = 0,
+    initialZoom: Float = 1f,
+    initialPanX: Float = 0f,
+    initialPanY: Float = 0f,
     backgroundModifier: Modifier = Modifier,
     onHandleTouchChange: (Boolean) -> Unit = {},
     onGestureEnd: () -> Unit = {},
@@ -200,7 +203,7 @@ fun ImageCropper(
                     val top = (rect.top + cropRect.top) / imgH
                     val right = (rect.left + cropRect.right) / imgW
                     val bottom = (rect.top + cropRect.bottom) / imgH
-                    callback(android.graphics.RectF(left, top, right, bottom))
+                    callback(android.graphics.RectF(left, top, right, bottom), cropState.zoom, cropState.pan.x, cropState.pan.y)
                 }
             },
             rotation = cropState.rotation
@@ -227,6 +230,14 @@ fun ImageCropper(
         LaunchedEffect(imageRotation) {
             if (cropState.rotation != imageRotation) {
                 cropState.snapRotationTo(imageRotation)
+            }
+        }
+        
+        LaunchedEffect(initialZoom, initialPanX, initialPanY, cropResetTrigger) {
+            if (initialZoom != 1f || initialPanX != 0f || initialPanY != 0f) {
+                cropState.snapZoomTo(initialZoom)
+                cropState.snapPanXto(initialPanX)
+                cropState.snapPanYto(initialPanY)
             }
         }
 
