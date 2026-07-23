@@ -228,7 +228,7 @@ fun EditScreen2(
     var showRevertDialog by remember { mutableStateOf(false) }
 
     // Track which tab is currently selected for the tab bar highlight
-    var selectedTab by remember { mutableStateOf<EditorItems?>(EditorItems.Lighting) }
+    var selectedTab by remember { mutableStateOf<EditorItems?>(EditorItems.Crop) }
     val showingEditorScreen by rememberedDerivedState {
         navBackStackEntry?.destination?.hasRoute<EditorDestination.Editor>() == true
     }
@@ -241,7 +241,8 @@ fun EditScreen2(
         navBackStackEntry?.destination?.hasRoute<EditorDestination.Colour>() == true ||
         navBackStackEntry?.destination?.hasRoute<EditorDestination.Effects>() == true ||
         navBackStackEntry?.destination?.hasRoute<EditorDestination.More>() == true ||
-        navBackStackEntry?.destination?.hasRoute<EditorDestination.Filters>() == true
+        navBackStackEntry?.destination?.hasRoute<EditorDestination.Filters>() == true ||
+        navBackStackEntry?.destination?.hasRoute<EditorDestination.Crop>() == true
     }
 
     var cropState by rememberSaveable { mutableStateOf(CropState(showCropper = true)) }
@@ -275,7 +276,7 @@ fun EditScreen2(
 
     // Pre-enable cropper: visible on all top-level tabs, hidden during detail/adjust/markup-draw modes
     val shouldShowCropper by rememberedDerivedState {
-        isOnTopLevelTab
+        selectedTab == EditorItems.Crop || isCropScrubbingMode
     }
     LaunchedEffect(shouldShowCropper) {
         cropState = cropState.copy(showCropper = shouldShowCropper)
@@ -1076,6 +1077,7 @@ fun EditScreen2(
                         LaunchedEffect(navBackStackEntry) {
                             val dest = navBackStackEntry?.destination
                             val tab = when {
+                                dest?.hasRoute<EditorDestination.Crop>() == true -> EditorItems.Crop
                                 dest?.hasRoute<EditorDestination.Lighting>() == true -> EditorItems.Lighting
                                 dest?.hasRoute<EditorDestination.Filters>() == true -> EditorItems.Filters
                                 dest?.hasRoute<EditorDestination.Markup>() == true -> EditorItems.Markup
@@ -1090,12 +1092,13 @@ fun EditScreen2(
                             modifier = Modifier.fillMaxWidth().alpha(immersiveAlpha),
                             selectedItem = selectedTab,
                             isSupportingPanel = false,
-                            onItemClick = { editorItem ->
-                                if (selectedTab == EditorItems.Filters && editorItem != EditorItems.Filters) {
+                            onItemClick = { tab ->
+                                if (selectedTab == EditorItems.Filters && tab != EditorItems.Filters) {
                                     commitFilter()
                                 }
-                                selectedTab = editorItem
-                                val dest = when (editorItem) {
+                                selectedTab = tab
+                                val dest = when (tab) {
+                                    EditorItems.Crop -> EditorDestination.Crop
                                     EditorItems.Lighting -> EditorDestination.Lighting
                                     EditorItems.Filters -> EditorDestination.Filters
                                     EditorItems.Markup -> EditorDestination.Markup
