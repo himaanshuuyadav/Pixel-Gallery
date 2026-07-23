@@ -42,6 +42,10 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -374,7 +378,7 @@ fun EditScreen2(
                     // Left cluster: Close + Undo + Redo
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         IconButton(
                             onClick = handleClose,
@@ -395,39 +399,80 @@ fun EditScreen2(
                             exit = fadeOut()
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                IconButton(
-                                    onClick = removeLast,
-                                    enabled = canUndo,
+                                // Undo split pill left
+                                val undoInteraction = remember { MutableInteractionSource() }
+                                val isUndoPressed by undoInteraction.collectIsPressedAsState()
+                                val undoScale by animateFloatAsState(
+                                    targetValue = if (isUndoPressed && canUndo) 0.85f else 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessLow
+                                    ),
+                                    label = "undoScale"
+                                )
+                                
+                                Surface(
+                                    onClick = { if (canUndo) removeLast() },
+                                    interactionSource = undoInteraction,
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp, topEnd = 4.dp, bottomEnd = 4.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                        .size(width = 44.dp, height = 36.dp)
+                                        .graphicsLayer {
+                                            scaleX = undoScale
+                                            scaleY = undoScale
+                                        }
                                 ) {
-                                    FontIcon(
-                                        unicode = FontIcons.Undo,
-                                        size = 24.sp,
-                                        contentDescription = "Undo",
-                                        tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Undo,
+                                            contentDescription = "Undo",
+                                            tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.3f),
+                                            size = 20.sp
+                                        )
+                                    }
                                 }
-                                IconButton(
-                                    onClick = onRedo,
-                                    enabled = canRedo,
+
+                                // Redo split pill right
+                                val redoInteraction = remember { MutableInteractionSource() }
+                                val isRedoPressed by redoInteraction.collectIsPressedAsState()
+                                val redoScale by animateFloatAsState(
+                                    targetValue = if (isRedoPressed && canRedo) 0.85f else 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessLow
+                                    ),
+                                    label = "redoScale"
+                                )
+                                
+                                Surface(
+                                    onClick = { if (canRedo) onRedo() },
+                                    interactionSource = redoInteraction,
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 18.dp, bottomEnd = 18.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                        .size(width = 44.dp, height = 36.dp)
+                                        .graphicsLayer {
+                                            scaleX = redoScale
+                                            scaleY = redoScale
+                                        }
                                 ) {
-                                    FontIcon(
-                                        unicode = FontIcons.Redo,
-                                        size = 24.sp,
-                                        contentDescription = "Redo",
-                                        tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        FontIcon(
+                                            unicode = FontIcons.Redo,
+                                            contentDescription = "Redo",
+                                            tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.3f),
+                                            size = 20.sp
+                                        )
+                                    }
                                 }
                             }
                         }
