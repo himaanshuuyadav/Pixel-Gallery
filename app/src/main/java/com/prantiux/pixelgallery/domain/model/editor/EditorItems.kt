@@ -15,7 +15,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 @Parcelize
 enum class EditorItems : Parcelable {
-    Crop,
     Lighting,
     Filters,
     Markup,
@@ -26,7 +25,6 @@ enum class EditorItems : Parcelable {
     @get:Composable
     val translatedName : String
         get() = when (this) {
-            Crop -> "Crop"
             Lighting -> this.name
             Filters -> this.name
             Markup -> this.name
@@ -38,7 +36,6 @@ enum class EditorItems : Parcelable {
     @IgnoredOnParcel
     val icon: String
         get() = when (this) {
-            Crop -> FontIcons.Crop
             Lighting -> FontIcons.WbSunny
             Filters -> FontIcons.Filter
             Markup -> FontIcons.Draw

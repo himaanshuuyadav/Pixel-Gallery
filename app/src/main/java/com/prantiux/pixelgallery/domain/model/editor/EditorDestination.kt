@@ -8,8 +8,6 @@ sealed class EditorDestination {
     @Serializable
     data object Editor : EditorDestination()
     @Serializable
-    data object Crop : EditorDestination()
-    @Serializable
     data object Lighting : EditorDestination()
     @Serializable
     data object Filters : EditorDestination()

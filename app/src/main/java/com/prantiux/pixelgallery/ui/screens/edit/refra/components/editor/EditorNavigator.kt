@@ -3,8 +3,6 @@ package com.prantiux.pixelgallery.ui.screens.edit.refra.components.editor
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -91,7 +89,6 @@ fun EditorNavigator(
                     isSupportingPanel = true,
                     onItemClick = { editorItem ->
                         val dest = when (editorItem) {
-                            EditorItems.Crop -> EditorDestination.Crop
                             EditorItems.Lighting -> EditorDestination.Lighting
                             EditorItems.Filters -> EditorDestination.Filters
                             EditorItems.Markup -> EditorDestination.Markup
@@ -105,18 +102,6 @@ fun EditorNavigator(
             }
             // Phone layout: tab bar is outside NavHost, so Editor destination is empty
         }
-        }
-
-        // Crop tab
-        composable<EditorDestination.Crop> {
-            CompositionLocalProvider(
-                LocalSharedTransitionScope provides this@SharedTransitionLayout,
-                LocalAnimatedVisibilityScope provides this@composable
-            ) {
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier.fillMaxWidth().height(0.dp)
-                )
-            }
         }
 
         // Lighting tab
