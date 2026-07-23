@@ -161,6 +161,7 @@ fun ImageCropper(
             initialZoom = initialZoom,
             initialPanX = initialPanX,
             initialPanY = initialPanY,
+            initialRotation = imageRotation,
             keys = resetKeys
         )
 
@@ -231,7 +232,7 @@ fun ImageCropper(
         }
         
         LaunchedEffect(imageRotation) {
-            if (cropState.rotation != imageRotation) {
+            if (cropState.rotation != imageRotation && cropState.initialized) {
                 cropState.snapRotationTo(imageRotation)
             }
         }

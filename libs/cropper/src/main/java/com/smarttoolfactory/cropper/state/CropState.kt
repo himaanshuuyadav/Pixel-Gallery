@@ -29,6 +29,7 @@ fun rememberCropState(
     initialZoom: Float = 1f,
     initialPanX: Float = 0f,
     initialPanY: Float = 0f,
+    initialRotation: Float = 0f,
     vararg keys: Any?
 ): CropState {
 
@@ -64,7 +65,8 @@ fun rememberCropState(
                     safeDrawAreaHeight = safeDrawAreaHeight,
                     initialZoom = initialZoom,
                     initialPanX = initialPanX,
-                    initialPanY = initialPanY
+                    initialPanY = initialPanY,
+                    initialRotation = initialRotation
                 )
             }
 
@@ -88,7 +90,8 @@ fun rememberCropState(
                     safeDrawAreaHeight = safeDrawAreaHeight,
                     initialZoom = initialZoom,
                     initialPanX = initialPanX,
-                    initialPanY = initialPanY
+                    initialPanY = initialPanY,
+                    initialRotation = initialRotation
                 )
             }
         }

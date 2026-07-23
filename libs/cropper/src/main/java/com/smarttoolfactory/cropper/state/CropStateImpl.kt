@@ -60,7 +60,8 @@ abstract class CropState internal constructor(
     val safeDrawAreaHeight: Int = 0,
     initialZoom: Float = 1f,
     initialPanX: Float = 0f,
-    initialPanY: Float = 0f
+    initialPanY: Float = 0f,
+    initialRotation: Float = 0f
 ) : TransformState(
     imageSize = imageSize,
     containerSize = containerSize,
@@ -68,7 +69,7 @@ abstract class CropState internal constructor(
     initialZoom = initialZoom,
     initialPanX = initialPanX,
     initialPanY = initialPanY,
-    initialRotation = 0f,
+    initialRotation = initialRotation,
     maxZoom = maxZoom,
     zoomable = zoomable,
     pannable = pannable,
@@ -102,14 +103,14 @@ abstract class CropState internal constructor(
         private set
 
 
-    private var initialized: Boolean = false
+    internal var initialized: Boolean = false
 
     /**
      * Region of touch inside, corners of or outside of overlay rectangle
      */
     var touchRegion by mutableStateOf(TouchRegion.None)
 
-    internal val hasInitialCrop = initialZoom != 1f || initialPanX != 0f || initialPanY != 0f
+    internal val hasInitialCrop = initialZoom != 1f || initialPanX != 0f || initialPanY != 0f || initialRotation != 0f
 
     internal suspend fun init() {
         if (!initialized) {
