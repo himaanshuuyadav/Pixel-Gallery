@@ -4,16 +4,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0"
     id("com.google.devtools.ksp") version "2.1.0-1.0.29"
+    id("kotlin-parcelize")
 }
 
 android {
     namespace = "com.prantiux.pixelgallery"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.prantiux.pixelgallery"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -26,6 +27,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -74,6 +76,21 @@ android {
 }
 
 dependencies {
+    // Editor UI & Rendering
+    implementation("dev.chrisbanes.haze:haze:1.7.2")
+    implementation("dev.chrisbanes.haze:haze-materials:1.7.2")
+    implementation("androidx.compose.material3.adaptive:adaptive:1.0.0")
+    implementation("androidx.compose.material3.adaptive:adaptive-layout:1.0.0")
+    implementation("androidx.compose.material3.adaptive:adaptive-navigation:1.0.0")
+    
+    // Glide Image Rendering
+    implementation("com.github.bumptech.glide:compose:1.0.0-beta01")
+    implementation("io.github.panpf.zoomimage:zoomimage-compose-glide:1.4.0")
+
+    // Image Processing Backend
+    implementation("com.github.awxkee:aire:0.18.1")
+
+
     // Zooming
     implementation("net.engawapg.lib:zoomable:1.6.2")
     // Compose BOM - REQUIRED MINIMUM VERSION
@@ -99,7 +116,6 @@ dependencies {
     implementation("androidx.graphics:graphics-shapes:1.0.1")
     
     // Material Icons Extended (for DragIndicator and other rounded icons)
-    implementation("androidx.compose.material:material-icons-extended")
 
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.8.5")
@@ -113,9 +129,14 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
 
-    // ExoPlayer for video playback
+    // ExoPlayer and Transformer for video playback & editing
     implementation("androidx.media3:media3-exoplayer:1.5.0")
     implementation("androidx.media3:media3-ui:1.5.0")
+    implementation("androidx.media3:media3-transformer:1.5.0")
+    implementation("androidx.media3:media3-effect:1.5.0")
+
+    // Image Processing & Cropping
+    implementation(project(":libs:cropper"))
 
     // Accompanist Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.36.0")

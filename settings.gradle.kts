@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Pixel Gallery"
 include(":app")
+include(":libs:cropper")
+include(":libs:gesture")
