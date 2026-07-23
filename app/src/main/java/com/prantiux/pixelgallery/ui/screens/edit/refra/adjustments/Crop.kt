@@ -6,10 +6,20 @@ import com.prantiux.pixelgallery.domain.model.editor.Adjustment
 
 /**
  * Crop adjustment that stores a normalized crop rect (0-1 range) and rotation.
+ * Also stores UI state variables (zoom, panX, panY, aspect ratio) so the crop
+ * can be re-edited later if the user returns to the crop scrubber.
+ *
  * [apply] crops [bitmap] using the normalized rect and rotation, producing a full-resolution result
  * regardless of the preview bitmap size used during editing.
  */
-data class Crop(val normalizedRect: RectF, val rotation: Float = 0f): Adjustment {
+data class Crop(
+    val normalizedRect: RectF,
+    val rotation: Float = 0f,
+    val zoom: Float = 1f,
+    val panX: Float = 0f,
+    val panY: Float = 0f,
+    val aspectRatioValue: Float = -1f // -1f denotes AspectRatio.Original
+): Adjustment {
 
     override fun apply(bitmap: Bitmap): Bitmap {
         val w = bitmap.width.toFloat()
