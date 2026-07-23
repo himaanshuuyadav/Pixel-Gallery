@@ -158,6 +158,9 @@ fun ImageCropper(
             cropProperties = cropProperties,
             initialOffsetY = offsetY,
             safeDrawAreaHeight = safeBoxHeight,
+            initialZoom = initialZoom,
+            initialPanX = initialPanX,
+            initialPanY = initialPanY,
             keys = resetKeys
         )
 
@@ -233,13 +236,6 @@ fun ImageCropper(
             }
         }
         
-        LaunchedEffect(initialZoom, initialPanX, initialPanY, cropResetTrigger) {
-            if (initialZoom != 1f || initialPanX != 0f || initialPanY != 0f) {
-                cropState.snapZoomTo(initialZoom)
-                cropState.snapPanXto(initialPanX)
-                cropState.snapPanYto(initialPanY)
-            }
-        }
 
         /// Create a MutableTransitionState<Boolean> for the AnimatedVisibility.
         var visible by remember { mutableStateOf(false) }

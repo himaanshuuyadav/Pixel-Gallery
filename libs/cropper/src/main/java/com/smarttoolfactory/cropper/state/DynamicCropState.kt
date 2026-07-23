@@ -51,7 +51,10 @@ class DynamicCropState internal constructor(
     private val minDimension: IntSize?,
     private var fixedAspectRatio: Boolean,
     initialOffsetY: Int = 0,
-    safeDrawAreaHeight: Int = 0
+    safeDrawAreaHeight: Int = 0,
+    initialZoom: Float = 1f,
+    initialPanX: Float = 0f,
+    initialPanY: Float = 0f
 ) : CropState(
     imageSize = imageSize,
     containerSize = containerSize,
@@ -65,7 +68,10 @@ class DynamicCropState internal constructor(
     rotatable = rotatable,
     limitPan = limitPan,
     initialOffsetY = initialOffsetY,
-    safeDrawAreaHeight = safeDrawAreaHeight
+    safeDrawAreaHeight = safeDrawAreaHeight,
+    initialZoom = initialZoom,
+    initialPanX = initialPanX,
+    initialPanY = initialPanY
 ) {
 
     /**

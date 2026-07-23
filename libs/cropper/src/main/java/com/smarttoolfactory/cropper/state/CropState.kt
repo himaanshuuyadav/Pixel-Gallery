@@ -26,6 +26,9 @@ fun rememberCropState(
     cropProperties: CropProperties,
     initialOffsetY: Int = 0,
     safeDrawAreaHeight: Int = 0,
+    initialZoom: Float = 1f,
+    initialPanX: Float = 0f,
+    initialPanY: Float = 0f,
     vararg keys: Any?
 ): CropState {
 
@@ -58,7 +61,10 @@ fun rememberCropState(
                     rotatable = rotatable,
                     limitPan = false,
                     initialOffsetY = initialOffsetY,
-                    safeDrawAreaHeight = safeDrawAreaHeight
+                    safeDrawAreaHeight = safeDrawAreaHeight,
+                    initialZoom = initialZoom,
+                    initialPanX = initialPanX,
+                    initialPanY = initialPanY
                 )
             }
 
@@ -79,7 +85,10 @@ fun rememberCropState(
                     minDimension = minDimension,
                     fixedAspectRatio = fixedAspectRatio,
                     initialOffsetY = initialOffsetY,
-                    safeDrawAreaHeight = safeDrawAreaHeight
+                    safeDrawAreaHeight = safeDrawAreaHeight,
+                    initialZoom = initialZoom,
+                    initialPanX = initialPanX,
+                    initialPanY = initialPanY
                 )
             }
         }

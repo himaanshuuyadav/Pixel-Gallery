@@ -57,12 +57,17 @@ abstract class CropState internal constructor(
     rotatable: Boolean = false,
     limitPan: Boolean = false,
     initialOffsetY: Int = 0,
-    val safeDrawAreaHeight: Int = 0
+    val safeDrawAreaHeight: Int = 0,
+    initialZoom: Float = 1f,
+    initialPanX: Float = 0f,
+    initialPanY: Float = 0f
 ) : TransformState(
     imageSize = imageSize,
     containerSize = containerSize,
     drawAreaSize = drawAreaSize,
-    initialZoom = 1f,
+    initialZoom = initialZoom,
+    initialPanX = initialPanX,
+    initialPanY = initialPanY,
     initialRotation = 0f,
     maxZoom = maxZoom,
     zoomable = zoomable,
@@ -104,11 +109,31 @@ abstract class CropState internal constructor(
      */
     var touchRegion by mutableStateOf(TouchRegion.None)
 
+    internal val hasInitialCrop = initialZoom != 1f || initialPanX != 0f || initialPanY != 0f
+
     internal suspend fun init() {
-        // When initial aspect ratio doesn't match drawable area
-        // overlay gets updated so updates draw area as well
-        animateTransformationToOverlayBounds(overlayRect, animate = true)
-        initialized = true
+        if (!initialized) {
+            animatableRectOverlay.snapTo(
+                getOverlayFromAspectRatio(
+                    containerSize.width.toFloat(),
+                    containerSize.height.toFloat(),
+                    drawAreaSize.width.toFloat(),
+                    aspectRatio,
+                    overlayRatio,
+                    initialOffsetY.toFloat()
+                )
+            )
+            
+            if (hasInitialCrop) {
+                // If we have an initial crop, just update the draw area without animating/resetting
+                drawAreaRect = updateImageDrawRectFromTransformation()
+            } else {
+                // When initial aspect ratio doesn't match drawable area
+                // overlay gets updated so updates draw area as well
+                animateTransformationToOverlayBounds(overlayRect, animate = true)
+            }
+            initialized = true
+        }
     }
 
     /**
