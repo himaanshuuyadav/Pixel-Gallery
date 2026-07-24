@@ -312,19 +312,9 @@ fun ImageViewer(
                 }
                 val effectiveColorFilter = previewMatrix?.let { ColorFilter.colorMatrix(it) }
                 ImageCropper(
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        if (effectiveColorFilter != null) {
-                            // API 31+ RenderEffect for color matrix on cropper content
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                renderEffect = RenderEffect.createColorFilterEffect(
-                                    ColorMatrixColorFilter(
-                                        NativeColorMatrix(previewMatrix.values)
-                                    )
-                                ).asComposeRenderEffect()
-                            }
-                        }
-                    },
+                    modifier = Modifier.fillMaxSize(),
                     imageBitmap = previewBitmap,
+                    colorFilter = effectiveColorFilter,
                     contentDescription = null,
                     cropStyle = CropDefaults.style(
                         drawGrid = showGridOverlay,

@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.graphics.ColorFilter
 import kotlin.math.roundToInt
 
 /**
@@ -17,7 +18,8 @@ internal fun ImageDrawCanvas(
     imageBitmap: ImageBitmap,
     imageWidth: Int,
     imageHeight: Int,
-    offsetY: Int = 0
+    offsetY: Int = 0,
+    colorFilter: ColorFilter? = null
 ) {
     Canvas(modifier = modifier) {
 
@@ -31,7 +33,8 @@ internal fun ImageDrawCanvas(
             dstOffset = IntOffset(
                 x = (canvasWidth - imageWidth) / 2,
                 y = (canvasHeight - imageHeight) / 2 + offsetY
-            )
+            ),
+            colorFilter = colorFilter
         )
     }
 }

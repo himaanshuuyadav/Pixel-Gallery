@@ -502,8 +502,12 @@ fun EditScreen2(
                                             onSaveCopy()
                                         },
                                         enabled = canSave && !isProcessing,
-                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = androidx.compose.foundation.shape.CornerSize(50), bottomStart = androidx.compose.foundation.shape.CornerSize(50), topEnd = androidx.compose.foundation.shape.CornerSize(2.dp), bottomEnd = androidx.compose.foundation.shape.CornerSize(2.dp)),
-                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = androidx.compose.foundation.shape.CornerSize(50), bottomStart = androidx.compose.foundation.shape.CornerSize(50), topEnd = androidx.compose.foundation.shape.CornerSize(4.dp), bottomEnd = androidx.compose.foundation.shape.CornerSize(4.dp)),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            disabledContentColor = Color.White.copy(alpha = 0.3f)
+                                        )
                                     ) {
                                         if (isProcessing) {
                                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
@@ -522,7 +526,7 @@ fun EditScreen2(
                                             animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
                                         )
                                         val startCorner by androidx.compose.animation.core.animateDpAsState(
-                                            targetValue = if (showMenu) 24.dp else 2.dp,
+                                            targetValue = if (showMenu) 50.dp else 4.dp,
                                             animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
                                         )
                                         val buttonInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -540,6 +544,10 @@ fun EditScreen2(
                                             enabled = canSave && !isProcessing,
                                             shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = androidx.compose.foundation.shape.CornerSize(startCorner), bottomStart = androidx.compose.foundation.shape.CornerSize(startCorner), topEnd = androidx.compose.foundation.shape.CornerSize(50), bottomEnd = androidx.compose.foundation.shape.CornerSize(50)),
                                             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                disabledContentColor = Color.White.copy(alpha = 0.3f)
+                                            ),
                                             modifier = Modifier
                                                 .width(36.dp)
                                                 .graphicsLayer {

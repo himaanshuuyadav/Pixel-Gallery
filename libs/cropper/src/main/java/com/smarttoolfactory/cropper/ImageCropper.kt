@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
+import androidx.compose.ui.graphics.ColorFilter
 
 @Composable
 fun ImageCropper(
@@ -77,7 +78,8 @@ fun ImageCropper(
     onHandleTouchChange: (Boolean) -> Unit = {},
     onGestureEnd: () -> Unit = {},
     imageRotation: Float = 0f,
-    contentPadding: PaddingValues = PaddingValues(0.dp)
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    colorFilter: ColorFilter? = null
 ) {
 
     ImageWithConstraints(
@@ -264,7 +266,8 @@ fun ImageCropper(
             cropStyle = cropStyle,
             transparentColor = transparentColor,
             backgroundModifier = backgroundModifier,
-            offsetY = offsetY
+            offsetY = offsetY,
+            colorFilter = colorFilter
         )
     }
 }
@@ -286,7 +289,8 @@ private fun ImageCropper(
     overlayRect: Rect,
     transparentColor: Color,
     backgroundModifier: Modifier,
-    offsetY: Int = 0
+    offsetY: Int = 0,
+    colorFilter: ColorFilter? = null
 ) {
     Box(
         modifier = Modifier
@@ -312,7 +316,8 @@ private fun ImageCropper(
                 cropStyle = cropStyle,
                 rectOverlay = overlayRect,
                 transparentColor = transparentColor,
-                offsetY = offsetY
+                offsetY = offsetY,
+                colorFilter = colorFilter
             )
         }
     }
@@ -333,7 +338,8 @@ private fun ImageCropperImpl(
     cropStyle: CropStyle,
     transparentColor: Color,
     rectOverlay: Rect,
-    offsetY: Int = 0
+    offsetY: Int = 0,
+    colorFilter: ColorFilter? = null
 ) {
 
     Box(contentAlignment = Alignment.Center) {
@@ -344,7 +350,8 @@ private fun ImageCropperImpl(
             imageBitmap = imageBitmap,
             imageWidth = imageWidthPx,
             imageHeight = imageHeightPx,
-            offsetY = offsetY
+            offsetY = offsetY,
+            colorFilter = colorFilter
         )
 
         val drawOverlay = cropStyle.drawOverlay

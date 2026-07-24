@@ -917,9 +917,6 @@ class EditViewModel : ViewModel() {
 
                         viewModelScope.launch(Dispatchers.Main) {
                             com.prantiux.pixelgallery.model.MediaEventBus.lastSavedUri.value = newUri
-                            // Small delay to allow MediaContentObserver and Room DB to sync
-                            // so the gallery overlay updates instantly when we return
-                            kotlinx.coroutines.delay(600)
                             _isSaving.value = false
                             onSuccess()
                         }
